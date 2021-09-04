@@ -13,7 +13,7 @@ QEMU_ARGS=\
 		-m 2G \
 		-drive format=raw,file=fat:rw:mnt \
 		-serial tcp::1234,server,nowait \
-		-serial tcp::1235,server,nowait
+		-serial tcp::1235,server,nowait \
 		-rtc base=localtime
 
 default:
