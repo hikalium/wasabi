@@ -28,8 +28,9 @@ default:
 
 commit :
 	cargo fmt
-	make # build
 	cargo clippy -- -D warnings
+	make spellcheck
+	make # build
 	git submodule update
 	git add .
 	./scripts/ensure_objs_are_not_under_git_control.sh
@@ -43,7 +44,6 @@ run : run_deps
 	$(QEMU) $(QEMU_ARGS)
 
 run_deps :
-	make spellcheck
 	cargo build
 	mkdir -p mnt/
 	-rm -rf mnt/*
