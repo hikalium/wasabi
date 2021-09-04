@@ -26,3 +26,8 @@ run_deps :
 
 run : run_deps
 	$(QEMU) $(QEMU_ARGS)
+
+commit :
+	cargo fmt
+	make # build
+	cargo clippy -- -D warnings
