@@ -5,6 +5,9 @@
 use core::fmt;
 use core::panic::PanicInfo;
 
+pub mod serial;
+pub mod x86;
+
 #[repr(C)]
 pub struct EFITableHeader {
     pub signature: u64,
@@ -78,12 +81,16 @@ fn panic(_info: &PanicInfo) -> ! {
 #[no_mangle]
 pub extern "win64" fn efi_main(_image_handle: EFIHandle, efi_system_table: EFISystemTable) -> ! {
     use core::fmt::Write;
+    serial::com_initialize(serial::IO_ADDR_COM2);
     (efi_system_table.con_out.clear_screen)(efi_system_table.con_out);
     let mut efi_writer = EFISimpleTextOutputProtocolWriter {
         protocol: efi_system_table.con_out,
     };
-    writeln!(efi_writer, "Loading liumOS...").unwrap();
+    writeln!(efi_writer, "Loading wasabiOS...").unwrap();
     writeln!(efi_writer, "{:#p}", &efi_system_table).unwrap();
+
+    let mut serial_writer = serial::SerialConsoleWriter {};
+    writeln!(serial_writer, "hello from serial").unwrap();
     loop {
         unsafe { asm!("pause") }
     }

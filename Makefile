@@ -7,27 +7,48 @@ QEMU_ARGS=\
 		-machine q35 -cpu qemu64 \
 		-bios $(OVMF) \
 		-device qemu-xhci -device usb-mouse \
+		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=usbnet0 -device usb-net,netdev=usbnet0 \
 		-object filter-dump,id=f1,netdev=usbnet0,file=dump_usb_nic.dat \
 		-m 2G \
 		-drive format=raw,file=fat:rw:mnt \
+		-serial tcp::1234,server,nowait \
+		-serial tcp::1235,server,nowait
 		-rtc base=localtime
 
 default:
 	cargo build
 
-.PHONY: run_deps run
-
-run_deps :
-	mkdir -p mnt/
-	-rm -rf mnt/*
-	mkdir -p mnt/EFI/BOOT
-	cp ${DEBUG_BIN_PATH} mnt/EFI/BOOT/BOOTX64.EFI
-
-run : run_deps
-	$(QEMU) $(QEMU_ARGS)
+.PHONY: \
+	commit \
+	run \
+	run_deps \
+	watch_serial \
+	# Keep this line blank
 
 commit :
 	cargo fmt
 	make # build
 	cargo clippy -- -D warnings
+	git submodule update
+	git add .
+	./scripts/ensure_objs_are_not_under_git_control.sh
+	git diff HEAD --color=always | less -R
+	git commit
+
+spellcheck :
+	@scripts/spellcheck.sh recieve receive
+
+run : run_deps
+	$(QEMU) $(QEMU_ARGS)
+
+run_deps :
+	make spellcheck
+	cargo build
+	mkdir -p mnt/
+	-rm -rf mnt/*
+	mkdir -p mnt/EFI/BOOT
+	cp ${DEBUG_BIN_PATH} mnt/EFI/BOOT/BOOTX64.EFI
+
+watch_serial:
+	while ! telnet localhost 1235 ; do sleep 1 ; done ;
