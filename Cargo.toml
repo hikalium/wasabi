@@ -1,7 +1,5 @@
-[package]
-name = "wasabi_os"
-version = "0.1.0"
-authors = ["hikalium <hikalium@hikalium.com>"]
-edition = "2018"
-
-[dependencies]
+[workspace]
+members = [
+    "graphics",
+    "loader",
+]

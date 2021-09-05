@@ -5,6 +5,8 @@
 use core::fmt;
 use core::panic::PanicInfo;
 
+extern crate graphics;
+
 pub mod serial;
 pub mod x86;
 
