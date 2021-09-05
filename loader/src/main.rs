@@ -9,6 +9,7 @@ extern crate graphics;
 
 pub mod serial;
 pub mod x86;
+pub mod xorshift;
 
 #[repr(C)]
 pub struct EFI_GUID {
@@ -216,8 +217,7 @@ fn init_vram(efi_system_table: &EFISystemTable) -> Result<VRAMBuffer, ()> {
     })
 }
 
-#[no_mangle]
-fn efi_main(_image_handle: EFIHandle, efi_system_table: EFISystemTable) -> ! {
+fn loader_main(efi_system_table: &EFISystemTable) -> Result<(), ()> {
     use core::fmt::Write;
     (efi_system_table.con_out.clear_screen)(efi_system_table.con_out);
     let mut efi_writer = EFISimpleTextOutputProtocolWriter {
@@ -226,19 +226,32 @@ fn efi_main(_image_handle: EFIHandle, efi_system_table: EFISystemTable) -> ! {
     writeln!(efi_writer, "Loading wasabiOS...").unwrap();
     writeln!(efi_writer, "{:#p}", &efi_system_table).unwrap();
 
-    let vram = init_vram(&efi_system_table).unwrap();
+    let vram = init_vram(efi_system_table).unwrap();
 
-    for x in (0..vram.width()).step_by(8) {
-        graphics::draw_line(&vram, 0xFF0000, 0, 0, x, vram.height() - 1).unwrap();
+    let mut rand = xorshift::Xorshift::init();
+    for _ in 0..100000 {
+        let xsize = (rand.next().unwrap() as i64).rem_euclid(vram.width() / 4 - 10) + 10;
+        let ysize = (rand.next().unwrap() as i64).rem_euclid(vram.width() / 4 - 10) + 10;
+        graphics::draw_rect(
+            &vram,
+            rand.next().unwrap() as u32,
+            (rand.next().unwrap() as i64).rem_euclid(vram.width() - xsize),
+            (rand.next().unwrap() as i64).rem_euclid(vram.height() - ysize),
+            xsize,
+            ysize,
+        )
+        .unwrap();
     }
-    for y in (0..vram.height()).step_by(8) {
-        graphics::draw_line(&vram, 0x00FF00, 0, 0, vram.width() - 1, y).unwrap();
-    }
-    graphics::draw_line(&vram, 0xFFFF00, 0, 0, vram.width() - 1, vram.height() - 1).unwrap();
 
     serial::com_initialize(serial::IO_ADDR_COM2);
     let mut serial_writer = serial::SerialConsoleWriter {};
     writeln!(serial_writer, "hello from serial").unwrap();
+    Ok(())
+}
+
+#[no_mangle]
+fn efi_main(_image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
+    loader_main(efi_system_table).unwrap();
     loop {
         unsafe { asm!("pause") }
     }

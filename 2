@@ -103,9 +103,9 @@ pub fn draw_rect<T: BitmapImageBuffer>(
     h: i64,
 ) -> core::result::Result<(), GraphicsError> {
     if !buf.is_in_x_range(px)
-        || !buf.is_in_y_range(py)
-        || !buf.is_in_x_range(px + w - 1)
-        || !buf.is_in_y_range(py + h - 1)
+        || !buf.is_in_x_range(py)
+        || !buf.is_in_y_range(px + w)
+        || !buf.is_in_y_range(py + h)
     {
         return Err(GraphicsError::OutOfRange);
     }
