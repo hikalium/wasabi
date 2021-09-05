@@ -4,7 +4,7 @@ QEMU=qemu-system-x86_64
 DEBUG_BIN_PATH=${PROJECT_ROOT}/target/x86_64-unknown-uefi/debug/loader.efi
 
 QEMU_ARGS=\
-		-machine q35 -cpu qemu64 \
+		-machine q35 -cpu qemu64 -smp 4 \
 		-bios $(OVMF) \
 		-device qemu-xhci -device usb-mouse \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
@@ -14,7 +14,8 @@ QEMU_ARGS=\
 		-drive format=raw,file=fat:rw:mnt \
 		-serial tcp::1234,server,nowait \
 		-serial tcp::1235,server,nowait \
-		-rtc base=localtime
+		-rtc base=localtime \
+		-monitor stdio
 
 default:
 	cargo build

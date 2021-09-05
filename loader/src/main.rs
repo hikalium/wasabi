@@ -26,6 +26,13 @@ pub const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EFI_GUID = EFI_GUID {
     data3: [0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a],
 };
 
+pub const EFI_MP_SERVICES_PROTOCOL_GUID: EFI_GUID = EFI_GUID {
+    data0: 0x3fdda605,
+    data1: 0xa76e,
+    data2: 0x4f46,
+    data3: [0xad, 0x29, 0x12, 0xf4, 0x53, 0x1b, 0x3d, 0x08],
+};
+
 pub type EFIVoid = u8;
 
 #[repr(C)]
@@ -88,13 +95,37 @@ pub struct EFIGraphicsOutputProtocol<'a> {
     pub mode: &'a EFIGraphicsOutputProtocolMode<'a>,
 }
 
+#[repr(C)]
+#[derive(Debug)]
+pub struct EFIProcessorInformation {
+    pub id: u64,
+    pub status: u32,
+    pub package: u32,
+    pub core: u32,
+    pub thread: u32,
+}
+
+#[repr(C)]
+pub struct EFIMPServicesProtocol {
+    pub get_number_of_processors: extern "win64" fn(
+        this: *const EFIMPServicesProtocol,
+        num_of_proc: &mut usize,
+        num_of_proc_enabled: &mut usize,
+    ) -> EFIStatus,
+    pub get_processor_info: extern "win64" fn(
+        this: *const EFIMPServicesProtocol,
+        proc_num: usize,
+        info: &mut EFIProcessorInformation,
+    ) -> EFIStatus,
+}
+
 pub struct EFIBootServicesTable {
     pub header: EFITableHeader,
     _reserved: [u64; 37],
     pub locate_protocol: extern "win64" fn(
         protocol: *const EFI_GUID,
         registration: *const EFIVoid,
-        interface: *mut *mut EFIGraphicsOutputProtocol,
+        interface: *mut *mut EFIVoid,
     ) -> EFIStatus,
 }
 
@@ -150,6 +181,22 @@ fn panic(info: &PanicInfo) -> ! {
     }
 }
 
+fn locate_mp_services_protocol<'a>(
+    efi_system_table: &'a EFISystemTable,
+) -> Result<&'a EFIMPServicesProtocol, ()> {
+    use core::ptr::null_mut;
+    let mut protocol: *mut EFIMPServicesProtocol = null_mut::<EFIMPServicesProtocol>();
+    let status = (efi_system_table.boot_services.locate_protocol)(
+        &EFI_MP_SERVICES_PROTOCOL_GUID,
+        null_mut::<EFIVoid>(),
+        &mut protocol as *mut *mut EFIMPServicesProtocol as *mut *mut EFIVoid,
+    );
+    if status != EFIStatus::SUCCESS {
+        return Err(());
+    }
+    Ok(unsafe { &*protocol })
+}
+
 fn locate_graphic_protocol<'a>(
     efi_system_table: &'a EFISystemTable,
 ) -> Result<&'a EFIGraphicsOutputProtocol<'a>, ()> {
@@ -159,7 +206,7 @@ fn locate_graphic_protocol<'a>(
     let status = (efi_system_table.boot_services.locate_protocol)(
         &EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
         null_mut::<EFIVoid>(),
-        &mut graphic_output_protocol,
+        &mut graphic_output_protocol as *mut *mut EFIGraphicsOutputProtocol as *mut *mut EFIVoid,
     );
     if status != EFIStatus::SUCCESS {
         return Err(());
@@ -227,6 +274,32 @@ fn loader_main(efi_system_table: &EFISystemTable) -> Result<(), ()> {
     writeln!(efi_writer, "{:#p}", &efi_system_table).unwrap();
 
     let vram = init_vram(efi_system_table).unwrap();
+
+    let mp_services_holder = locate_mp_services_protocol(efi_system_table);
+    match mp_services_holder {
+        Ok(mp) => {
+            writeln!(efi_writer, "MP service found").unwrap();
+            let mut num_proc: usize = 0;
+            let mut num_proc_enabled: usize = 0;
+            let status = (mp.get_number_of_processors)(mp, &mut num_proc, &mut num_proc_enabled);
+            writeln!(
+                efi_writer,
+                "status = {:?}, {}/{} cpu(s) enabled",
+                status, num_proc_enabled, num_proc
+            )
+            .unwrap();
+            let mut info: EFIProcessorInformation = EFIProcessorInformation {
+                id: 0,
+                status: 0,
+                core: 0,
+                package: 0,
+                thread: 0,
+            };
+            let status = (mp.get_processor_info)(mp, 0, &mut info);
+            writeln!(efi_writer, "status = {:?}, info = {:?}", status, info).unwrap();
+        }
+        Err(_) => writeln!(efi_writer, "MP service not found").unwrap(),
+    }
 
     let mut rand = xorshift::Xorshift::init();
     for _ in 0..100000 {
