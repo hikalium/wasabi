@@ -166,6 +166,56 @@ fn locate_graphic_protocol<'a>(
     Ok(unsafe { &*graphic_output_protocol })
 }
 
+use graphics::BitmapImageBuffer;
+
+pub struct VRAMBuffer {
+    buf: *mut u8,
+    width: usize,
+    height: usize,
+    pixels_per_line: usize,
+}
+
+impl BitmapImageBuffer for VRAMBuffer {
+    fn bytes_per_pixel(&self) -> i64 {
+        4
+    }
+    fn pixels_per_line(&self) -> i64 {
+        self.pixels_per_line as i64
+    }
+    fn width(&self) -> i64 {
+        self.width as i64
+    }
+    fn height(&self) -> i64 {
+        self.height as i64
+    }
+    fn buf(&self) -> *mut u8 {
+        self.buf
+    }
+    unsafe fn pixel_at(&self, x: i64, y: i64) -> *mut u8 {
+        self.buf()
+            .add(((y * self.pixels_per_line() + x) * self.bytes_per_pixel()) as usize)
+    }
+    fn flush(&self) {
+        // Do nothing
+    }
+    fn is_in_x_range(&self, px: i64) -> bool {
+        0 <= px && px < self.width as i64
+    }
+    fn is_in_y_range(&self, py: i64) -> bool {
+        0 <= py && py < self.height as i64
+    }
+}
+
+fn init_vram(efi_system_table: &EFISystemTable) -> Result<VRAMBuffer, ()> {
+    let gp = locate_graphic_protocol(efi_system_table)?;
+    Ok(VRAMBuffer {
+        buf: gp.mode.frame_buffer_base as *mut u8,
+        width: gp.mode.info.horizontal_resolution as usize,
+        height: gp.mode.info.vertical_resolution as usize,
+        pixels_per_line: gp.mode.info.pixels_per_scan_line as usize,
+    })
+}
+
 #[no_mangle]
 fn efi_main(_image_handle: EFIHandle, efi_system_table: EFISystemTable) -> ! {
     use core::fmt::Write;
@@ -176,24 +226,15 @@ fn efi_main(_image_handle: EFIHandle, efi_system_table: EFISystemTable) -> ! {
     writeln!(efi_writer, "Loading wasabiOS...").unwrap();
     writeln!(efi_writer, "{:#p}", &efi_system_table).unwrap();
 
-    let gp = locate_graphic_protocol(&efi_system_table).unwrap();
-    writeln!(efi_writer, "{:?}", gp.mode.frame_buffer_base).unwrap();
-    writeln!(efi_writer, "{:?}", gp.mode.frame_buffer_size).unwrap();
-    writeln!(efi_writer, "{:?}", gp).unwrap();
-    writeln!(efi_writer, "{:X}", gp.mode.info.red_mask).unwrap();
+    let vram = init_vram(&efi_system_table).unwrap();
 
-    let base_addr = gp.mode.frame_buffer_base as *mut u8;
-    for y in 0..gp.mode.info.vertical_resolution / 2 {
-        for x in 0..gp.mode.info.horizontal_resolution / 2 {
-            for i in 1..2 {
-                // BGR-
-                unsafe {
-                    *base_addr
-                        .add((i + (y * gp.mode.info.pixels_per_scan_line + x) * 4) as usize) = 0xff;
-                }
-            }
-        }
+    for x in (0..vram.width()).step_by(8) {
+        graphics::draw_line(&vram, 0xFF0000, 0, 0, x, vram.height() - 1).unwrap();
     }
+    for y in (0..vram.height()).step_by(8) {
+        graphics::draw_line(&vram, 0x00FF00, 0, 0, vram.width() - 1, y).unwrap();
+    }
+    graphics::draw_line(&vram, 0xFFFF00, 0, 0, vram.width() - 1, vram.height() - 1).unwrap();
 
     serial::com_initialize(serial::IO_ADDR_COM2);
     let mut serial_writer = serial::SerialConsoleWriter {};

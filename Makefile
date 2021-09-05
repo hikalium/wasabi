@@ -1,7 +1,7 @@
 PROJECT_ROOT:=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 OVMF=${PROJECT_ROOT}/third_party/ovmf/bios64.bin
 QEMU=qemu-system-x86_64
-DEBUG_BIN_PATH=${PROJECT_ROOT}/target/x86_64-unknown-uefi/debug/wasabi_os.efi
+DEBUG_BIN_PATH=${PROJECT_ROOT}/target/x86_64-unknown-uefi/debug/loader.efi
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 \
