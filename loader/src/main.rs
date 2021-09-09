@@ -4,19 +4,21 @@
 
 use crate::efi::*;
 use crate::error::*;
+use crate::memory_map_holder::*;
+use core::fmt::Write;
 use core::panic::PanicInfo;
 
 extern crate graphics;
 
 pub mod efi;
 pub mod error;
+pub mod memory_map_holder;
 pub mod serial;
 pub mod x86;
 pub mod xorshift;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    use core::fmt::Write;
     serial::com_initialize(serial::IO_ADDR_COM2);
     let mut serial_writer = serial::SerialConsoleWriter {};
     writeln!(serial_writer, "panic! {:?}", info).unwrap();
@@ -27,14 +29,28 @@ fn panic(info: &PanicInfo) -> ! {
 
 use graphics::BitmapImageBuffer;
 
-pub struct VRAMBuffer {
+pub fn exit_from_efi_boot_services(
+    image_handle: EFIHandle,
+    efi_system_table: &EFISystemTable,
+    memory_map: &mut memory_map_holder::MemoryMapHolder,
+) {
+    // Get a memory map and exit boot services
+    let status = memory_map_holder::get_memory_map(efi_system_table, memory_map);
+    assert_eq!(status, EFIStatus::SUCCESS);
+    let status =
+        (efi_system_table.boot_services.exit_boot_services)(image_handle, memory_map.map_key);
+    assert_eq!(status, EFIStatus::SUCCESS);
+}
+
+#[derive(Clone, Copy)]
+pub struct VRAMBufferInfo {
     buf: *mut u8,
     width: usize,
     height: usize,
     pixels_per_line: usize,
 }
 
-impl BitmapImageBuffer for VRAMBuffer {
+impl BitmapImageBuffer for VRAMBufferInfo {
     fn bytes_per_pixel(&self) -> i64 {
         4
     }
@@ -65,9 +81,9 @@ impl BitmapImageBuffer for VRAMBuffer {
     }
 }
 
-fn init_vram(efi_system_table: &EFISystemTable) -> Result<VRAMBuffer, WasabiError> {
+fn init_vram(efi_system_table: &EFISystemTable) -> Result<VRAMBufferInfo, WasabiError> {
     let gp = locate_graphic_protocol(efi_system_table)?;
-    Ok(VRAMBuffer {
+    Ok(VRAMBufferInfo {
         buf: gp.mode.frame_buffer_base as *mut u8,
         width: gp.mode.info.horizontal_resolution as usize,
         height: gp.mode.info.vertical_resolution as usize,
@@ -75,8 +91,11 @@ fn init_vram(efi_system_table: &EFISystemTable) -> Result<VRAMBuffer, WasabiErro
     })
 }
 
-fn loader_main(efi_system_table: &EFISystemTable) -> Result<(), ()> {
-    use core::fmt::Write;
+pub struct WasabiBootInfo {
+    vram: VRAMBufferInfo,
+}
+
+fn loader_main_with_boot_services(efi_system_table: &EFISystemTable) -> Result<WasabiBootInfo, ()> {
     (efi_system_table.con_out.clear_screen)(efi_system_table.con_out);
     let mut efi_writer = EFISimpleTextOutputProtocolWriter {
         protocol: efi_system_table.con_out,
@@ -112,6 +131,11 @@ fn loader_main(efi_system_table: &EFISystemTable) -> Result<(), ()> {
         Err(_) => writeln!(efi_writer, "MP service not found").unwrap(),
     }
 
+    Ok(WasabiBootInfo { vram })
+}
+
+fn loader_main(info: &WasabiBootInfo) -> Result<(), WasabiError> {
+    let vram = info.vram;
     let mut rand = xorshift::Xorshift::init();
     for _ in 0..100000 {
         let xsize = (rand.next().unwrap() as i64).rem_euclid(vram.width() / 4 - 10) + 10;
@@ -126,16 +150,21 @@ fn loader_main(efi_system_table: &EFISystemTable) -> Result<(), ()> {
         )
         .unwrap();
     }
-
-    serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut serial_writer = serial::SerialConsoleWriter {};
-    writeln!(serial_writer, "hello from serial").unwrap();
     Ok(())
 }
 
 #[no_mangle]
-fn efi_main(_image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
-    loader_main(efi_system_table).unwrap();
+fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
+    serial::com_initialize(serial::IO_ADDR_COM2);
+    let mut serial_writer = serial::SerialConsoleWriter {};
+    writeln!(serial_writer, "hello from serial").unwrap();
+
+    let info = loader_main_with_boot_services(efi_system_table).unwrap();
+    let mut memory_map = MemoryMapHolder::new();
+    exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
+    writeln!(serial_writer, "Exited from EFI Boot Services").unwrap();
+    loader_main(&info).unwrap();
+
     loop {
         unsafe { asm!("pause") }
     }
