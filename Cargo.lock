@@ -3,6 +3,10 @@
 version = 3
 
 [[package]]
+name = "font"
+version = "0.1.0"
+
+[[package]]
 name = "graphics"
 version = "0.1.0"
 

@@ -18,7 +18,8 @@ QEMU_ARGS=\
 		-monitor stdio
 
 default:
-	cargo build
+	cd font && cargo build
+	cd loader && cargo build
 
 .PHONY: \
 	commit \
@@ -45,7 +46,7 @@ run : run_deps
 	$(QEMU) $(QEMU_ARGS)
 
 run_deps :
-	cargo build
+	make
 	mkdir -p mnt/
 	-rm -rf mnt/*
 	mkdir -p mnt/EFI/BOOT
