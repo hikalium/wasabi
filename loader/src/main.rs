@@ -137,18 +137,16 @@ fn loader_main_with_boot_services(efi_system_table: &EFISystemTable) -> Result<W
 fn loader_main(info: &WasabiBootInfo) -> Result<(), WasabiError> {
     let vram = info.vram;
     let mut rand = xorshift::Xorshift::init();
-    for _ in 0..100000 {
-        let xsize = (rand.next().unwrap() as i64).rem_euclid(vram.width() / 4 - 10) + 10;
-        let ysize = (rand.next().unwrap() as i64).rem_euclid(vram.width() / 4 - 10) + 10;
-        graphics::draw_rect(
-            &vram,
-            rand.next().unwrap() as u32,
-            (rand.next().unwrap() as i64).rem_euclid(vram.width() - xsize),
-            (rand.next().unwrap() as i64).rem_euclid(vram.height() - ysize),
-            xsize,
-            ysize,
-        )
-        .unwrap();
+    let mut y = 0;
+    while y <= vram.height - 16 {
+        let mut x = 0;
+        while x <= vram.width - 8 {
+            let col = rand.next().unwrap() as u32;
+            let c = rand.next().unwrap() as u8 as char;
+            graphics::draw_char(&vram, col, !col, x as i64, y as i64, c).unwrap();
+            x += 8;
+        }
+        y += 16;
     }
     Ok(())
 }

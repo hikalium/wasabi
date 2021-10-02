@@ -119,6 +119,39 @@ pub fn draw_rect<T: BitmapImageBuffer>(
     Ok(())
 }
 
+include!("../../generated/font.rs");
+
+pub fn draw_char<T: BitmapImageBuffer>(
+    buf: &T,
+    fg_color: u32,
+    bg_color: u32,
+    px: i64,
+    py: i64,
+    c: char,
+) -> core::result::Result<(), GraphicsError> {
+    if !buf.is_in_x_range(px)
+        || !buf.is_in_y_range(py)
+        || !buf.is_in_x_range(px + 8 - 1)
+        || !buf.is_in_y_range(py + 16 - 1)
+    {
+        return Err(GraphicsError::OutOfRange);
+    }
+
+    let idx = c as usize;
+    for y in 0..16_i64 {
+        for x in 0..8_i64 {
+            let col = if idx >= 256 || ((BITMAP_FONT[idx][y as usize] >> x) & 1) == 1 {
+                fg_color
+            } else {
+                bg_color
+            };
+            draw_point(buf, col, px + x, py + y)?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

@@ -17,20 +17,29 @@ QEMU_ARGS=\
 		-rtc base=localtime \
 		-monitor stdio
 
-default:
-	cd font && cargo build
-	cd loader && cargo build
+default: bin
 
 .PHONY: \
+	bin \
 	commit \
+	font \
+	spellcheck \
 	run \
 	run_deps \
 	watch_serial \
 	# Keep this line blank
 
+bin: font
+	cd font && cargo build
+	cd loader && cargo build
+
+clippy: font
+	cd font && cargo clippy
+	cd loader && cargo clippy
+
 commit :
 	cargo fmt
-	cargo clippy -- -D warnings
+	make clippy
 	make spellcheck
 	make # build
 	git submodule update
@@ -38,6 +47,10 @@ commit :
 	./scripts/ensure_objs_are_not_under_git_control.sh
 	git diff HEAD --color=always | less -R
 	git commit
+
+font:
+	mkdir -p generated
+	cargo run --bin font font/font.txt > generated/font.rs
 
 spellcheck :
 	@scripts/spellcheck.sh recieve receive
