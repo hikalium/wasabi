@@ -34,15 +34,19 @@ bin: font
 	cd loader && cargo build
 
 clippy: font
-	cd font && cargo clippy
-	cd loader && cargo clippy
+	cd font && cargo clippy -- -D warnings
+	cd loader && cargo clippy -- -D warnings
+
+test: font
+	cd font && cargo test
+	cd loader && cargo test
 
 commit :
 	cargo fmt
 	make clippy
 	make spellcheck
 	make # build
-	git submodule update
+	make test
 	git add .
 	./scripts/ensure_objs_are_not_under_git_control.sh
 	git diff HEAD --color=always | less -R

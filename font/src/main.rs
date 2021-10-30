@@ -14,12 +14,13 @@ fn main() -> std::io::Result<()> {
     for row in input.split('\n') {
         line += 1;
         if row.starts_with("0x") {
-            if row_index != 16 {
-                panic!(
-                    "line {}: fonts[0x{:02X}] has {} rows but expected 16",
-                    line, font_index, row_index
-                );
-            }
+            assert!(
+                !(row_index != 16),
+                "line {}: fonts[0x{:02X}] has {} rows but expected 16",
+                line,
+                font_index,
+                row_index
+            );
             let row_trimmed = row.trim_start_matches("0x");
             font_index = match usize::from_str_radix(row_trimmed, 16) {
                 Ok(i) => i,
@@ -32,9 +33,12 @@ fn main() -> std::io::Result<()> {
             // skip blank lines
             continue;
         }
-        if row_index >= 16 {
-            panic!("line {}: fonts[0x{:02X}] has extra rows", line, font_index);
-        }
+        assert!(
+            !(row_index >= 16),
+            "line {}: fonts[0x{:02X}] has extra rows",
+            line,
+            font_index
+        );
         let mut row_bits = 0;
         for i in 0..8 {
             match row.chars().nth(i) {
