@@ -169,9 +169,10 @@ impl fmt::Debug for EFIMemoryDescriptor {
         write!(f, "EFIMemoryDescriptor {{ ")?;
         write!(
             f,
-            "phys: [{:#018X}-{:#018X})",
+            "phys: [{:#018X}-{:#018X}) ({} bytes)",
             self.physical_start,
-            self.physical_start + self.number_of_pages * 4096
+            self.physical_start + self.number_of_pages * 4096,
+            self.number_of_pages * 4096
         )?;
         write!(f, " attr: {:#018X}", self.attribute)?;
         write!(f, " {:#?}", self.memory_type)?;

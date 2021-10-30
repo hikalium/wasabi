@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(asm)]
+#![feature(alloc_error_handler)]
 
 use crate::efi::*;
 use crate::error::*;
@@ -8,6 +9,10 @@ use crate::graphics::text_area::*;
 use crate::memory_map_holder::*;
 use core::fmt::Write;
 use core::panic::PanicInfo;
+
+extern crate alloc;
+
+use alloc::vec::Vec;
 
 extern crate graphics;
 
@@ -135,12 +140,41 @@ fn loader_main_with_boot_services(efi_system_table: &EFISystemTable) -> Result<W
     Ok(WasabiBootInfo { vram })
 }
 
-fn loader_main(info: &WasabiBootInfo) -> Result<(), WasabiError> {
+fn loader_main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), WasabiError> {
+    serial::com_initialize(serial::IO_ADDR_COM2);
+    let mut serial_writer = serial::SerialConsoleWriter {};
+    writeln!(serial_writer, "hello from serial").unwrap();
+
     let vram = info.vram;
     let mut textarea = TextArea::new(&vram, 8, 16, vram.width() - 16, vram.height() - 32);
     for _ in 0..200 {
         textarea.print_char('W')?;
     }
+    let mut total_pages = 0;
+    for e in memory_map.iter() {
+        if e.memory_type != EFIMemoryType::CONVENTIONAL_MEMORY {
+            continue;
+        }
+        ALLOCATOR.set_descriptor(e);
+        total_pages += e.number_of_pages;
+        writeln!(serial_writer, "{:?}", e).unwrap();
+    }
+    writeln!(
+        serial_writer,
+        "Total memory: {} MiB",
+        total_pages * 4096 / 1024 / 1024
+    )
+    .unwrap();
+
+    let mut a = Vec::with_capacity(544768 / 4);
+    for i in 0..256u32 {
+        writeln!(serial_writer, "{}", i).unwrap();
+        a.push(i);
+    }
+    for v in a {
+        writeln!(serial_writer, "{}", v).unwrap();
+    }
+
     textarea.print_string("\nWelcome to Wasabi OS!!!")?;
     Ok(())
 }
@@ -155,9 +189,69 @@ fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
     let mut memory_map = MemoryMapHolder::new();
     exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
     writeln!(serial_writer, "Exited from EFI Boot Services").unwrap();
-    loader_main(&info).unwrap();
+    loader_main(&info, &memory_map).unwrap();
 
     loop {
         unsafe { asm!("pause") }
     }
+}
+
+use alloc::alloc::GlobalAlloc;
+use alloc::alloc::Layout;
+use core::cell::UnsafeCell;
+
+struct SimpleAllocator {
+    page_cursor: UnsafeCell<usize>,
+    desc: UnsafeCell<EFIMemoryDescriptor>,
+}
+
+#[global_allocator]
+static ALLOCATOR: SimpleAllocator = SimpleAllocator {
+    page_cursor: UnsafeCell::new(0),
+    desc: UnsafeCell::new(EFIMemoryDescriptor {
+        memory_type: EFIMemoryType::RESERVED,
+        physical_start: 0,
+        virtual_start: 0,
+        number_of_pages: 0,
+        attribute: 0,
+    }),
+};
+
+unsafe impl Sync for SimpleAllocator {}
+
+unsafe impl GlobalAlloc for SimpleAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        serial::com_initialize(serial::IO_ADDR_COM2);
+        let mut serial_writer = serial::SerialConsoleWriter {};
+        writeln!(serial_writer, "alloc: {:?}", layout).unwrap();
+        let pages_needed = (layout.size() + 4095) / 4096;
+        if *self.page_cursor.get() + pages_needed > (*self.desc.get()).number_of_pages as usize {
+            core::ptr::null_mut::<u8>()
+        } else {
+            let addr = *self.page_cursor.get() * 4096 + (*self.desc.get()).physical_start as usize;
+            *self.page_cursor.get() += pages_needed;
+            addr as *mut u8
+        }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        serial::com_initialize(serial::IO_ADDR_COM2);
+        let mut serial_writer = serial::SerialConsoleWriter {};
+        writeln!(serial_writer, "dealloc: {:?} ptr {:?}", layout, ptr).unwrap();
+    }
+}
+
+impl SimpleAllocator {
+    fn set_descriptor(&self, desc: &EFIMemoryDescriptor) {
+        serial::com_initialize(serial::IO_ADDR_COM2);
+        let mut serial_writer = serial::SerialConsoleWriter {};
+        writeln!(serial_writer, "set_descriptor: {:?}", desc).unwrap();
+        unsafe {
+            *self.desc.get() = *desc;
+        }
+    }
+}
+
+#[alloc_error_handler]
+fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
+    panic!("allocation error: {:?}", layout)
 }
