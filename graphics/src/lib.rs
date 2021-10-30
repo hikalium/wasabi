@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod text_area;
+
 pub trait BitmapImageBuffer {
     fn bytes_per_pixel(&self) -> i64;
     fn pixels_per_line(&self) -> i64;
@@ -20,13 +22,10 @@ pub enum GraphicsError {
     OutOfRange,
 }
 
+pub type GraphicsResult = core::result::Result<(), GraphicsError>;
+
 #[allow(clippy::many_single_char_names)]
-pub fn draw_point<T: BitmapImageBuffer>(
-    buf: &T,
-    color: u32,
-    x: i64,
-    y: i64,
-) -> core::result::Result<(), GraphicsError> {
+pub fn draw_point<T: BitmapImageBuffer>(buf: &T, color: u32, x: i64, y: i64) -> GraphicsResult {
     if !buf.is_in_x_range(x) || !buf.is_in_x_range(x) {
         return Err(GraphicsError::OutOfRange);
     }
@@ -51,7 +50,7 @@ pub fn draw_line<T: BitmapImageBuffer>(
     y0: i64,
     x1: i64,
     y1: i64,
-) -> core::result::Result<(), GraphicsError> {
+) -> GraphicsResult {
     if !buf.is_in_x_range(x0)
         || !buf.is_in_x_range(x1)
         || !buf.is_in_y_range(y0)
@@ -101,7 +100,7 @@ pub fn draw_rect<T: BitmapImageBuffer>(
     py: i64,
     w: i64,
     h: i64,
-) -> core::result::Result<(), GraphicsError> {
+) -> GraphicsResult {
     if !buf.is_in_x_range(px)
         || !buf.is_in_y_range(py)
         || !buf.is_in_x_range(px + w - 1)
@@ -128,7 +127,7 @@ pub fn draw_char<T: BitmapImageBuffer>(
     px: i64,
     py: i64,
     c: char,
-) -> core::result::Result<(), GraphicsError> {
+) -> GraphicsResult {
     if !buf.is_in_x_range(px)
         || !buf.is_in_y_range(py)
         || !buf.is_in_x_range(px + 8 - 1)
