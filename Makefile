@@ -17,7 +17,8 @@ QEMU_ARGS=\
 		-serial chardev:char0 \
 		-serial chardev:char0 \
 		-rtc base=localtime \
-		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait
+		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
+		-full-screen
 
 default: bin
 
