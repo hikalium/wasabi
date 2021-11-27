@@ -2,6 +2,9 @@
 #![no_main]
 #![feature(asm)]
 #![feature(alloc_error_handler)]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
 
 use crate::efi::*;
 use crate::error::*;
@@ -16,6 +19,7 @@ use alloc::vec::Vec;
 
 extern crate graphics;
 
+pub mod debug_exit;
 pub mod efi;
 pub mod error;
 pub mod memory_map_holder;
@@ -181,6 +185,9 @@ fn loader_main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<()
 
 #[no_mangle]
 fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
+    #[cfg(test)]
+    test_main();
+
     serial::com_initialize(serial::IO_ADDR_COM2);
     let mut serial_writer = serial::SerialConsoleWriter {};
     writeln!(serial_writer, "hello from serial").unwrap();
@@ -249,6 +256,47 @@ impl SimpleAllocator {
             *self.desc.get() = *desc;
         }
     }
+}
+
+#[cfg(test)]
+#[start]
+pub extern "win64" fn _start() -> ! {
+    test_main();
+    loop {}
+}
+
+pub trait Testable {
+    fn run(&self);
+}
+
+impl<T> Testable for T
+where
+    T: Fn(),
+{
+    fn run(&self) {
+        serial::com_initialize(serial::IO_ADDR_COM2);
+        let mut writer = serial::SerialConsoleWriter {};
+        write!(writer, "{}...\t", core::any::type_name::<T>()).unwrap();
+        self();
+        writeln!(writer, "[PASS]").unwrap();
+    }
+}
+
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Testable]) -> ! {
+    serial::com_initialize(serial::IO_ADDR_COM2);
+    let mut writer = serial::SerialConsoleWriter {};
+    writeln!(writer, "Running {} tests...", tests.len()).unwrap();
+    for test in tests {
+        test.run();
+    }
+    write!(writer, "Done!").unwrap();
+    debug_exit::exit_qemu(debug_exit::QemuExitCode::Success)
+}
+
+#[test_case]
+fn trivial_assertion() {
+    assert_eq!(1, 1);
 }
 
 #[alloc_error_handler]

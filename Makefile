@@ -2,6 +2,7 @@ PROJECT_ROOT:=$(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 OVMF=${PROJECT_ROOT}/third_party/ovmf/bios64.bin
 QEMU=qemu-system-x86_64
 DEBUG_BIN_PATH=${PROJECT_ROOT}/target/x86_64-unknown-uefi/debug/loader.efi
+PORT_MONITOR?=2222
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
@@ -12,10 +13,11 @@ QEMU_ARGS=\
 		-object filter-dump,id=f1,netdev=usbnet0,file=dump_usb_nic.dat \
 		-m 2G \
 		-drive format=raw,file=fat:rw:mnt \
-		-serial tcp::1234,server,nowait \
-		-serial tcp::1235,server,nowait \
+		-chardev stdio,id=char0,mux=on,logfile=serial.log \
+		-serial chardev:char0 \
+		-serial chardev:char0 \
 		-rtc base=localtime \
-		-monitor stdio
+		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait
 
 default: bin
 
@@ -71,3 +73,19 @@ run_deps :
 
 watch_serial:
 	while ! telnet localhost 1235 ; do sleep 1 ; done ;
+
+internal_run_loader_test :
+	@echo Using ${LOADER_TEST_EFI} as a loader...
+	mkdir -p mnt/
+	-rm -rf mnt/*
+	mkdir -p mnt/EFI/BOOT
+	cp ${LOADER_TEST_EFI} mnt/EFI/BOOT/BOOTX64.EFI
+	$(QEMU) $(QEMU_ARGS) $(QEMU_ARGS_GUI) ; \
+		RETCODE=$$? ; \
+		if [ $$RETCODE -eq 3 ]; then \
+			echo "\nPASS" ; \
+			exit 0 ; \
+		else \
+			echo "\nFAIL: QEMU returned $$RETCODE" ; \
+			exit 1 ; \
+		fi

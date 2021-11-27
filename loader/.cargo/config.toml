@@ -1,12 +1,12 @@
 [build]
 target = 'x86_64-unknown-uefi'
 
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
+[lib]
+target = "x86_64-unknown-uefi"
 
 [unstable]
-build-std = ["core", "compiler_builtins", "alloc"]
+build-std = ["core", "compiler_builtins", "alloc", "panic_abort"]
 build-std-features = ["compiler-builtins-mem"]
+
+[target.'cfg(target_os = "uefi")']
+runner = "../scripts/test_runner.sh"

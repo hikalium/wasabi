@@ -9,4 +9,3 @@ graphics = { path = "../graphics" }
 
 [[bin]]
 name = "loader"
-test = false
