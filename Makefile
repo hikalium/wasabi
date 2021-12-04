@@ -17,8 +17,7 @@ QEMU_ARGS=\
 		-serial chardev:char0 \
 		-serial chardev:char0 \
 		-rtc base=localtime \
-		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
-		-full-screen
+		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait
 
 default: bin
 
@@ -81,7 +80,7 @@ internal_run_loader_test :
 	-rm -rf mnt/*
 	mkdir -p mnt/EFI/BOOT
 	cp ${LOADER_TEST_EFI} mnt/EFI/BOOT/BOOTX64.EFI
-	$(QEMU) $(QEMU_ARGS) $(QEMU_ARGS_GUI) ; \
+	$(QEMU) $(QEMU_ARGS) -display none ; \
 		RETCODE=$$? ; \
 		if [ $$RETCODE -eq 3 ]; then \
 			echo "\nPASS" ; \
