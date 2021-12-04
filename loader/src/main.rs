@@ -14,6 +14,7 @@ pub mod efi;
 pub mod error;
 pub mod loader;
 pub mod memory_map_holder;
+pub mod panic;
 pub mod serial;
 pub mod test_runner;
 pub mod vram;
@@ -24,17 +25,6 @@ use crate::efi::*;
 use crate::graphics::text_area::*;
 use crate::memory_map_holder::*;
 use core::fmt::Write;
-use core::panic::PanicInfo;
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut serial_writer = serial::SerialConsoleWriter {};
-    writeln!(serial_writer, "panic! {:?}", info).unwrap();
-    loop {
-        unsafe { asm!("hlt") }
-    }
-}
 
 pub fn exit_from_efi_boot_services(
     image_handle: EFIHandle,
