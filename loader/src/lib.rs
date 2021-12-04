@@ -9,6 +9,7 @@
 pub mod debug_exit;
 pub mod efi;
 pub mod error;
+pub mod memory_map_holder;
 pub mod panic;
 pub mod serial;
 pub mod test_runner;

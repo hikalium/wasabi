@@ -26,19 +26,6 @@ use crate::graphics::text_area::*;
 use crate::memory_map_holder::*;
 use core::fmt::Write;
 
-pub fn exit_from_efi_boot_services(
-    image_handle: EFIHandle,
-    efi_system_table: &EFISystemTable,
-    memory_map: &mut memory_map_holder::MemoryMapHolder,
-) {
-    // Get a memory map and exit boot services
-    let status = memory_map_holder::get_memory_map(efi_system_table, memory_map);
-    assert_eq!(status, EFIStatus::SUCCESS);
-    let status =
-        (efi_system_table.boot_services.exit_boot_services)(image_handle, memory_map.map_key);
-    assert_eq!(status, EFIStatus::SUCCESS);
-}
-
 pub struct WasabiBootInfo {
     vram: vram::VRAMBufferInfo,
 }
