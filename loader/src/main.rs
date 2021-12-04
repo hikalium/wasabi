@@ -24,6 +24,7 @@ pub mod efi;
 pub mod error;
 pub mod memory_map_holder;
 pub mod serial;
+pub mod test_runner;
 pub mod x86;
 pub mod xorshift;
 
@@ -180,11 +181,9 @@ fn loader_main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<()
     Ok(())
 }
 
+#[cfg(not(test))]
 #[no_mangle]
 fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
-    #[cfg(test)]
-    test_main();
-
     serial::com_initialize(serial::IO_ADDR_COM2);
     let mut serial_writer = serial::SerialConsoleWriter {};
     writeln!(serial_writer, "hello from serial").unwrap();
@@ -337,4 +336,11 @@ fn trivial_assertion() {
 #[alloc_error_handler]
 fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)
+}
+
+#[cfg(test)]
+#[no_mangle]
+fn efi_main(image_handle: efi::EFIHandle, efi_system_table: &efi::EFISystemTable) -> () {
+    test_runner::test_prepare(image_handle, efi_system_table);
+    test_main();
 }
