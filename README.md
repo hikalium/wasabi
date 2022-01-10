@@ -1,2 +1,2 @@
-# wasabi
-Toy web browser + OS in Rust = wasabi
+# WasabiOS
+Toy web browser and OS in Rust ("sabi" in Japanese) = WasabiOS
