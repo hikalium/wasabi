@@ -44,14 +44,22 @@ pub enum EFIStatus {
     SUCCESS = 0,
 }
 
-impl EFIStatus {
-    pub fn into_result(&self) -> Result<(), EFIStatus> {
+type EFIResult = Result<(), EFIStatus>;
+
+impl From<EFIStatus> for EFIResult {
+    fn from(e: EFIStatus) -> Self {
         use EFIStatus::*;
-        if *self == SUCCESS {
+        if e == SUCCESS {
             Ok(())
         } else {
-            Err(*self)
+            Err(e)
         }
+    }
+}
+
+impl EFIStatus {
+    pub fn into_result(&self) -> EFIResult {
+        (*self).into()
     }
 }
 
