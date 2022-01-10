@@ -33,14 +33,14 @@ pub struct WasabiBootInfo {
 #[cfg(not(test))]
 #[no_mangle]
 fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
-    serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut serial_writer = serial::SerialConsoleWriter {};
-    writeln!(serial_writer, "hello from serial").unwrap();
-
     let info = loader::main_with_boot_services(efi_system_table).unwrap();
     let mut memory_map = MemoryMapHolder::new();
     exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
-    writeln!(serial_writer, "Exited from EFI Boot Services").unwrap();
+
+    // Initialize serial here since we exited from EFI Boot Services
+    serial::com_initialize(serial::IO_ADDR_COM2);
+    println!("Exited from EFI Boot Services");
+
     loader::main(&info, &memory_map).unwrap();
 
     loop {
@@ -128,10 +128,6 @@ root------------------------>|
 
 impl SimpleAllocator {
     fn set_descriptor(&self, desc: &EFIMemoryDescriptor) {
-        // Create linked list here???
-        serial::com_initialize(serial::IO_ADDR_COM2);
-        let mut serial_writer = serial::SerialConsoleWriter {};
-        writeln!(serial_writer, "set_descriptor: {:?}", desc).unwrap();
         unsafe {
             let info = &mut *(desc.physical_start as *mut FreeInfo);
             *info.next_free_info.as_ptr() = None;

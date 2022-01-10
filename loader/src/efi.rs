@@ -38,9 +38,21 @@ pub struct EFITableHeader {
 
 pub type EFIHandle = u64;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
+#[must_use]
 pub enum EFIStatus {
     SUCCESS = 0,
+}
+
+impl EFIStatus {
+    pub fn into_result(&self) -> Result<(), EFIStatus> {
+        use EFIStatus::*;
+        if *self == SUCCESS {
+            Ok(())
+        } else {
+            Err(*self)
+        }
+    }
 }
 
 #[repr(C)]
@@ -167,17 +179,19 @@ pub struct EFIMemoryDescriptor {
 
 impl fmt::Debug for EFIMemoryDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EFIMemoryDescriptor {{ ")?;
-        write!(
-            f,
-            "phys: [{:#018X}-{:#018X}) ({} bytes)",
-            self.physical_start,
-            self.physical_start + self.number_of_pages * 4096,
-            self.number_of_pages * 4096
-        )?;
-        write!(f, " attr: {:#018X}", self.attribute)?;
-        write!(f, " {:#?}", self.memory_type)?;
-        write!(f, " }}")
+        f.debug_struct("EFIMemoryDescriptor")
+            .field(
+                "phys",
+                &format_args!(
+                    "[{:#018X}-{:#018X})",
+                    self.physical_start,
+                    self.physical_start + self.number_of_pages * 4096,
+                ),
+            )
+            .field("size", &format_args!("({:8} pages)", self.number_of_pages))
+            .field("attr", &format_args!("{:#X}", self.attribute))
+            .field("type", &format_args!("{:?}", self.memory_type))
+            .finish()
     }
 }
 
@@ -203,7 +217,9 @@ pub struct EFISimpleTextOutputProtocolWriter<'a> {
 impl EFISimpleTextOutputProtocolWriter<'_> {
     pub fn write_char(&mut self, c: u8) {
         let cbuf: [u16; 2] = [c.into(), 0];
-        (self.protocol.output_string)(self.protocol, cbuf.as_ptr());
+        (self.protocol.output_string)(self.protocol, cbuf.as_ptr())
+            .into_result()
+            .unwrap();
     }
     pub fn write_str(&mut self, s: &str) {
         for c in s.bytes() {

@@ -1,38 +1,41 @@
-use crate::efi::*;
 use crate::error::*;
-use crate::serial;
 use crate::vram;
 use crate::MemoryMapHolder;
 use crate::TextArea;
 use crate::WasabiBootInfo;
 use crate::ALLOCATOR;
-use alloc::vec::Vec;
+use crate::*;
 use core::fmt::Write;
 use graphics::BitmapImageBuffer;
 
 pub fn main_with_boot_services(
     efi_system_table: &EFISystemTable,
 ) -> Result<WasabiBootInfo, WasabiError> {
-    (efi_system_table.con_out.clear_screen)(efi_system_table.con_out);
     let mut efi_writer = EFISimpleTextOutputProtocolWriter {
         protocol: efi_system_table.con_out,
     };
-    writeln!(efi_writer, "Loading wasabiOS...").unwrap();
-    writeln!(efi_writer, "{:#p}", &efi_system_table).unwrap();
-
+    (efi_system_table.con_out.clear_screen)(efi_system_table.con_out).into_result()?;
+    writeln!(efi_writer, "Welcome to WasabiOS! ").unwrap();
+    writeln!(
+        efi_writer,
+        "main_with_boot_services started. efi_system_table = {:p}",
+        &efi_system_table
+    )
+    .unwrap();
     let vram = vram::init_vram(efi_system_table).unwrap();
 
     let mp_services_holder = locate_mp_services_protocol(efi_system_table);
     match mp_services_holder {
         Ok(mp) => {
-            writeln!(efi_writer, "MP service found").unwrap();
+            writeln!(efi_writer, "MP service found.").unwrap();
             let mut num_proc: usize = 0;
             let mut num_proc_enabled: usize = 0;
-            let status = (mp.get_number_of_processors)(mp, &mut num_proc, &mut num_proc_enabled);
+            (mp.get_number_of_processors)(mp, &mut num_proc, &mut num_proc_enabled)
+                .into_result()?;
             writeln!(
                 efi_writer,
-                "status = {:?}, {}/{} cpu(s) enabled",
-                status, num_proc_enabled, num_proc
+                "{}/{} cpus enabled/exists",
+                num_proc_enabled, num_proc
             )
             .unwrap();
             let mut info: EFIProcessorInformation = EFIProcessorInformation {
@@ -42,8 +45,8 @@ pub fn main_with_boot_services(
                 package: 0,
                 thread: 0,
             };
-            let status = (mp.get_processor_info)(mp, 0, &mut info);
-            writeln!(efi_writer, "status = {:?}, info = {:?}", status, info).unwrap();
+            (mp.get_processor_info)(mp, 0, &mut info).into_result()?;
+            writeln!(efi_writer, "{:?}", info).unwrap();
         }
         Err(_) => writeln!(efi_writer, "MP service not found").unwrap(),
     }
@@ -52,9 +55,7 @@ pub fn main_with_boot_services(
 }
 
 pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), WasabiError> {
-    serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut serial_writer = serial::SerialConsoleWriter {};
-    writeln!(serial_writer, "hello from serial").unwrap();
+    println!("hello from serial");
 
     let vram = info.vram;
     let mut textarea = TextArea::new(&vram, 8, 16, vram.width() - 16, vram.height() - 32);
@@ -68,20 +69,9 @@ pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), W
         }
         ALLOCATOR.set_descriptor(e);
         total_pages += e.number_of_pages;
-        writeln!(serial_writer, "{:?}", e).unwrap();
+        println!("{:?}", e);
     }
-    writeln!(
-        serial_writer,
-        "Total memory: {} MiB",
-        total_pages * 4096 / 1024 / 1024
-    )
-    .unwrap();
-
-    for i in 0..1000 {
-        let _a = Vec::<u8>::with_capacity(2);
-        writeln!(serial_writer, "{}", i).unwrap();
-    }
-    let _a = Vec::<u8>::with_capacity(8192);
+    println!("Total memory: {} MiB", total_pages * 4096 / 1024 / 1024);
 
     textarea.print_string("\nWelcome to Wasabi OS!!!")?;
     Ok(())

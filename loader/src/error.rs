@@ -1,13 +1,21 @@
+use crate::efi::EFIStatus;
 use graphics::GraphicsError;
 
 #[derive(Debug)]
 pub enum WasabiError {
     Failed(),
-    GraphicsError(graphics::GraphicsError),
+    GraphicsError(GraphicsError),
+    EFIError(EFIStatus),
 }
 
 impl From<GraphicsError> for WasabiError {
-    fn from(error: GraphicsError) -> Self {
-        WasabiError::GraphicsError(error)
+    fn from(e: GraphicsError) -> Self {
+        WasabiError::GraphicsError(e)
+    }
+}
+
+impl From<EFIStatus> for WasabiError {
+    fn from(e: EFIStatus) -> Self {
+        WasabiError::EFIError(e)
     }
 }

@@ -13,9 +13,10 @@ QEMU_ARGS=\
 		-object filter-dump,id=f1,netdev=usbnet0,file=dump_usb_nic.dat \
 		-m 2G \
 		-drive format=raw,file=fat:rw:mnt \
-		-chardev stdio,id=char0,mux=on,logfile=serial.log \
-		-serial chardev:char0 \
-		-serial chardev:char0 \
+		-chardev file,id=char_com1,mux=on,path=com1.log \
+		-chardev stdio,id=char_com2,mux=on,logfile=com2.log \
+		-serial chardev:char_com1 \
+		-serial chardev:char_com2 \
 		-rtc base=localtime \
 		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait
 
