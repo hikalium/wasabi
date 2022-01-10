@@ -20,11 +20,14 @@ QEMU_ARGS=\
 		-rtc base=localtime \
 		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait
 
+HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
+
 default: bin
 
 .PHONY: \
 	bin \
 	commit \
+	dump_config \
 	font \
 	spellcheck \
 	run \
@@ -39,6 +42,9 @@ bin: font
 clippy: font
 	cd font && cargo clippy -- -D warnings
 	cd loader && cargo clippy -- -D warnings
+
+dump_config:
+	@echo "Host target: $(HOST_TARGET)"
 
 test: font
 	cd font && cargo test
