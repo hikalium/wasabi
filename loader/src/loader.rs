@@ -58,10 +58,12 @@ pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), W
     println!("hello from serial");
 
     let vram = info.vram;
-    let mut textarea = TextArea::new(&vram, 8, 16, vram.width() - 16, vram.height() - 32);
-    for _ in 0..200 {
-        textarea.print_char('W')?;
-    }
+    let textarea = TextArea::new(vram, 8, 16, vram.width() - 16, vram.height() - 32);
+
+    print::GLOBAL_PRINTER.set_text_area(textarea);
+    println!("VRAM initialized.");
+    println!("Welcome to Wasabi OS!!!");
+
     let mut total_pages = 0;
     for e in memory_map.iter() {
         if e.memory_type != EFIMemoryType::CONVENTIONAL_MEMORY {
@@ -73,6 +75,5 @@ pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), W
     }
     println!("Total memory: {} MiB", total_pages * 4096 / 1024 / 1024);
 
-    textarea.print_string("\nWelcome to Wasabi OS!!!")?;
     Ok(())
 }

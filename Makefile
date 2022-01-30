@@ -71,6 +71,9 @@ spellcheck :
 run : run_deps
 	$(QEMU) $(QEMU_ARGS)
 
+pxe : run_deps
+	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
+
 run_deps :
 	make
 	mkdir -p mnt/
@@ -80,6 +83,10 @@ run_deps :
 
 watch_serial:
 	while ! telnet localhost 1235 ; do sleep 1 ; done ;
+
+install : run_deps
+	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " && \
+		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 
 internal_run_loader_test :
 	@echo Using ${LOADER_TEST_EFI} as a loader...

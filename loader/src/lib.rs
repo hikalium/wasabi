@@ -11,8 +11,10 @@ pub mod efi;
 pub mod error;
 pub mod memory_map_holder;
 pub mod panic;
+pub mod print;
 pub mod serial;
 pub mod test_runner;
+pub mod vram;
 pub mod x86;
 
 #[cfg(test)]

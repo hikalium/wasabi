@@ -1,9 +1,10 @@
 use crate::draw_char;
 use crate::BitmapImageBuffer;
 use crate::GraphicsResult;
+use core::fmt;
 
-pub struct TextArea<'a, T: BitmapImageBuffer> {
-    buf: &'a T,
+pub struct TextArea<T: BitmapImageBuffer> {
+    buf: T,
     x: i64,
     y: i64,
     w: i64,
@@ -12,8 +13,8 @@ pub struct TextArea<'a, T: BitmapImageBuffer> {
     cy: i64,
 }
 
-impl<T: BitmapImageBuffer> TextArea<'_, T> {
-    pub fn new(buf: &T, x: i64, y: i64, w: i64, h: i64) -> TextArea<T> {
+impl<T: BitmapImageBuffer> TextArea<T> {
+    pub fn new(buf: T, x: i64, y: i64, w: i64, h: i64) -> TextArea<T> {
         TextArea {
             buf,
             x,
@@ -43,7 +44,7 @@ impl<T: BitmapImageBuffer> TextArea<'_, T> {
         match c {
             '\n' => self.new_line(),
             _ => draw_char(
-                self.buf,
+                &self.buf,
                 fg,
                 bg,
                 self.x + self.cx * 8,
@@ -64,5 +65,12 @@ impl<T: BitmapImageBuffer> TextArea<'_, T> {
     }
     pub fn print_string(&mut self, s: &str) -> GraphicsResult {
         self.print_string_with_color(s, 0xFFFFFF, 0x000000)
+    }
+}
+
+impl<T: BitmapImageBuffer> fmt::Write for TextArea<T> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.print_string(s).or(Err(fmt::Error))?;
+        Ok(())
     }
 }

@@ -40,20 +40,3 @@ impl fmt::Write for SerialConsoleWriter {
         Ok(())
     }
 }
-
-#[macro_export]
-macro_rules! print {
-        ($($arg:tt)*) => ($crate::serial::_print(format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! println {
-        () => ($crate::print!("\n"));
-            ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-#[doc(hidden)]
-pub fn _print(args: fmt::Arguments) {
-    let mut writer = crate::serial::SerialConsoleWriter {};
-    fmt::write(&mut writer, args).unwrap();
-}
