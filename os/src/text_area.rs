@@ -1,6 +1,4 @@
-use crate::draw_char;
-use crate::BitmapImageBuffer;
-use crate::GraphicsResult;
+use crate::graphics::*;
 use core::fmt;
 
 pub struct TextArea<T: BitmapImageBuffer> {

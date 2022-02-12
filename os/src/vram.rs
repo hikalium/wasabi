@@ -1,6 +1,6 @@
-use crate::efi::{locate_graphic_protocol, EFISystemTable};
+use crate::efi::*;
 use crate::error::*;
-use graphics::BitmapImageBuffer;
+use crate::graphics::*;
 
 #[derive(Clone, Copy)]
 pub struct VRAMBufferInfo {

@@ -9,11 +9,13 @@ pub mod boot_info;
 pub mod debug_exit;
 pub mod efi;
 pub mod error;
+pub mod graphics;
 pub mod memory_map_holder;
 pub mod panic;
 pub mod print;
 pub mod serial;
 pub mod test_runner;
+pub mod text_area;
 pub mod vram;
 pub mod x86;
 

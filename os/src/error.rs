@@ -1,5 +1,5 @@
-use crate::efi::EFIStatus;
-use graphics::GraphicsError;
+use crate::efi::*;
+use crate::graphics::*;
 
 #[derive(Debug)]
 pub enum WasabiError {

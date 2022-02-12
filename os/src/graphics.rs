@@ -1,7 +1,3 @@
-#![no_std]
-
-pub mod text_area;
-
 pub trait BitmapImageBuffer {
     fn bytes_per_pixel(&self) -> i64;
     fn pixels_per_line(&self) -> i64;
@@ -149,12 +145,4 @@ pub fn draw_char<T: BitmapImageBuffer>(
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
 }

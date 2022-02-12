@@ -7,12 +7,5 @@ name = "font"
 version = "0.1.0"
 
 [[package]]
-name = "graphics"
-version = "0.1.0"
-
-[[package]]
 name = "os"
 version = "0.0.0"
-dependencies = [
- "graphics",
-]

@@ -1,7 +1,7 @@
+use crate::text_area::*;
 use crate::vram::VRAMBufferInfo;
 use core::cell::RefCell;
 use core::fmt;
-use graphics::text_area::TextArea;
 
 pub struct GlobalPrinter {
     text_area: RefCell<Option<TextArea<VRAMBufferInfo>>>,

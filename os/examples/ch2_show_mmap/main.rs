@@ -6,20 +6,19 @@
 #![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
-extern crate graphics;
 
 use core::arch::asm;
 use core::fmt::Write;
-use graphics::text_area::TextArea;
-use graphics::BitmapImageBuffer;
 use os::boot_info::WasabiBootInfo;
 use os::efi::*;
 use os::error::*;
+use os::graphics::*;
 use os::memory_map_holder::MemoryMapHolder;
 use os::print;
 use os::println;
 use os::serial;
 use os::simple_allocator::ALLOCATOR;
+use os::text_area::TextArea;
 use os::vram;
 
 pub fn main_with_boot_services(
