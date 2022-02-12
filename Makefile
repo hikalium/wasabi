@@ -1,5 +1,5 @@
 PROJECT_ROOT:=$(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
-OVMF=${PROJECT_ROOT}/third_party/ovmf/bios64.bin
+OVMF=${PROJECT_ROOT}/third_party/ovmf/RELEASEX64_OVMF.fd
 QEMU=qemu-system-x86_64
 DEBUG_BIN_PATH=${PROJECT_ROOT}/target/x86_64-unknown-uefi/debug/loader.efi
 PORT_MONITOR?=2222
