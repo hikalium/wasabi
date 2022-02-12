@@ -1,3 +1,4 @@
+use core::arch::asm;
 use core::fmt;
 
 pub fn write_io_port(port: u16, data: u8) {

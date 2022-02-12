@@ -1,7 +1,7 @@
-use core::panic::PanicInfo;
-
 use crate::serial;
+use core::arch::asm;
 use core::fmt::Write;
+use core::panic::PanicInfo;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {

@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(asm)]
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![test_runner(test_runner::test_runner)]

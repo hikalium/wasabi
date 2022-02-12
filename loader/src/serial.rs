@@ -1,4 +1,5 @@
 use crate::x86;
+use core::arch::asm;
 use core::convert::TryInto;
 use core::fmt;
 

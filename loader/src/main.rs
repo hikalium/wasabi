@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(asm)]
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
@@ -25,6 +24,7 @@ pub mod xorshift;
 use crate::efi::*;
 use crate::graphics::text_area::*;
 use crate::memory_map_holder::*;
+use core::arch::asm;
 use core::fmt::Write;
 
 pub struct WasabiBootInfo {
@@ -79,13 +79,6 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         if pages_needed > *free_info.num_of_pages.as_ptr() {
             core::ptr::null_mut::<u8>()
         } else {
-            /*
-            .......######################.........
-                   ^
-            ***
-                                      ***
-                   <-number_of_pages->
-            */
             *free_info.num_of_pages.as_ptr() -= pages_needed;
             if *free_info.num_of_pages.as_ptr() == 0 {
                 // Releases the free info since it is empty
@@ -94,14 +87,6 @@ unsafe impl GlobalAlloc for SimpleAllocator {
             (free_info as *const FreeInfo as *mut u8).add(*free_info.num_of_pages.as_ptr() * 4096)
         }
     }
-    /*
-        ....######.....
-        ....#####@.....
-        ....######.....
-            XXXXX
-                 X
-
-    */
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         serial::com_initialize(serial::IO_ADDR_COM2);
         let mut serial_writer = serial::SerialConsoleWriter {};
