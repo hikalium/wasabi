@@ -37,7 +37,7 @@ default: bin
 
 bin: font
 	cd font && cargo build
-	cd loader && cargo build
+	cd loader && cargo build --example ch2_show_mmap
 
 clippy: font
 	cd font && cargo clippy -- -D warnings
@@ -69,7 +69,7 @@ spellcheck :
 	@scripts/spellcheck.sh recieve receive
 
 run : run_deps
-	$(QEMU) $(QEMU_ARGS)
+	cd loader/examples && cargo run --example ch2_show_mmap
 
 pxe : run_deps
 	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
@@ -79,7 +79,6 @@ run_deps :
 	mkdir -p mnt/
 	-rm -rf mnt/*
 	mkdir -p mnt/EFI/BOOT
-	cp ${DEBUG_BIN_PATH} mnt/EFI/BOOT/BOOTX64.EFI
 
 watch_serial:
 	while ! telnet localhost 1235 ; do sleep 1 ; done ;
@@ -87,6 +86,14 @@ watch_serial:
 install : run_deps
 	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " && \
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
+
+internal_launch_qemu :
+	@echo Using ${PATH_TO_EFI} as a loader...
+	mkdir -p mnt/
+	-rm -rf mnt/*
+	mkdir -p mnt/EFI/BOOT
+	cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
+	$(QEMU) $(QEMU_ARGS)
 
 internal_run_loader_test :
 	@echo Using ${LOADER_TEST_EFI} as a loader...

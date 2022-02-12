@@ -15,7 +15,7 @@ fn main() -> std::io::Result<()> {
         line += 1;
         if row.starts_with("0x") {
             assert!(
-                !(row_index != 16),
+                row_index == 16,
                 "line {}: fonts[0x{:02X}] has {} rows but expected 16",
                 line,
                 font_index,
@@ -34,7 +34,7 @@ fn main() -> std::io::Result<()> {
             continue;
         }
         assert!(
-            !(row_index >= 16),
+            row_index < 16,
             "line {}: fonts[0x{:02X}] has extra rows",
             line,
             font_index

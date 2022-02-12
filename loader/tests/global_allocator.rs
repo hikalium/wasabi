@@ -1,12 +1,13 @@
 #![no_std]
 #![no_main]
-#![feature(asm)]
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![test_runner(test_runner::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
-use loader::*;
+use loader::efi;
+use loader::loader::*;
+use loader::test_runner;
 
 #[cfg(test)]
 #[no_mangle]

@@ -8,27 +8,30 @@
 extern crate alloc;
 extern crate graphics;
 
-pub mod boot_info;
-pub mod debug_exit;
-pub mod efi;
-pub mod error;
-pub mod loader;
-pub mod memory_map_holder;
-pub mod panic;
-pub mod print;
-pub mod serial;
-pub mod simple_allocator;
-pub mod test_runner;
-pub mod vram;
-pub mod x86;
-pub mod xorshift;
-
-use crate::efi::exit_from_efi_boot_services;
-use crate::efi::EFIHandle;
-use crate::efi::EFISystemTable;
-use crate::memory_map_holder::MemoryMapHolder;
 use core::arch::asm;
 use core::fmt::Write;
+use loader::efi::*;
+use loader::memory_map_holder::*;
+use loader::println;
+use loader::serial;
+
+#[cfg(not(test))]
+#[no_mangle]
+fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
+    let info = loader::loader::main_with_boot_services(efi_system_table).unwrap();
+    let mut memory_map = MemoryMapHolder::new();
+    exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
+
+    // Initialize serial here since we exited from EFI Boot Services
+    serial::com_initialize(serial::IO_ADDR_COM2);
+    println!("Exited from EFI Boot Services");
+
+    loader::loader::main(&info, &memory_map).unwrap();
+
+    loop {
+        unsafe { asm!("pause") }
+    }
+}
 
 #[cfg(test)]
 #[start]
@@ -69,24 +72,6 @@ fn test_runner(tests: &[&dyn Testable]) -> ! {
 #[test_case]
 fn trivial_assertion() {
     assert_eq!(1, 1);
-}
-
-#[cfg(not(test))]
-#[no_mangle]
-fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
-    let info = loader::main_with_boot_services(efi_system_table).unwrap();
-    let mut memory_map = MemoryMapHolder::new();
-    exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
-
-    // Initialize serial here since we exited from EFI Boot Services
-    serial::com_initialize(serial::IO_ADDR_COM2);
-    println!("Exited from EFI Boot Services");
-
-    loader::main(&info, &memory_map).unwrap();
-
-    loop {
-        unsafe { asm!("pause") }
-    }
 }
 
 #[cfg(test)]

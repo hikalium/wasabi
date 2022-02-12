@@ -1,11 +1,12 @@
+use crate::boot_info::WasabiBootInfo;
+use crate::efi::*;
 use crate::error::*;
+use crate::memory_map_holder::MemoryMapHolder;
+use crate::println;
+use crate::simple_allocator::ALLOCATOR;
 use crate::vram;
-use crate::MemoryMapHolder;
-use crate::TextArea;
-use crate::WasabiBootInfo;
-use crate::ALLOCATOR;
-use crate::*;
 use core::fmt::Write;
+use graphics::text_area::TextArea;
 use graphics::BitmapImageBuffer;
 
 pub fn main_with_boot_services(
@@ -60,7 +61,7 @@ pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), W
     let vram = info.vram;
     let textarea = TextArea::new(vram, 8, 16, vram.width() - 16, vram.height() - 32);
 
-    print::GLOBAL_PRINTER.set_text_area(textarea);
+    crate::print::GLOBAL_PRINTER.set_text_area(textarea);
     println!("VRAM initialized.");
     println!("Welcome to Wasabi OS!!!");
 

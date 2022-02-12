@@ -5,9 +5,11 @@
 #![test_runner(test_runner::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+pub mod boot_info;
 pub mod debug_exit;
 pub mod efi;
 pub mod error;
+pub mod loader;
 pub mod memory_map_holder;
 pub mod panic;
 pub mod print;
@@ -15,6 +17,8 @@ pub mod serial;
 pub mod test_runner;
 pub mod vram;
 pub mod x86;
+
+pub mod simple_allocator;
 
 #[cfg(test)]
 #[no_mangle]
