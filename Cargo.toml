@@ -2,5 +2,5 @@
 members = [
     "font",
     "graphics",
-    "loader",
+    "os",
 ]

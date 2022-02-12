@@ -9,7 +9,6 @@ pub mod boot_info;
 pub mod debug_exit;
 pub mod efi;
 pub mod error;
-pub mod loader;
 pub mod memory_map_holder;
 pub mod panic;
 pub mod print;

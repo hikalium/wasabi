@@ -1,7 +1,6 @@
 PROJECT_ROOT:=$(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 OVMF=${PROJECT_ROOT}/third_party/ovmf/RELEASEX64_OVMF.fd
 QEMU=qemu-system-x86_64
-DEBUG_BIN_PATH=${PROJECT_ROOT}/target/x86_64-unknown-uefi/debug/loader.efi
 PORT_MONITOR?=2222
 
 QEMU_ARGS=\
@@ -37,20 +36,20 @@ default: bin
 
 bin: font
 	cd font && cargo build
-	cd loader && cargo build --example ch2_show_mmap
+	cd os && cargo build --example ch2_show_mmap
 
 clippy: font
 	cd font && cargo clippy -- -D warnings
-	cd loader && cargo clippy -- -D warnings
+	cd os && cargo clippy -- -D warnings
 	cd font && cargo clippy --all-features --all-targets -- -D warnings
-	cd loader && cargo clippy --all-features --all-targets -- -D warnings
+	cd os && cargo clippy --all-features --all-targets -- -D warnings
 
 dump_config:
 	@echo "Host target: $(HOST_TARGET)"
 
 test: font
 	cd font && cargo test
-	cd loader && cargo test
+	cd os && cargo test
 
 commit :
 	cargo fmt
@@ -71,7 +70,7 @@ spellcheck :
 	@scripts/spellcheck.sh recieve receive
 
 run : run_deps
-	cd loader/examples && cargo run --example ch2_show_mmap
+	cd os/examples && cargo run --example ch2_show_mmap
 
 pxe : run_deps
 	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
@@ -90,15 +89,15 @@ install : run_deps
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 
 internal_launch_qemu :
-	@echo Using ${PATH_TO_EFI} as a loader...
+	@echo Using ${PATH_TO_EFI} as a os...
 	mkdir -p mnt/
 	-rm -rf mnt/*
 	mkdir -p mnt/EFI/BOOT
 	cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
 	$(QEMU) $(QEMU_ARGS)
 
-internal_run_loader_test :
-	@echo Using ${LOADER_TEST_EFI} as a loader...
+internal_run_os_test :
+	@echo Using ${LOADER_TEST_EFI} as a os...
 	mkdir -p mnt/
 	-rm -rf mnt/*
 	mkdir -p mnt/EFI/BOOT

@@ -1,5 +1,5 @@
 [package]
-name = "loader"
+name = "os"
 version = "0.0.0"
 authors = ["hikalium <hikalium@hikalium.com>"]
 edition = "2018"

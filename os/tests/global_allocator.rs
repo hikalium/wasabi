@@ -5,9 +5,8 @@
 #![test_runner(test_runner::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
-use loader::efi;
-use loader::loader::*;
-use loader::test_runner;
+use os::efi;
+use os::test_runner;
 
 #[cfg(test)]
 #[no_mangle]
