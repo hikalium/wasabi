@@ -42,6 +42,8 @@ bin: font
 clippy: font
 	cd font && cargo clippy -- -D warnings
 	cd loader && cargo clippy -- -D warnings
+	cd font && cargo clippy --all-features --all-targets -- -D warnings
+	cd loader && cargo clippy --all-features --all-targets -- -D warnings
 
 dump_config:
 	@echo "Host target: $(HOST_TARGET)"

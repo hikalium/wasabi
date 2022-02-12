@@ -11,7 +11,7 @@ use loader::test_runner;
 
 #[cfg(test)]
 #[no_mangle]
-fn efi_main(image_handle: efi::EFIHandle, efi_system_table: &efi::EFISystemTable) -> () {
+fn efi_main(image_handle: efi::EFIHandle, efi_system_table: &efi::EFISystemTable) {
     test_runner::test_prepare(image_handle, efi_system_table);
     test_main();
 }
