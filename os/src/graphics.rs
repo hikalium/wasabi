@@ -146,3 +146,11 @@ pub fn draw_char<T: BitmapImageBuffer>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test_case]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
+    }
+}
