@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
+#![feature(associated_type_defaults)]
 #![test_runner(test_runner::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 

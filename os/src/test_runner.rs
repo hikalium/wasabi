@@ -1,5 +1,6 @@
 use crate::debug_exit;
 use crate::efi;
+use crate::println;
 use crate::serial;
 use core::fmt::Write;
 
@@ -31,8 +32,26 @@ pub fn test_runner(tests: &[&dyn Testable]) -> ! {
     debug_exit::exit_qemu(debug_exit::QemuExitCode::Success)
 }
 
-pub fn test_prepare(_image_handle: efi::EFIHandle, _efi_system_table: &efi::EFISystemTable) {
+/// This function is called before the tests run and
+/// responsible to exit from EFIBootServices and setting up
+/// a global allocator for tests.
+pub fn test_prepare(image_handle: efi::EFIHandle, efi_system_table: &efi::EFISystemTable) {
+    use crate::memory_map_holder::MemoryMapHolder;
+    use crate::simple_allocator::ALLOCATOR;
+
     serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut serial_writer = serial::SerialConsoleWriter {};
-    writeln!(serial_writer, "test_prepare done.").unwrap();
+
+    let mut memory_map = MemoryMapHolder::new();
+    efi::exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
+
+    let mut total_pages = 0;
+    for e in memory_map.iter() {
+        if e.memory_type != efi::EFIMemoryType::CONVENTIONAL_MEMORY {
+            continue;
+        }
+        ALLOCATOR.set_descriptor(e);
+        total_pages += e.number_of_pages;
+        println!("{:?}", e);
+    }
+    println!("Total memory: {} MiB", total_pages * 4096 / 1024 / 1024);
 }

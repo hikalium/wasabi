@@ -42,7 +42,7 @@ impl<T: BitmapImageBuffer> TextArea<T> {
         match c {
             '\n' => self.new_line(),
             _ => draw_char(
-                &self.buf,
+                &mut self.buf,
                 fg,
                 bg,
                 self.x + self.cx * 8,

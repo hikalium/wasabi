@@ -23,21 +23,11 @@ impl BitmapImageBuffer for VRAMBufferInfo {
     fn height(&self) -> i64 {
         self.height as i64
     }
-    fn buf(&self) -> *mut u8 {
+    fn buf(&self) -> *const u8 {
         self.buf
     }
-    unsafe fn pixel_at(&self, x: i64, y: i64) -> *mut u8 {
-        self.buf()
-            .add(((y * self.pixels_per_line() + x) * self.bytes_per_pixel()) as usize)
-    }
-    fn flush(&self) {
-        // Do nothing
-    }
-    fn is_in_x_range(&self, px: i64) -> bool {
-        0 <= px && px < self.width as i64
-    }
-    fn is_in_y_range(&self, py: i64) -> bool {
-        0 <= py && py < self.height as i64
+    fn buf_mut(&mut self) -> *mut u8 {
+        self.buf
     }
 }
 
