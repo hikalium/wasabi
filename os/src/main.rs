@@ -112,7 +112,9 @@ fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
 #[start]
 pub extern "win64" fn _start() -> ! {
     test_main();
-    loop {}
+    loop {
+        unsafe { core::arch::asm!("pause") }
+    }
 }
 
 pub trait Testable {
@@ -145,14 +147,16 @@ fn test_runner(tests: &[&dyn Testable]) -> ! {
     debug_exit::exit_qemu(debug_exit::QemuExitCode::Success)
 }
 
+/*
 #[test_case]
 fn trivial_assertion() {
     assert_eq!(1, 1);
 }
+*/
 
 #[cfg(test)]
 #[no_mangle]
-fn efi_main(image_handle: os::efi::EFIHandle, efi_system_table: &os::efi::EFISystemTable) -> () {
+fn efi_main(image_handle: os::efi::EFIHandle, efi_system_table: &os::efi::EFISystemTable) {
     os::test_runner::test_prepare(image_handle, efi_system_table);
     test_main();
 }

@@ -36,7 +36,7 @@ default: bin
 
 bin: font
 	cd font && cargo build
-	cd os && cargo build --example ch2_show_mmap
+	cd os && cargo build
 
 clippy: font
 	cd font && cargo clippy -- -D warnings
@@ -71,6 +71,9 @@ spellcheck :
 	@scripts/spellcheck.sh recieve receive
 
 run : run_deps
+	cd os/examples && cargo run
+
+run_example : run_deps
 	cd os/examples && cargo run --example ch2_show_mmap
 
 pxe : run_deps

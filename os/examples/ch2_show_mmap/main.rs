@@ -27,7 +27,7 @@ pub fn main_with_boot_services(
         protocol: efi_system_table.con_out,
     };
     (efi_system_table.con_out.clear_screen)(efi_system_table.con_out).into_result()?;
-    writeln!(efi_writer, "Welcome to WasabiOS!!!! ").unwrap();
+    writeln!(efi_writer, "Welcome to Wasabi OS! ({})", file!()).unwrap();
     writeln!(
         efi_writer,
         "main_with_boot_services started. efi_system_table = {:p}",
