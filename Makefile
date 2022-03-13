@@ -48,9 +48,9 @@ dump_config:
 	@echo "Host target: $(HOST_TARGET)"
 
 test: font
+	cd os && cargo test -vvv
 	cd os && cargo test --examples
 	cd font && cargo test
-	cd os && cargo test
 
 commit :
 	cargo fmt

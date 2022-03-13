@@ -2,7 +2,7 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
-#![test_runner(crate::test_runner)]
+#![test_runner(os::test_runner::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
@@ -15,7 +15,6 @@ use os::graphics::*;
 use os::memory_map_holder::MemoryMapHolder;
 use os::print;
 use os::println;
-use os::serial;
 use os::simple_allocator::ALLOCATOR;
 use os::text_area::TextArea;
 use os::vram;
@@ -93,6 +92,7 @@ pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), W
 #[cfg(not(test))]
 #[no_mangle]
 fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
+    use os::serial;
     let info = main_with_boot_services(efi_system_table).unwrap();
     let mut memory_map = MemoryMapHolder::new();
     exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
@@ -109,54 +109,7 @@ fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {
 }
 
 #[cfg(test)]
-#[start]
-pub extern "win64" fn _start() -> ! {
-    test_main();
-    loop {
-        unsafe { core::arch::asm!("pause") }
-    }
-}
-
-pub trait Testable {
-    fn run(&self);
-}
-
-impl<T> Testable for T
-where
-    T: Fn(),
-{
-    fn run(&self) {
-        serial::com_initialize(serial::IO_ADDR_COM2);
-        let mut writer = serial::SerialConsoleWriter {};
-        write!(writer, "{}...\t", core::any::type_name::<T>()).unwrap();
-        self();
-        writeln!(writer, "[PASS]").unwrap();
-    }
-}
-
-#[cfg(test)]
-fn test_runner(tests: &[&dyn Testable]) -> ! {
-    use os::debug_exit;
-    serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut writer = serial::SerialConsoleWriter {};
-    writeln!(writer, "Running {} tests...", tests.len()).unwrap();
-    for test in tests {
-        test.run();
-    }
-    write!(writer, "Done!").unwrap();
-    debug_exit::exit_qemu(debug_exit::QemuExitCode::Success)
-}
-
-/*
-#[test_case]
-fn trivial_assertion() {
-    assert_eq!(1, 1);
-}
-*/
-
-#[cfg(test)]
 #[no_mangle]
 fn efi_main(image_handle: os::efi::EFIHandle, efi_system_table: &os::efi::EFISystemTable) {
-    os::test_runner::test_prepare(image_handle, efi_system_table);
-    test_main();
+    os::test_runner::run_tests(image_handle, efi_system_table, &test_main);
 }

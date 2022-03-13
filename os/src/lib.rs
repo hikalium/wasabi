@@ -3,7 +3,7 @@
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![feature(associated_type_defaults)]
-#![test_runner(test_runner::test_runner)]
+#![test_runner(crate::test_runner::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 pub mod boot_info;
@@ -24,6 +24,5 @@ pub mod x86;
 #[cfg(test)]
 #[no_mangle]
 fn efi_main(image_handle: efi::EFIHandle, efi_system_table: &efi::EFISystemTable) {
-    test_runner::test_prepare(image_handle, efi_system_table);
-    test_main();
+    test_runner::run_tests(image_handle, efi_system_table, &test_main);
 }

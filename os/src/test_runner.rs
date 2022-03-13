@@ -35,7 +35,11 @@ pub fn test_runner(tests: &[&dyn Testable]) -> ! {
 /// This function is called before the tests run and
 /// responsible to exit from EFIBootServices and setting up
 /// a global allocator for tests.
-pub fn test_prepare(image_handle: efi::EFIHandle, efi_system_table: &efi::EFISystemTable) {
+pub fn run_tests(
+    image_handle: efi::EFIHandle,
+    efi_system_table: &efi::EFISystemTable,
+    test_main: &dyn Fn(),
+) {
     use crate::memory_map_holder::MemoryMapHolder;
     use crate::simple_allocator::ALLOCATOR;
 
@@ -54,4 +58,5 @@ pub fn test_prepare(image_handle: efi::EFIHandle, efi_system_table: &efi::EFISys
         println!("{:?}", e);
     }
     println!("Total memory: {} MiB", total_pages * 4096 / 1024 / 1024);
+    test_main();
 }
