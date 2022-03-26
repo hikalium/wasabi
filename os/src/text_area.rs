@@ -13,7 +13,7 @@ pub struct TextArea<T: BitmapImageBuffer> {
 
 impl<T: BitmapImageBuffer> TextArea<T> {
     pub fn new(buf: T, x: i64, y: i64, w: i64, h: i64) -> TextArea<T> {
-        TextArea {
+        let mut text_area = TextArea {
             buf,
             x,
             y,
@@ -21,7 +21,12 @@ impl<T: BitmapImageBuffer> TextArea<T> {
             h,
             cx: 0,
             cy: 0,
-        }
+        };
+        text_area.clear_screen().unwrap();
+        text_area
+    }
+    fn clear_screen(&mut self) -> GraphicsResult {
+        draw_rect(&mut self.buf, 0x000000, self.x, self.y, self.w, self.h)
     }
     fn new_line(&mut self) -> GraphicsResult {
         self.cx = 0;
