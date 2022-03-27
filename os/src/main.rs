@@ -14,9 +14,6 @@ pub fn main() -> Result<(), WasabiError> {
     Ok(())
 }
 
-#[test_case]
-fn malloc_iterate_free_and_alloc() {}
-
 #[cfg(not(test))]
 #[no_mangle]
 fn efi_main(image_handle: os::efi::EFIHandle, efi_system_table: &mut os::efi::EFISystemTable) -> ! {

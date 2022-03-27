@@ -25,10 +25,11 @@ unsafe impl GlobalAlloc for SimpleAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         serial::com_initialize(serial::IO_ADDR_COM2);
         let mut serial_writer = serial::SerialConsoleWriter {};
-        writeln!(serial_writer, "alloc: {:?}", layout).unwrap();
+        //writeln!(serial_writer, "alloc: {:?}", layout).unwrap();
         let free_info = (*self.free_info.as_ptr()).expect("free_info is None");
         let pages_needed = (layout.size() + 4095) / 4096;
         if pages_needed > *free_info.num_of_pages.as_ptr() {
+            writeln!(serial_writer, "alloc: {:?}: No more memory", layout).unwrap();
             core::ptr::null_mut::<u8>()
         } else {
             *free_info.num_of_pages.as_ptr() -= pages_needed;
@@ -41,8 +42,7 @@ unsafe impl GlobalAlloc for SimpleAllocator {
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         serial::com_initialize(serial::IO_ADDR_COM2);
-        let mut serial_writer = serial::SerialConsoleWriter {};
-        writeln!(serial_writer, "dealloc: {:?} ptr {:?}", layout, ptr).unwrap();
+        //writeln!(serial_writer, "dealloc: {:?} ptr {:?}", layout, ptr).unwrap();
         let pages_being_freed = (layout.size() + 4095) / 4096;
         let info = &mut *(ptr as *mut FreeInfo);
         *info.next_free_info.as_ptr() = *self.free_info.as_ptr();
@@ -85,4 +85,14 @@ impl SimpleAllocator {
 #[alloc_error_handler]
 fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)
+}
+
+#[test_case]
+fn malloc_iterate_free_and_alloc() {
+    use alloc::vec::Vec;
+    for i in 0..1_000_000 {
+        let mut vec = Vec::new();
+        vec.resize(i, 10);
+        // vec will be deallocatad at the end of this scope
+    }
 }
