@@ -36,15 +36,11 @@ pub fn test_runner(tests: &[&dyn Testable]) -> ! {
 /// a global allocator for tests.
 pub fn run_tests(
     image_handle: efi::EFIHandle,
-    efi_system_table: &efi::EFISystemTable,
+    efi_system_table: &mut efi::EFISystemTable,
     test_main: &dyn Fn(),
 ) {
-    use crate::memory_map_holder::MemoryMapHolder;
-
-    serial::com_initialize(serial::IO_ADDR_COM2);
-
-    let mut memory_map = MemoryMapHolder::new();
-    efi::exit_from_efi_boot_services(image_handle, efi_system_table, &mut memory_map);
-    crate::allocator::ALLOCATOR.init_with_mmap(&memory_map);
+    use crate::init::*;
+    init_basic_runtime(image_handle, efi_system_table);
+    init_global_allocator();
     test_main();
 }

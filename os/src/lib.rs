@@ -11,6 +11,7 @@ pub mod debug_exit;
 pub mod efi;
 pub mod error;
 pub mod graphics;
+pub mod init;
 pub mod memory_map_holder;
 pub mod panic;
 pub mod print;
@@ -25,6 +26,15 @@ pub mod allocator;
 
 #[cfg(test)]
 #[no_mangle]
-fn efi_main(image_handle: efi::EFIHandle, efi_system_table: &efi::EFISystemTable) {
+fn efi_main(image_handle: efi::EFIHandle, efi_system_table: &mut efi::EFISystemTable) {
     test_runner::run_tests(image_handle, efi_system_table, &test_main);
 }
+
+// Structs
+pub use boot_info::BootInfo;
+pub use memory_map_holder::MemoryMapHolder;
+pub use text_area::TextArea;
+pub use vram::VRAMBufferInfo;
+
+// Trait impls
+use crate::graphics::BitmapImageBuffer;

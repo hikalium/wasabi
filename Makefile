@@ -10,7 +10,7 @@ QEMU_ARGS=\
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=usbnet0 -device usb-net,netdev=usbnet0 \
 		-object filter-dump,id=f1,netdev=usbnet0,file=dump_usb_nic.dat \
-		-m 2G \
+		-m 256M \
 		-drive format=raw,file=fat:rw:mnt \
 		-chardev file,id=char_com1,mux=on,path=com1.log \
 		-chardev stdio,id=char_com2,mux=on,logfile=com2.log \

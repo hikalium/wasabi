@@ -281,11 +281,11 @@ pub fn locate_graphic_protocol<'a>(
 
 pub fn exit_from_efi_boot_services(
     image_handle: EFIHandle,
-    efi_system_table: &EFISystemTable,
+    efi_system_table: &mut EFISystemTable,
     memory_map: &mut memory_map_holder::MemoryMapHolder,
 ) {
     // Get a memory map and exit boot services
-    let status = memory_map_holder::get_memory_map(efi_system_table, memory_map);
+    let status = memory_map_holder::get_memory_map(&efi_system_table, memory_map);
     assert_eq!(status, EFIStatus::SUCCESS);
     let status =
         (efi_system_table.boot_services.exit_boot_services)(image_handle, memory_map.map_key);
