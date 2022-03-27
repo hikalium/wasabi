@@ -1,6 +1,9 @@
 extern crate alloc;
 
 use crate::efi::EFIMemoryDescriptor;
+use crate::efi::EFIMemoryType;
+use crate::memory_map_holder::MemoryMapHolder;
+use crate::println;
 use crate::serial;
 use alloc::alloc::GlobalAlloc;
 use alloc::alloc::Layout;
@@ -15,11 +18,6 @@ pub struct SimpleAllocator {
 pub static ALLOCATOR: SimpleAllocator = SimpleAllocator {
     free_info: Cell::new(None),
 };
-
-/*
-phys: ....1.........23....456...
-virt: .......123456.............
-*/
 
 unsafe impl Sync for SimpleAllocator {}
 
@@ -57,17 +55,24 @@ struct FreeInfo {
     next_free_info: Cell<Option<&'static FreeInfo>>,
     num_of_pages: Cell<usize>,
 }
-// Assume that FreeInfo is smaller than 4KiB
-
-/*
-............#############....##...
-            ^                ^
-            |<---------------|
-root------------------------>|
-*/
 
 impl SimpleAllocator {
-    pub fn set_descriptor(&self, desc: &EFIMemoryDescriptor) {
+    pub fn init_with_mmap(&self, memory_map: &MemoryMapHolder) {
+        let mut total_pages = 0;
+        for e in memory_map.iter() {
+            if e.memory_type != EFIMemoryType::CONVENTIONAL_MEMORY {
+                continue;
+            }
+            ALLOCATOR.set_descriptor(e);
+            total_pages += e.number_of_pages;
+            println!("{:?}", e);
+        }
+        println!(
+            "Allocator initialized. Total memory: {} MiB",
+            total_pages * 4096 / 1024 / 1024
+        );
+    }
+    fn set_descriptor(&self, desc: &EFIMemoryDescriptor) {
         unsafe {
             let info = &mut *(desc.physical_start as *mut FreeInfo);
             *info.next_free_info.as_ptr() = None;

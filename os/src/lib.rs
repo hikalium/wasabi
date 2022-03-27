@@ -15,11 +15,13 @@ pub mod memory_map_holder;
 pub mod panic;
 pub mod print;
 pub mod serial;
-pub mod simple_allocator;
 pub mod test_runner;
 pub mod text_area;
 pub mod vram;
 pub mod x86;
+
+#[path = "simple_allocator.rs"]
+pub mod allocator;
 
 #[cfg(test)]
 #[no_mangle]

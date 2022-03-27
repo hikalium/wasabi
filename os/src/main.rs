@@ -15,7 +15,6 @@ use os::graphics::*;
 use os::memory_map_holder::MemoryMapHolder;
 use os::print;
 use os::println;
-use os::simple_allocator::ALLOCATOR;
 use os::text_area::TextArea;
 use os::vram;
 
@@ -74,18 +73,9 @@ pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), W
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
 
     println!("VRAM initialized.");
-    println!("Welcome to Wasabi OS!!!");
+    println!("Booting Wasabi OS!!!");
 
-    let mut total_pages = 0;
-    for e in memory_map.iter() {
-        if e.memory_type != EFIMemoryType::CONVENTIONAL_MEMORY {
-            continue;
-        }
-        ALLOCATOR.set_descriptor(e);
-        total_pages += e.number_of_pages;
-        println!("{:?}", e);
-    }
-    println!("Total memory: {} MiB", total_pages * 4096 / 1024 / 1024);
+    os::allocator::ALLOCATOR.init_with_mmap(memory_map);
 
     Ok(())
 }
