@@ -78,6 +78,11 @@ pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), W
     Ok(())
 }
 
+#[test_case]
+fn trivial_assertion() {
+    assert_eq!(1, 1);
+}
+
 #[cfg(not(test))]
 #[no_mangle]
 fn efi_main(image_handle: EFIHandle, efi_system_table: &EFISystemTable) -> ! {

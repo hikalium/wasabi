@@ -41,16 +41,19 @@ bin: font
 clippy: font
 	cd font && cargo clippy -- -D warnings
 	cd os && cargo clippy -- -D warnings
-	cd font && cargo clippy --all-features --all-targets -- -D warnings
-	cd os && cargo clippy --all-features --all-targets -- -D warnings
+	# Following ones will run clippy on examples as well, but disabled for now
+	# cd font && cargo clippy --all-features --all-targets -- -D warnings
+	# cd os && cargo clippy --all-features --all-targets -- -D warnings
 
 dump_config:
 	@echo "Host target: $(HOST_TARGET)"
 
 test: font
-	cd os && cargo test -vvv
-	cd os && cargo test --examples
-	cd font && cargo test
+	cd os && cargo test --bin os
+	# For now, only OS tests are run to speed up the development
+	# cd os && cargo test -vvv
+	# cd os && cargo test --examples
+	# cd font && cargo test
 
 commit :
 	cargo fmt
