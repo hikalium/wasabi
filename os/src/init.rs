@@ -8,7 +8,7 @@ pub fn init_basic_runtime(
     (efi_system_table.con_out.clear_screen)(efi_system_table.con_out)
         .into_result()
         .unwrap();
-    let vram = vram::init_vram(&efi_system_table).unwrap();
+    let vram = vram::init_vram(efi_system_table).unwrap();
 
     // Initialize serial here since we exited from EFI Boot Services
     serial::com_initialize(serial::IO_ADDR_COM2);
