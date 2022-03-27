@@ -69,10 +69,8 @@ pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), W
 
     let vram = info.vram;
     let textarea = TextArea::new(vram, 8, 16, vram.width() - 16, vram.height() - 32);
-
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
 
-    println!("VRAM initialized.");
     println!("Booting Wasabi OS!!!");
 
     os::allocator::ALLOCATOR.init_with_mmap(memory_map);
