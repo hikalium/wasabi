@@ -1,0 +1,73 @@
+GS =0030 0000000000000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+LDT=0000 0000000000000000 0000ffff 00008200 DPL=0 LDT
+TR =0000 0000000000000000 0000ffff 00008b00 DPL=0 TSS64-busy
+GDT=     000000001f9de000 00000047
+IDT=     000000001f582018 00000fff
+CR0=80010033 CR2=0000000000000000 CR3=000000001fc01000 CR4=00000668
+DR0=0000000000000000 DR1=0000000000000000 DR2=0000000000000000 DR3=0000000000000000
+DR6=00000000ffff0ff0 DR7=0000000000000400
+CCS=0000000000000000 CCD=000000001fe99558 CCO=EFLAGS
+EFER=0000000000000d00
+init_graphical_terminal()
+GlobalPrinter: TextArea is set. Printing to VRAM.
+init_global_allocator()
+Using mmap at 0x000000001e4c2090
+Loader Info:
+EFIMemoryDescriptor { phys: [0x000000001E4A1000-0x000000001E4CD000), size: (      44 pages), attr: 0xF, type: LOADER_CODE }
+Available memory:
+EFIMemoryDescriptor { phys: [0x0000000000001000-0x00000000000A0000), size: (     159 pages), attr: 0xF, type: CONVENTIONAL_MEMORY }
+Add free at 0x0000000000001000
+first @ 1E4C2000
+fh before None
+Add free Header { next_header: None, size: 651264, is_allocated: false }
+fh after None
+EFIMemoryDescriptor { phys: [0x0000000000100000-0x0000000000800000), size: (    1792 pages), attr: 0xF, type: CONVENTIONAL_MEMORY }
+Add free at 0x0000000000100000
+first @ 1E4C2000
+fh before Some(Header { next_header: None, size: 651264, is_allocated: false })
+Add free Header { next_header: Some(Header { next_header: None, size: 651264, is_allocated: false }), size: 7340032, is_allocated: false }
+fh after None
+EFIMemoryDescriptor { phys: [0x0000000000808000-0x000000000080B000), size: (       3 pages), attr: 0xF, type: CONVENTIONAL_MEMORY }
+Add free at 0x0000000000808000
+first @ 1E4C2000
+fh before Some(Header { next_header: Some(Header { next_header: None, size: 651264, is_allocated: false }), size: 7340032, is_allocated: false })
+Add free Header { next_header: Some(Header { next_header: Some(Header { next_header: None, size: 651264, is_allocated: false }), size: 7340032, is_allocated: false }), size: 12288, is_allocated: false }
+fh after None
+EFIMemoryDescriptor { phys: [0x000000000080C000-0x0000000000810000), size: (       4 pages), attr: 0xF, type: CONVENTIONAL_MEMORY }
+Add free at 0x000000000080c000
+first @ 1E4C2000
+fh before Some(Header { next_header: Some(Header { next_header: Some(Header { next_header: None, size: 651264, is_allocated: false }), size: 7340032, is_allocated: false }), size: 12288, is_allocated: false })
+Add free Header { next_header: Some(Header { next_header: Some(Header { next_header: Some(Header { next_header: None, size: 651264, is_allocated: false }), size: 7340032, is_allocated: false }), size: 12288, is_allocated: false }), size: 16384, is_allocated: false }
+fh after None
+EFIMemoryDescriptor { phys: [0x0000000001500000-0x000000001BF36000), size: (  109110 pages), attr: 0xF, type: CONVENTIONAL_MEMORY }
+Add free at 0x0000000001500000
+check_exception old: 0xffffffff new 0xe
+   133: v=0e e=0000 i=0 cpl=0 IP=0038:000000001e4aada8 pc=000000001e4aada8 SP=0030:000000001feb8c70 CR2=ffffffffffffffff
+RAX=0000000000000001 RBX=000000001e5f02c8 RCX=0000000000000000 RDX=ffffffffffffffff
+RSI=000000001e5e8018 RDI=000000001e5e8018 RBP=0000000000000000 RSP=000000001feb8c70
+R8 =0000000000ffffff R9 =0000000000000000 R10=00000000000002b0 R11=0000000000000001
+R12=0000000000000000 R13=0000000000000000 R14=000000001e5f0218 R15=0000000000000004
+RIP=000000001e4aada8 RFL=00000046 [---Z-P-] CPL=0 II=0 A20=1 SMM=0 HLT=0
+ES =0030 0000000000000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+CS =0038 0000000000000000 ffffffff 00af9a00 DPL=0 CS64 [-R-]
+SS =0030 0000000000000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+DS =0030 0000000000000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+FS =0030 0000000000000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+GS =0030 0000000000000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+LDT=0000 0000000000000000 0000ffff 00008200 DPL=0 LDT
+TR =0000 0000000000000000 0000ffff 00008b00 DPL=0 TSS64-busy
+GDT=     000000001f9de000 00000047
+IDT=     000000001f582018 00000fff
+CR0=80010033 CR2=ffffffffffffffff CR3=000000001fc01000 CR4=00000668
+DR0=0000000000000000 DR1=0000000000000000 DR2=0000000000000000 DR3=0000000000000000
+DR6=00000000ffff0ff0 DR7=0000000000000400
+CCS=0000000000000038 CCD=000000001feb8c70 CCO=CLR
+EFER=0000000000000d00
+qemu-system-x86_64: Slirp: Failed to send packet, ret: -1
+qemu-system-x86_64: Slirp: Failed to send packet, ret: -1
+qemu-system-x86_64: Slirp: Failed to send packet, ret: -1
+qemu-system-x86_64: Slirp: Failed to send packet, ret: -1
+qemu-system-x86_64: Slirp: Failed to send packet, ret: -1
+qemu-system-x86_64: Slirp: Failed to send packet, ret: -1
+qemu-system-x86_64: Slirp: Failed to send packet, ret: -1
+qemu-system-x86_64: Slirp: Failed to send packet, ret: -1
