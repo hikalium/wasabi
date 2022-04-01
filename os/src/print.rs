@@ -28,6 +28,10 @@ pub static GLOBAL_PRINTER: GlobalPrinter = GlobalPrinter {
 macro_rules! print {
         ($($arg:tt)*) => ($crate::print::_print(format_args!($($arg)*)));
 }
+#[macro_export]
+macro_rules! print_nothing {
+        ($($arg:tt)*) => ($crate::print::_print_nothing(format_args!($($arg)*)));
+}
 
 #[macro_export]
 macro_rules! println {
@@ -44,3 +48,5 @@ pub fn _print(args: fmt::Arguments) {
         None => {}
     }
 }
+#[doc(hidden)]
+pub fn _print_nothing(_args: fmt::Arguments) {}

@@ -10,14 +10,15 @@ QEMU_ARGS=\
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=usbnet0 -device usb-net,netdev=usbnet0 \
 		-object filter-dump,id=f1,netdev=usbnet0,file=dump_usb_nic.dat \
-		-m 256M \
+		-m 1024M \
 		-drive format=raw,file=fat:rw:mnt \
 		-chardev file,id=char_com1,mux=on,path=com1.log \
 		-chardev stdio,id=char_com2,mux=on,logfile=com2.log \
 		-serial chardev:char_com1 \
 		-serial chardev:char_com2 \
 		-rtc base=localtime \
-		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait
+		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
+		${MORE_QEMU_FLAGS}
 
 HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
 
@@ -50,6 +51,7 @@ dump_config:
 
 test: font
 	cd os && cargo test --bin os
+	cd os && cargo test --lib
 	# For now, only OS tests are run to speed up the development
 	# cd os && cargo test -vvv
 	# cd os && cargo test --examples
@@ -90,6 +92,9 @@ run_deps :
 
 watch_serial:
 	while ! telnet localhost 1235 ; do sleep 1 ; done ;
+
+watch_qemu_monitor:
+	while ! telnet localhost ${PORT_MONITOR} ; do sleep 1 ; done ;
 
 install : run_deps
 	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " && \

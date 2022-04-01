@@ -21,7 +21,8 @@ pub mod text_area;
 pub mod vram;
 pub mod x86;
 
-#[path = "simple_allocator.rs"]
+// #[path = "simple_allocator.rs"]
+#[path = "first_fit_allocator.rs"]
 pub mod allocator;
 
 #[cfg(test)]
