@@ -32,11 +32,11 @@ pub fn test_runner(tests: &[&dyn Testable]) -> ! {
 }
 
 /// This function is called before the tests run and
-/// responsible to exit from EFIBootServices and setting up
+/// responsible to exit from EfiBootServices and setting up
 /// a global allocator for tests.
 pub fn run_tests(
-    image_handle: efi::EFIHandle,
-    efi_system_table: &mut efi::EFISystemTable,
+    image_handle: efi::EfiHandle,
+    efi_system_table: &mut efi::EfiSystemTable,
     test_main: &dyn Fn(),
 ) {
     use crate::init::*;

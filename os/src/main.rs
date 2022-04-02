@@ -16,7 +16,7 @@ pub fn main() -> Result<(), WasabiError> {
 
 #[cfg(not(test))]
 #[no_mangle]
-fn efi_main(image_handle: os::efi::EFIHandle, efi_system_table: &mut os::efi::EFISystemTable) -> ! {
+fn efi_main(image_handle: os::efi::EfiHandle, efi_system_table: &mut os::efi::EfiSystemTable) -> ! {
     use os::init::*;
     init_basic_runtime(image_handle, efi_system_table);
     init_graphical_terminal();
@@ -29,6 +29,6 @@ fn efi_main(image_handle: os::efi::EFIHandle, efi_system_table: &mut os::efi::EF
 
 #[cfg(test)]
 #[no_mangle]
-fn efi_main(image_handle: os::efi::EFIHandle, efi_system_table: &mut os::efi::EFISystemTable) {
+fn efi_main(image_handle: os::efi::EfiHandle, efi_system_table: &mut os::efi::EfiSystemTable) {
     os::test_runner::run_tests(image_handle, efi_system_table, &test_main);
 }

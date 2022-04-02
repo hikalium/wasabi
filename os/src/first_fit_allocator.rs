@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use crate::efi::EFIMemoryDescriptor;
-use crate::efi::EFIMemoryType;
+use crate::efi::EfiMemoryDescriptor;
+use crate::efi::EfiMemoryType;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::println;
 use alloc::alloc::GlobalAlloc;
@@ -134,8 +134,8 @@ impl FirstFitAllocator {
         println!("Using mmap at {:#p}", memory_map);
         println!("Loader Info:");
         for e in memory_map.iter() {
-            if e.memory_type != EFIMemoryType::LOADER_CODE
-                && e.memory_type != EFIMemoryType::LOADER_DATA
+            if e.memory_type != EfiMemoryType::LOADER_CODE
+                && e.memory_type != EfiMemoryType::LOADER_DATA
             {
                 continue;
             }
@@ -144,7 +144,7 @@ impl FirstFitAllocator {
         println!("Available memory:");
         let mut total_pages = 0;
         for e in memory_map.iter() {
-            if e.memory_type != EFIMemoryType::CONVENTIONAL_MEMORY {
+            if e.memory_type != EfiMemoryType::CONVENTIONAL_MEMORY {
                 continue;
             }
             println!("{:?}", e);
@@ -156,9 +156,8 @@ impl FirstFitAllocator {
             total_pages * 4096 / 1024 / 1024
         );
     }
-    fn add_free_from_descriptor(&self, desc: &EFIMemoryDescriptor) {
+    fn add_free_from_descriptor(&self, desc: &EfiMemoryDescriptor) {
         let mut header = unsafe { Header::new_from_addr(desc.physical_start as usize) };
-        println!("Add free at {:#p}", header);
         header.next_header = None;
         header.is_allocated = false;
         header.size = (desc.number_of_pages as usize) * 4096;

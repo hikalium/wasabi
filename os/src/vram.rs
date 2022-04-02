@@ -31,7 +31,7 @@ impl BitmapImageBuffer for VRAMBufferInfo {
     }
 }
 
-pub fn init_vram(efi_system_table: &EFISystemTable) -> Result<VRAMBufferInfo, WasabiError> {
+pub fn init_vram(efi_system_table: &EfiSystemTable) -> Result<VRAMBufferInfo, WasabiError> {
     let gp = locate_graphic_protocol(efi_system_table)?;
     Ok(VRAMBufferInfo {
         buf: gp.mode.frame_buffer_base as *mut u8,

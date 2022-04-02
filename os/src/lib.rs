@@ -27,7 +27,7 @@ pub mod allocator;
 
 #[cfg(test)]
 #[no_mangle]
-fn efi_main(image_handle: efi::EFIHandle, efi_system_table: &mut efi::EFISystemTable) {
+fn efi_main(image_handle: efi::EfiHandle, efi_system_table: &mut efi::EfiSystemTable) {
     test_runner::run_tests(image_handle, efi_system_table, &test_main);
 }
 

@@ -5,7 +5,7 @@ use crate::graphics::*;
 pub enum WasabiError {
     Failed(),
     GraphicsError(GraphicsError),
-    EFIError(EFIStatus),
+    EfiError(EfiStatus),
 }
 
 impl From<GraphicsError> for WasabiError {
@@ -14,8 +14,8 @@ impl From<GraphicsError> for WasabiError {
     }
 }
 
-impl From<EFIStatus> for WasabiError {
-    fn from(e: EFIStatus) -> Self {
-        WasabiError::EFIError(e)
+impl From<EfiStatus> for WasabiError {
+    fn from(e: EfiStatus) -> Self {
+        WasabiError::EfiError(e)
     }
 }
