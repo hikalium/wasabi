@@ -1,3 +1,4 @@
 {
-  "rust-analyzer.completion.autoimport.enable": false
+  "rust-analyzer.completion.autoimport.enable": false,
+  "rust-analyzer.checkOnSave.command": "clippy"
 }

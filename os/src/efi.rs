@@ -37,10 +37,7 @@ impl fmt::Display for CStrPtr16 {
                     break;
                 }
                 let bytes = c.to_be_bytes();
-                let result = write!(f, "{}", bytes[1] as char);
-                if result.is_err() {
-                    return result;
-                }
+                write!(f, "{}", bytes[1] as char)?;
                 index += 1;
             }
         }
@@ -475,8 +472,8 @@ pub fn locate_mp_services_protocol<'a>(
     Ok(unsafe { &*protocol })
 }
 
-pub fn alloc_pages<'a>(
-    efi_system_table: &'a EfiSystemTable,
+pub fn alloc_pages(
+    efi_system_table: &EfiSystemTable,
     number_of_pages: usize,
 ) -> Result<*mut u8, WasabiError> {
     let mut mem: *mut u8 = null_mut::<u8>();

@@ -1,5 +1,6 @@
 use crate::*;
 use core::mem::size_of;
+use core::ptr::null_mut;
 use error::*;
 
 pub fn load_all_root_files(
@@ -7,7 +8,7 @@ pub fn load_all_root_files(
     efi_system_table: &mut efi::EfiSystemTable,
 ) -> Result<(), WasabiError> {
     let mut loaded_image_protocol: *mut efi::EfiLoadedImageProtocol =
-        0 as *mut efi::EfiLoadedImageProtocol;
+        null_mut::<efi::EfiLoadedImageProtocol>();
     unsafe {
         let status = (efi_system_table
             .boot_services
@@ -26,7 +27,7 @@ pub fn load_all_root_files(
     }
 
     let mut simple_file_system_protocol: *mut efi::EfiSimpleFileSystemProtocol =
-        0 as *mut efi::EfiSimpleFileSystemProtocol;
+        null_mut::<efi::EfiSimpleFileSystemProtocol>();
     unsafe {
         let status = (efi_system_table
             .boot_services
@@ -43,7 +44,7 @@ pub fn load_all_root_files(
         );
     }
 
-    let mut root_file: *mut efi::EfiFileProtocol = 0 as *mut efi::EfiFileProtocol;
+    let mut root_file: *mut efi::EfiFileProtocol = null_mut::<efi::EfiFileProtocol>();
     unsafe {
         let status = ((*simple_file_system_protocol).open_volume)(
             simple_file_system_protocol,
