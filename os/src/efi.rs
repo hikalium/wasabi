@@ -2,6 +2,51 @@ use crate::error::*;
 use crate::memory_map_holder;
 use core::fmt;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct CStrPtr16 {
+    ptr: *const u16,
+}
+impl CStrPtr16 {
+    pub fn from_ptr(p: *const u16) -> CStrPtr16 {
+        CStrPtr16 { ptr: p }
+    }
+}
+
+pub fn strlen_char16(strp: CStrPtr16) -> usize {
+    let mut len: usize = 0;
+    unsafe {
+        loop {
+            if *strp.ptr.add(len) == 0 {
+                break;
+            }
+            len += 1;
+        }
+    }
+    len
+}
+
+impl fmt::Display for CStrPtr16 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        unsafe {
+            let mut index = 0;
+            loop {
+                let c = *self.ptr.offset(index);
+                if c == 0 {
+                    break;
+                }
+                let bytes = c.to_be_bytes();
+                let result = write!(f, "{}", bytes[1] as char);
+                if result.is_err() {
+                    return result;
+                }
+                index += 1;
+            }
+        }
+        Result::Ok(())
+    }
+}
+
 #[repr(C)]
 pub struct EFI_GUID {
     data0: u32,
@@ -22,6 +67,24 @@ pub const EFI_MP_SERVICES_PROTOCOL_GUID: EFI_GUID = EFI_GUID {
     data1: 0xa76e,
     data2: 0x4f46,
     data3: [0xad, 0x29, 0x12, 0xf4, 0x53, 0x1b, 0x3d, 0x08],
+};
+pub const EFI_LOADED_IMAGE_PROTOCOL_GUID: EFI_GUID = EFI_GUID {
+    data0: 0x5B1B31A1,
+    data1: 0x9562,
+    data2: 0x11d2,
+    data3: [0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
+};
+pub const EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID: EFI_GUID = EFI_GUID {
+    data0: 0x0964e5b22,
+    data1: 0x6459,
+    data2: 0x11d2,
+    data3: [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
+};
+pub const EFI_FILE_SYSTEM_INFO_GUID: EFI_GUID = EFI_GUID {
+    data0: 0x09576e93,
+    data1: 0x6d3f,
+    data2: 0x11d2,
+    data3: [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
 };
 
 pub type EFIVoid = u8;
@@ -76,6 +139,14 @@ pub struct EFISimpleTextOutputProtocol {
 }
 
 #[repr(C)]
+pub struct EFILoadedImageProtocol<'a> {
+    pub revision: u32,
+    pub parent_handle: EFIHandle,
+    pub system_table: &'a EFISystemTable<'a>,
+    pub device_handle: EFIHandle,
+}
+
+#[repr(C)]
 #[derive(Debug)]
 pub struct EFIGraphicsOutputProtocolPixelInfo {
     pub version: u32,
@@ -118,6 +189,74 @@ pub struct EFIProcessorInformation {
 }
 
 #[repr(C)]
+#[allow(dead_code)]
+#[derive(Default, Debug)]
+pub struct EFITime {
+    year: u16,  // 1900 – 9999
+    month: u8,  // 1 – 12
+    day: u8,    // 1 – 31
+    hour: u8,   // 0 – 23
+    minute: u8, // 0 – 59
+    second: u8, // 0 – 59
+    pad1: u8,
+    nanosecond: u32, // 0 – 999,999,999
+    time_zone: u16,  // -1440 to 1440 or 2047
+    daylight: u8,
+    pad2: u8,
+}
+
+#[repr(C)]
+#[derive(Default, Debug)]
+pub struct EFIFileInfo {
+    pub size: u64,
+    pub file_size: u64,
+    pub physical_size: u64,
+    pub create_time: EFITime,
+    pub last_access_time: EFITime,
+    pub modification_time: EFITime,
+    pub attr: u64,
+    pub file_name: [u16; 32],
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct EFIFileSystemInfo {
+    pub size: u64,
+    pub readonly: u8,
+    pub volume_size: u64,
+    pub free_space: u64,
+    pub block_size: u32,
+    pub volume_label: [u16; 32],
+}
+
+#[repr(C)]
+pub struct EFIFileProtocol {
+    pub revision: u64,
+    reserved0: [u64; 3],
+    pub read: extern "win64" fn(
+        this: *const EFIFileProtocol,
+        buffer_size: &mut EFINativeUInt,
+        buffer: &mut EFIFileInfo,
+    ) -> EFIStatus,
+    reserved1: [u64; 3],
+    pub get_info: extern "win64" fn(
+        this: *const EFIFileProtocol,
+        information_type: *const EFI_GUID,
+        buffer_size: &mut EFINativeUInt,
+        buffer: &mut EFIFileSystemInfo,
+    ) -> EFIStatus,
+}
+
+#[repr(C)]
+pub struct EFISimpleFileSystemProtocol {
+    pub revision: u64,
+    pub open_volume: extern "win64" fn(
+        this: *const EFISimpleFileSystemProtocol,
+        root: *mut *mut EFIFileProtocol,
+    ) -> EFIStatus,
+}
+
+#[repr(C)]
 pub struct EFIMPServicesProtocol {
     pub get_number_of_processors: extern "win64" fn(
         this: *const EFIMPServicesProtocol,
@@ -128,6 +267,19 @@ pub struct EFIMPServicesProtocol {
         this: *const EFIMPServicesProtocol,
         proc_num: usize,
         info: &mut EFIProcessorInformation,
+    ) -> EFIStatus,
+}
+
+pub union EFIBootServicesTableHandleProtocolVariants {
+    pub handle_loaded_image_protocol: extern "win64" fn(
+        handle: EFIHandle,
+        protocol: *const EFI_GUID,
+        interface: *mut *mut EFILoadedImageProtocol,
+    ) -> EFIStatus,
+    pub handle_simple_file_system_protocol: extern "win64" fn(
+        handle: EFIHandle,
+        protocol: *const EFI_GUID,
+        interface: *mut *mut EFISimpleFileSystemProtocol,
     ) -> EFIStatus,
 }
 
@@ -142,11 +294,13 @@ pub struct EFIBootServicesTable {
         descriptor_size: *mut EFINativeUInt,
         descriptor_version: *mut u32,
     ) -> EFIStatus,
-    _reserved1: [u64; 21],
+    _reserved1: [u64; 11],
+    pub handle_protocol: EFIBootServicesTableHandleProtocolVariants,
+    _reserved2: [u64; 9],
     pub exit_boot_services:
         extern "win64" fn(image_handle: EFIHandle, map_key: EFINativeUInt) -> EFIStatus,
 
-    _reserved2: [u64; 10],
+    _reserved3: [u64; 10],
     pub locate_protocol: extern "win64" fn(
         protocol: *const EFI_GUID,
         registration: *const EFIVoid,
