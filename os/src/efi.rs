@@ -204,6 +204,15 @@ pub struct EFITime {
     daylight: u8,
     pad2: u8,
 }
+impl fmt::Display for EFITime {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            self.year, self.month, self.day, self.hour, self.minute, self.second
+        )
+    }
+}
 
 #[repr(C)]
 #[derive(Default, Debug)]
@@ -216,6 +225,18 @@ pub struct EFIFileInfo {
     pub modification_time: EFITime,
     pub attr: u64,
     pub file_name: [u16; 32],
+}
+impl fmt::Display for EFIFileInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "EFIFileInfo {{ create_time: {}, attr: {:#X}, file_name: {}, file_size: {}}}",
+            self.create_time,
+            self.attr,
+            CStrPtr16::from_ptr(self.file_name.as_ptr()),
+            self.file_size,
+        )
+    }
 }
 
 #[repr(C)]

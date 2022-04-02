@@ -83,7 +83,7 @@ pub fn load_all_root_files(
             if file_info_size == 0 {
                 break;
             }
-            println!("FILE: {:?}", file_info);
+            println!("FILE: {}", file_info);
         }
     }
     Ok(())
