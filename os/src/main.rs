@@ -7,10 +7,52 @@
 
 extern crate alloc;
 
+use os::boot_info::BootInfo;
 use os::error::*;
+use os::graphics;
+use os::graphics::BitmapImageBuffer;
+
+fn paint_wasabi_logo() {
+    const SIZE: i64 = 256;
+    const COL_SABI: u32 = 0xe33b26;
+    const COL_WASABI: u32 = 0x7ec288;
+
+    let mut vram = BootInfo::take().vram();
+    let dx = vram.width() / 2 - SIZE;
+    let dy = vram.height() / 2 - SIZE;
+
+    // Sabi (Ferris)
+    for x in 0..SIZE {
+        graphics::draw_line(
+            &mut vram,
+            COL_SABI,
+            dx + SIZE,
+            dy,
+            dx + SIZE / 2 + x,
+            dy + SIZE,
+        )
+        .unwrap();
+    }
+    // Wasabi
+    for x in 0..SIZE {
+        graphics::draw_line(&mut vram, COL_WASABI, dx, dy, dx + SIZE / 2 + x, dy + SIZE).unwrap();
+    }
+    for x in 0..SIZE {
+        graphics::draw_line(
+            &mut vram,
+            COL_WASABI + 0x3d3d3d,
+            dx + SIZE * 2,
+            dy,
+            dx + SIZE / 2 + x,
+            dy + SIZE,
+        )
+        .unwrap();
+    }
+}
 
 pub fn main() -> Result<(), WasabiError> {
     os::println!("Booting Wasabi OS!!!");
+    paint_wasabi_logo();
     Ok(())
 }
 

@@ -88,6 +88,9 @@ pub fn load_all_root_files(
                 continue;
             }
             println!("FILE: {}", file_info);
+            let num_of_pages = util::size_in_pages_from_bytes(file_info.size as usize);
+            let buf = efi::alloc_pages(efi_system_table, num_of_pages)?;
+            println!("allocated buf: {:#p}", buf);
         }
     }
     Ok(())

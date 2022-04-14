@@ -18,6 +18,7 @@ pub mod print;
 pub mod serial;
 pub mod test_runner;
 pub mod text_area;
+pub mod util;
 pub mod vram;
 pub mod x86;
 
