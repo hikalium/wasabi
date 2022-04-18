@@ -36,7 +36,7 @@ pub fn test_runner(tests: &[&dyn Testable]) -> ! {
 /// a global allocator for tests.
 pub fn run_tests(
     image_handle: efi::EfiHandle,
-    efi_system_table: &mut efi::EfiSystemTable,
+    efi_system_table: &'static mut efi::EfiSystemTable,
     test_main: &dyn Fn(),
 ) {
     use crate::init::*;
