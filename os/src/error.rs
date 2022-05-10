@@ -6,6 +6,8 @@ pub enum WasabiError {
     Failed(),
     GraphicsError(GraphicsError),
     EfiError(EfiStatus),
+    FileNameTooLong,
+    FileRead,
 }
 
 impl From<GraphicsError> for WasabiError {

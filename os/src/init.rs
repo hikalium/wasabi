@@ -1,6 +1,6 @@
+use crate::boot_info::File;
 use crate::efi;
 use crate::*;
-use core::mem::size_of;
 use core::ptr::null_mut;
 use error::*;
 
@@ -41,10 +41,13 @@ impl EfiServices {
         }
         unsafe { &mut *loaded_image_protocol }
     }
-    pub fn load_all_root_files(&self) -> Result<(), WasabiError> {
+    pub fn load_all_root_files(
+        &self,
+        root_files: &mut [Option<File>; 32],
+    ) -> Result<(), WasabiError> {
         let loaded_image_protocol = self.get_loaded_image_protocol();
 
-        let mut simple_file_system_protocol: *mut efi::EfiSimpleFileSystemProtocol =
+        let mut simple_fs_protocol: *mut efi::EfiSimpleFileSystemProtocol =
             null_mut::<efi::EfiSimpleFileSystemProtocol>();
         unsafe {
             let status = (self
@@ -54,63 +57,35 @@ impl EfiServices {
                 .handle_simple_file_system_protocol)(
                 (*loaded_image_protocol).device_handle,
                 &efi::EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
-                &mut simple_file_system_protocol,
+                &mut simple_fs_protocol,
             );
             assert_eq!(status, efi::EfiStatus::SUCCESS);
-            println!(
-                "Got SimpleFileSystemProtocol. revision: {:#X}",
-                (*simple_file_system_protocol).revision
-            );
+            println!("Got SimpleFileSystemProtocol.",);
         }
-
-        let mut root_file: *mut efi::EfiFileProtocol = null_mut::<efi::EfiFileProtocol>();
-        unsafe {
-            let status = ((*simple_file_system_protocol).open_volume)(
-                simple_file_system_protocol,
-                &mut root_file,
-            );
-            assert_eq!(status, efi::EfiStatus::SUCCESS);
-            println!(
-                "Got FileProtocol of the root file. revision: {:#X}",
-                (*root_file).revision
-            );
-        }
-
-        let mut root_fs_info: efi::EfiFileSystemInfo = efi::EfiFileSystemInfo::default();
-        let mut root_fs_info_size: usize = size_of::<efi::EfiFileSystemInfo>();
-        unsafe {
-            let status = ((*root_file).get_info)(
-                root_file,
-                &efi::EFI_FILE_SYSTEM_INFO_GUID,
-                &mut root_fs_info_size,
-                &mut root_fs_info,
-            );
-            assert_eq!(status, efi::EfiStatus::SUCCESS);
-            println!(
-                "Got root fs. volume label: {}",
-                efi::CStrPtr16::from_ptr(root_fs_info.volume_label.as_ptr())
-            );
-        }
+        let simple_fs_protocol = unsafe { &*simple_fs_protocol };
+        let root_file = simple_fs_protocol.open_volume();
+        let root_fs_info = root_file.get_fs_info();
+        println!(
+            "Got root fs. volume label: {}",
+            efi::CStrPtr16::from_ptr(root_fs_info.volume_label.as_ptr())
+        );
 
         // List all files under root dir
-        loop {
-            let mut file_info: efi::EfiFileInfo = efi::EfiFileInfo::default();
-            let mut file_info_size;
-            unsafe {
-                file_info_size = size_of::<efi::EfiFileInfo>();
-                let status = ((*root_file).read)(root_file, &mut file_info_size, &mut file_info);
-                assert_eq!(status, efi::EfiStatus::SUCCESS);
-                if file_info_size == 0 {
-                    break;
-                }
-                if file_info.is_dir() {
-                    continue;
-                }
-                println!("FILE: {}", file_info);
-                let num_of_pages = util::size_in_pages_from_bytes(file_info.size as usize);
-                let buf = efi::alloc_pages(self.efi_system_table, num_of_pages)?;
-                println!("allocated buf: {:#p}", buf);
+        let i = 0;
+        while let Some(file_info) = root_file.read_complete::<efi::EfiFileInfo>() {
+            if root_files.len() <= i {
+                // root_files is full
+                panic!("No more space left for root_files");
             }
+            if file_info.is_dir() {
+                continue;
+            }
+            println!("FILE: {}", file_info);
+            let buf = efi::alloc_slice(self.efi_system_table, file_info.size as usize)?;
+            println!("allocated buf: {:#p}", buf);
+            let file = root_file.open(&file_info.file_name);
+            file.read_into_slice(buf)
+                .expect("Failed to load file contents");
         }
         Ok(())
     }
@@ -141,13 +116,15 @@ pub fn init_basic_runtime(
     crate::println!("init_basic_runtime()");
     let efi_services = EfiServices::new(image_handle, efi_system_table);
     efi_services.clear_screen();
+    const FILE_NONE: Option<File> = None;
+    let mut root_files = [FILE_NONE; 32];
     efi_services
-        .load_all_root_files()
+        .load_all_root_files(&mut root_files)
         .expect("Failed to load root files");
     let vram = efi_services.get_vram_info();
 
     let memory_map = EfiServices::exit_from_boot_services(efi_services);
-    let boot_info = BootInfo::new(vram, memory_map);
+    let boot_info = BootInfo::new(vram, memory_map, root_files);
     unsafe {
         BootInfo::set(boot_info);
     }

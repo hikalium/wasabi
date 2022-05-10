@@ -1,5 +1,6 @@
 use crate::error::*;
 use crate::memory_map_holder;
+use crate::util::*;
 use core::fmt;
 use core::ptr::null_mut;
 
@@ -213,6 +214,17 @@ impl fmt::Display for EfiTime {
 
 #[repr(C)]
 #[derive(Default, Debug)]
+pub struct EfiFileName {
+    pub file_name: [u16; 32],
+}
+impl fmt::Display for EfiFileName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", CStrPtr16::from_ptr(self.file_name.as_ptr()),)
+    }
+}
+
+#[repr(C)]
+#[derive(Default, Debug)]
 pub struct EfiFileInfo {
     pub size: u64,
     pub file_size: u64,
@@ -221,7 +233,7 @@ pub struct EfiFileInfo {
     pub last_access_time: EfiTime,
     pub modification_time: EfiTime,
     pub attr: u64,
-    pub file_name: [u16; 32],
+    pub file_name: EfiFileName,
 }
 impl EfiFileInfo {
     pub fn is_dir(&self) -> bool {
@@ -233,10 +245,7 @@ impl fmt::Display for EfiFileInfo {
         write!(
             f,
             "EfiFileInfo {{ create_time: {}, attr: {:#X}, file_name: {}, file_size: {}}}",
-            self.create_time,
-            self.attr,
-            CStrPtr16::from_ptr(self.file_name.as_ptr()),
-            self.file_size,
+            self.create_time, self.attr, self.file_name, self.file_size,
         )
     }
 }
@@ -252,31 +261,106 @@ pub struct EfiFileSystemInfo {
     pub volume_label: [u16; 32],
 }
 
+// [uefi_2_9]:588
 #[repr(C)]
 pub struct EfiFileProtocol {
-    pub revision: u64,
-    reserved0: [u64; 3],
-    pub read: extern "win64" fn(
-        this: *const EfiFileProtocol,
-        buffer_size: &mut usize,
-        buffer: &mut EfiFileInfo,
+    revision: u64,
+    open: extern "win64" fn(
+        this: *const Self,
+        new_handle: &mut *const Self,
+        file_name: &EfiFileName,
+        open_mode: u64,
+        attributes: u64,
     ) -> EfiStatus,
+    reserved0: [u64; 2],
+    read:
+        extern "win64" fn(this: *const Self, buffer_size: &mut usize, buffer: *mut u8) -> EfiStatus,
     reserved1: [u64; 3],
-    pub get_info: extern "win64" fn(
-        this: *const EfiFileProtocol,
+    get_info: extern "win64" fn(
+        this: *const Self,
         information_type: *const EfiGuid,
         buffer_size: &mut usize,
-        buffer: &mut EfiFileSystemInfo,
+        buffer: *mut u8,
     ) -> EfiStatus,
+}
+
+impl EfiFileProtocol {
+    pub fn open(&self, name: &EfiFileName) -> &EfiFileProtocol {
+        let mut new_file_protocol = core::ptr::null::<EfiFileProtocol>();
+        let status = (self.open)(
+            self as *const EfiFileProtocol,
+            &mut new_file_protocol,
+            name,
+            1, /* Read */
+            0,
+        );
+        assert_eq!(status, EfiStatus::SUCCESS);
+        // Safety: this is safe since the object pointed by the pointer is allocated by UEFI and it
+        // will be valid upon success
+        unsafe { &*new_file_protocol }
+    }
+    pub fn read_complete<T>(&self) -> Option<T> {
+        // Safety: data will be initialized in this function and it will be returned only if the
+        // UEFI protocol succeeds.
+        let mut data = unsafe { core::mem::zeroed::<T>() };
+        let size_expected = core::mem::size_of::<T>();
+        let mut size_read = size_expected;
+        let status = (self.read)(
+            self as *const EfiFileProtocol,
+            &mut size_read,
+            &mut data as *mut T as *mut u8,
+        );
+        assert_eq!(status, EfiStatus::SUCCESS);
+        if size_read != size_expected {
+            None
+        } else {
+            Some(data)
+        }
+    }
+    pub fn read_into_slice<T>(&self, buf: &mut [T]) -> Result<(), WasabiError> {
+        let size_expected = buf.len();
+        let mut size_read = size_expected;
+        let status = (self.read)(
+            self as *const EfiFileProtocol,
+            &mut size_read,
+            buf.as_mut_ptr() as *mut u8,
+        );
+        assert_eq!(status, EfiStatus::SUCCESS);
+        if size_read != size_expected {
+            Err(WasabiError::FileRead)
+        } else {
+            Ok(())
+        }
+    }
+    unsafe fn get_info<T>(&self, information_type: &EfiGuid) -> T {
+        let mut data = core::mem::zeroed::<T>();
+        let status = (self.get_info)(
+            self as *const EfiFileProtocol,
+            information_type,
+            &mut core::mem::size_of::<T>(),
+            &mut data as *mut T as *mut u8,
+        );
+        assert_eq!(status, EfiStatus::SUCCESS);
+        data
+    }
+    pub fn get_fs_info(&self) -> EfiFileSystemInfo {
+        unsafe { self.get_info(&EFI_FILE_SYSTEM_INFO_GUID) }
+    }
 }
 
 #[repr(C)]
 pub struct EfiSimpleFileSystemProtocol {
-    pub revision: u64,
-    pub open_volume: extern "win64" fn(
-        this: *const EfiSimpleFileSystemProtocol,
-        root: *mut *mut EfiFileProtocol,
-    ) -> EfiStatus,
+    revision: u64,
+    open_volume:
+        extern "win64" fn(this: *const Self, root: *mut *const EfiFileProtocol) -> EfiStatus,
+}
+impl EfiSimpleFileSystemProtocol {
+    pub fn open_volume(&self) -> &EfiFileProtocol {
+        let mut new_file_protocol = core::ptr::null::<EfiFileProtocol>();
+        let status = (self.open_volume)(self as *const Self, &mut new_file_protocol);
+        assert_eq!(status, EfiStatus::SUCCESS);
+        unsafe { &*new_file_protocol }
+    }
 }
 
 #[repr(C)]
@@ -472,7 +556,7 @@ pub fn locate_mp_services_protocol<'a>(
     Ok(unsafe { &*protocol })
 }
 
-pub fn alloc_pages(
+unsafe fn alloc_pages(
     efi_system_table: &EfiSystemTable,
     number_of_pages: usize,
 ) -> Result<*mut u8, WasabiError> {
@@ -487,6 +571,18 @@ pub fn alloc_pages(
         .into_result()
         .and(Ok(mem))
         .map_err(WasabiError::EfiError)
+}
+
+pub fn alloc_slice<'a>(
+    efi_system_table: &'a EfiSystemTable,
+    size: usize,
+) -> Result<&'a mut [u8], WasabiError> {
+    Ok(unsafe {
+        core::slice::from_raw_parts_mut(
+            alloc_pages(efi_system_table, size_in_pages_from_bytes(size))?,
+            size,
+        )
+    })
 }
 
 pub fn locate_graphic_protocol<'a>(

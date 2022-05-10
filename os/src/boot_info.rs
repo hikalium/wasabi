@@ -1,18 +1,58 @@
+use crate::efi::EfiFileName;
+use crate::error::WasabiError;
 use crate::*;
+
+pub struct File {
+    name: EfiFileName,
+    data: &'static mut [u8],
+}
+impl File {
+    /// # Safety
+    ///
+    /// passed data and len should be valid
+    pub unsafe fn from_raw(
+        name: EfiFileName,
+        data: *mut u8,
+        len: usize,
+    ) -> Result<Self, WasabiError> {
+        Ok(Self {
+            name,
+            data: core::slice::from_raw_parts_mut(data, len),
+        })
+    }
+    pub fn name(&self) -> &EfiFileName {
+        &self.name
+    }
+    pub fn data(&self) -> &[u8] {
+        self.data
+    }
+}
 
 pub struct BootInfo {
     vram: VRAMBufferInfo,
     memory_map: MemoryMapHolder,
+    root_files: [Option<File>; 32],
 }
 impl BootInfo {
-    pub fn new(vram: VRAMBufferInfo, memory_map: MemoryMapHolder) -> BootInfo {
-        BootInfo { vram, memory_map }
+    pub fn new(
+        vram: VRAMBufferInfo,
+        memory_map: MemoryMapHolder,
+        root_files: [Option<File>; 32],
+    ) -> BootInfo {
+        BootInfo {
+            vram,
+            memory_map,
+            root_files,
+        }
     }
     pub fn vram(&self) -> VRAMBufferInfo {
         self.vram
     }
     pub fn memory_map(&'static self) -> &'static MemoryMapHolder {
         &self.memory_map
+    }
+    pub fn root_files(&self) -> &[Option<File>; 32] {
+        &self.root_files
     }
     /// # Safety
     ///
