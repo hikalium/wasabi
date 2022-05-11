@@ -60,7 +60,7 @@ pub fn main() -> Result<(), WasabiError> {
     os::println!("Number of root files: {}", root_files.len());
     for (i, f) in root_files.iter().enumerate() {
         os::println!("root_files[{}]: {}", i, f.name());
-        os::print::hexdump(&f.data());
+        os::print::hexdump(f.data());
     }
 
     Ok(())
