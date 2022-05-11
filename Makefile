@@ -89,6 +89,7 @@ run_deps :
 	mkdir -p mnt/
 	-rm -rf mnt/*
 	mkdir -p mnt/EFI/BOOT
+	cp README.md mnt/
 
 watch_serial:
 	while ! telnet localhost 1235 ; do sleep 1 ; done ;

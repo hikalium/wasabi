@@ -52,8 +52,56 @@ pub fn _print(args: fmt::Arguments) {
 pub fn _print_nothing(_args: fmt::Arguments) {}
 
 pub fn hexdump(bytes: &[u8]) {
+    let mut i = 0;
+    let mut ascii = [0u8; 16];
+    let mut offset = 0;
     for v in bytes.iter() {
-        print!("{v:02X} ");
+        if i == 0 {
+            print!("{offset:08X}: ");
+        }
+        print!("{:02X} ", v);
+        ascii[i] = *v;
+        i += 1;
+        if i == 16 {
+            print!("|");
+            for c in ascii.iter() {
+                print!(
+                    "{}",
+                    if (0x20..=0x7f).contains(c) {
+                        *c as char
+                    } else {
+                        '.'
+                    }
+                );
+            }
+            println!("|");
+            offset += 16;
+            i = 0;
+        }
     }
-    println!();
+    if i != 0 {
+        let old_i = i;
+        while i < 16 {
+            print!("   ");
+            i += 1;
+        }
+        print!("|");
+        for c in ascii[0..old_i].iter() {
+            print!(
+                "{}",
+                if (0x20u8..=0x7fu8).contains(c) {
+                    *c as char
+                } else {
+                    '.'
+                }
+            );
+        }
+        println!("|");
+    }
+}
+
+pub fn hexdump_struct<T>(data: &T) {
+    hexdump(unsafe {
+        core::slice::from_raw_parts(data as *const T as *const u8, core::mem::size_of::<T>())
+    })
 }

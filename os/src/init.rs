@@ -70,14 +70,11 @@ impl EfiServices {
             efi::CStrPtr16::from_ptr(root_fs_info.volume_label.as_ptr())
         );
 
-        // List all files under root dir
-        let i = 0;
+        // Load all files under root dir
+        let mut i = 0;
         while let Some(file_info) = root_file.read_file_info() {
-            if root_files.len() <= i {
-                // root_files is full
-                panic!("No more space left for root_files");
-            }
             if file_info.is_dir() {
+                println!("DIR : {}", file_info);
                 continue;
             }
             println!("FILE: {}", file_info);
@@ -86,7 +83,18 @@ impl EfiServices {
             let file = root_file.open(&file_info.file_name);
             file.read_into_slice(buf)
                 .expect("Failed to load file contents");
-            print::hexdump(&buf[0..16]);
+            if root_files.len() <= i {
+                // root_files is full
+                panic!("No more space left for root_files");
+            }
+            unsafe {
+                root_files[i] = Some(File::from_raw(
+                    file_info.file_name,
+                    buf.as_mut_ptr(),
+                    file_info.size as usize,
+                )?);
+            }
+            i += 1;
         }
         Ok(())
     }

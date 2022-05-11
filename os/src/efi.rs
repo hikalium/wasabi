@@ -312,6 +312,8 @@ impl EfiFileProtocol {
         );
         assert_eq!(status, EfiStatus::SUCCESS);
         if size_read > 0 {
+            crate::println!("Read {size_read} bytes");
+            crate::print::hexdump_struct(&data);
             Some(data)
         } else {
             None

@@ -53,6 +53,16 @@ fn paint_wasabi_logo() {
 pub fn main() -> Result<(), WasabiError> {
     os::println!("Booting Wasabi OS!!!");
     paint_wasabi_logo();
+    let boot_info = BootInfo::take();
+    let root_files = boot_info.root_files();
+    let root_files: alloc::vec::Vec<&os::boot_info::File> =
+        root_files.iter().filter_map(|e| e.as_ref()).collect();
+    os::println!("Number of root files: {}", root_files.len());
+    for (i, f) in root_files.iter().enumerate() {
+        os::println!("root_files[{}]: {}", i, f.name());
+        os::print::hexdump(&f.data());
+    }
+
     Ok(())
 }
 
