@@ -299,23 +299,26 @@ impl EfiFileProtocol {
         // will be valid upon success
         unsafe { &*new_file_protocol }
     }
-    pub fn read_complete<T>(&self) -> Option<T> {
+    fn read_into_type<T>(&self) -> Option<T> {
         // Safety: data will be initialized in this function and it will be returned only if the
         // UEFI protocol succeeds.
         let mut data = unsafe { core::mem::zeroed::<T>() };
-        let size_expected = core::mem::size_of::<T>();
-        let mut size_read = size_expected;
+        let buf_size = core::mem::size_of::<T>();
+        let mut size_read = buf_size;
         let status = (self.read)(
             self as *const EfiFileProtocol,
             &mut size_read,
             &mut data as *mut T as *mut u8,
         );
         assert_eq!(status, EfiStatus::SUCCESS);
-        if size_read != size_expected {
-            None
-        } else {
+        if size_read > 0 {
             Some(data)
+        } else {
+            None
         }
+    }
+    pub fn read_file_info(&self) -> Option<EfiFileInfo> {
+        self.read_into_type::<EfiFileInfo>()
     }
     pub fn read_into_slice<T>(&self, buf: &mut [T]) -> Result<(), WasabiError> {
         let size_expected = buf.len();

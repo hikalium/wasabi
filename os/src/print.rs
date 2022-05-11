@@ -50,3 +50,10 @@ pub fn _print(args: fmt::Arguments) {
 }
 #[doc(hidden)]
 pub fn _print_nothing(_args: fmt::Arguments) {}
+
+pub fn hexdump(bytes: &[u8]) {
+    for v in bytes.iter() {
+        print!("{v:02X} ");
+    }
+    println!();
+}

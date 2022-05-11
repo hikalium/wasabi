@@ -72,7 +72,7 @@ impl EfiServices {
 
         // List all files under root dir
         let i = 0;
-        while let Some(file_info) = root_file.read_complete::<efi::EfiFileInfo>() {
+        while let Some(file_info) = root_file.read_file_info() {
             if root_files.len() <= i {
                 // root_files is full
                 panic!("No more space left for root_files");
@@ -86,6 +86,7 @@ impl EfiServices {
             let file = root_file.open(&file_info.file_name);
             file.read_into_slice(buf)
                 .expect("Failed to load file contents");
+            print::hexdump(&buf[0..16]);
         }
         Ok(())
     }
