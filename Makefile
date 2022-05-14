@@ -124,3 +124,6 @@ internal_run_os_test :
 			echo "\nFAIL: QEMU returned $$RETCODE" ; \
 			exit 1 ; \
 		fi
+
+act:
+	act -P hikalium/wasabi-builder:latest=hikalium/wasabi-builder:latest
