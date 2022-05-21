@@ -213,9 +213,9 @@ impl fmt::Display for EfiTime {
 }
 
 #[repr(C)]
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct EfiFileName {
-    pub file_name: [u16; 32],
+    file_name: [u16; 32],
 }
 impl fmt::Display for EfiFileName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -226,7 +226,7 @@ impl fmt::Display for EfiFileName {
 #[repr(C)]
 #[derive(Default, Debug)]
 pub struct EfiFileInfo {
-    pub size: u64,
+    size: u64,
     pub file_size: u64,
     pub physical_size: u64,
     pub create_time: EfiTime,
@@ -238,6 +238,12 @@ pub struct EfiFileInfo {
 impl EfiFileInfo {
     pub fn is_dir(&self) -> bool {
         self.attr & 0x10 != 0
+    }
+    pub fn file_size(&self) -> usize {
+        self.file_size as usize
+    }
+    pub fn file_name(&self) -> EfiFileName {
+        self.file_name
     }
 }
 impl fmt::Display for EfiFileInfo {
@@ -332,7 +338,10 @@ impl EfiFileProtocol {
         );
         assert_eq!(status, EfiStatus::SUCCESS);
         if size_read != size_expected {
-            Err(WasabiError::FileRead)
+            Err(WasabiError::ReadFileSizeMismatch {
+                expected: size_expected,
+                actual: size_read,
+            })
         } else {
             Ok(())
         }
@@ -578,7 +587,7 @@ unsafe fn alloc_pages(
         .map_err(WasabiError::EfiError)
 }
 
-pub fn alloc_slice<'a>(
+pub fn alloc_byte_slice<'a>(
     efi_system_table: &'a EfiSystemTable,
     size: usize,
 ) -> Result<&'a mut [u8], WasabiError> {
@@ -612,9 +621,15 @@ pub fn exit_from_efi_boot_services(
     memory_map: &mut memory_map_holder::MemoryMapHolder,
 ) {
     // Get a memory map and exit boot services
-    let status = memory_map_holder::get_memory_map(efi_system_table, memory_map);
-    assert_eq!(status, EfiStatus::SUCCESS);
-    let status =
-        (efi_system_table.boot_services.exit_boot_services)(image_handle, memory_map.map_key);
-    assert_eq!(status, EfiStatus::SUCCESS);
+    loop {
+        // exit_boot_services can fail if the memory map is updated in the logic so keep retrying in the
+        // loop.
+        let status = memory_map_holder::get_memory_map(efi_system_table, memory_map);
+        assert_eq!(status, EfiStatus::SUCCESS);
+        let status =
+            (efi_system_table.boot_services.exit_boot_services)(image_handle, memory_map.map_key);
+        if status == EfiStatus::SUCCESS {
+            break;
+        }
+    }
 }

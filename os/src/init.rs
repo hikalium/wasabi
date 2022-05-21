@@ -78,7 +78,7 @@ impl EfiServices {
                 continue;
             }
             println!("FILE: {}", file_info);
-            let buf = efi::alloc_slice(self.efi_system_table, file_info.size as usize)?;
+            let buf = efi::alloc_byte_slice(self.efi_system_table, file_info.file_size())?;
             println!("allocated buf: {:#p}", buf);
             let file = root_file.open(&file_info.file_name);
             file.read_into_slice(buf)
@@ -89,9 +89,9 @@ impl EfiServices {
             }
             unsafe {
                 root_files[i] = Some(File::from_raw(
-                    file_info.file_name,
+                    file_info.file_name(),
                     buf.as_mut_ptr(),
-                    file_info.size as usize,
+                    file_info.file_size(),
                 )?);
             }
             i += 1;

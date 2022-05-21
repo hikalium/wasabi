@@ -76,7 +76,7 @@ spellcheck :
 	@scripts/spellcheck.sh recieve receive
 
 run : run_deps
-	cd os/examples && cargo run
+	cd os && cargo run
 
 run_example : run_deps
 	cd os/examples && cargo run --example ch2_show_mmap
@@ -98,6 +98,8 @@ watch_qemu_monitor:
 	while ! telnet localhost ${PORT_MONITOR} ; do sleep 1 ; done ;
 
 install : run_deps
+	cd os && cargo install --path . --root ../generated/
+	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
 	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " && \
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 

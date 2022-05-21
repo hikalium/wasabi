@@ -7,7 +7,7 @@ pub enum WasabiError {
     GraphicsError(GraphicsError),
     EfiError(EfiStatus),
     FileNameTooLong,
-    FileRead,
+    ReadFileSizeMismatch { expected: usize, actual: usize },
 }
 
 impl From<GraphicsError> for WasabiError {
