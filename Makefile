@@ -76,7 +76,8 @@ spellcheck :
 	@scripts/spellcheck.sh recieve receive
 
 run : run_deps
-	cd os && cargo run
+	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
+	cd os/examples && cargo run
 
 run_example : run_deps
 	cd os/examples && cargo run --example ch2_show_mmap
@@ -85,9 +86,9 @@ pxe : run_deps
 	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
 
 run_deps :
-	make
+	make bin
+	-rm -rf mnt
 	mkdir -p mnt/
-	-rm -rf mnt/*
 	mkdir -p mnt/EFI/BOOT
 	cp README.md mnt/
 
