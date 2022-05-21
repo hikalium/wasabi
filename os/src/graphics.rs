@@ -1,16 +1,17 @@
+use core::cmp::Ordering;
+
 pub trait BitmapImageBuffer {
-    type Pixel = u32;
     fn bytes_per_pixel(&self) -> i64;
     fn pixels_per_line(&self) -> i64;
     fn width(&self) -> i64;
     fn height(&self) -> i64;
     fn buf(&self) -> *const u8;
     fn buf_mut(&mut self) -> *mut u8;
-    fn pixel_at(&mut self, x: i64, y: i64) -> Option<&mut Self::Pixel> {
+    fn pixel_at(&mut self, x: i64, y: i64) -> Option<&mut u32> {
         if self.is_in_x_range(x) && self.is_in_y_range(y) {
             // # Safety
             // (x, y) is always validated by the checks above.
-            unsafe { Some(&mut *(self.unchecked_pixel_at(x, y) as *mut Self::Pixel)) }
+            unsafe { Some(&mut *(self.unchecked_pixel_at(x, y))) }
         } else {
             None
         }
@@ -19,9 +20,10 @@ pub trait BitmapImageBuffer {
     ///
     /// Returned pointer is valid as long as the given coordinates are valid
     /// which means that passing is_in_*_range tests.
-    unsafe fn unchecked_pixel_at(&mut self, x: i64, y: i64) -> *mut u8 {
+    unsafe fn unchecked_pixel_at(&mut self, x: i64, y: i64) -> *mut u32 {
         self.buf_mut()
             .add(((y * self.pixels_per_line() + x) * self.bytes_per_pixel()) as usize)
+            as *mut u32
     }
     fn flush(&self) {
         // Do nothing
@@ -42,21 +44,27 @@ pub enum GraphicsError {
 
 pub type GraphicsResult = core::result::Result<(), GraphicsError>;
 
+unsafe fn unchecked_draw_point<T: BitmapImageBuffer>(
+    buf: &mut T,
+    color: u32,
+    x: i64,
+    y: i64,
+) -> GraphicsResult {
+    // Assumes the buffer uses ARGB format
+    // which means that the components will be stored in [A, R, G, B] order.
+    // This is true for little-endian machine but not on big endian.
+    *buf.unchecked_pixel_at(x, y) = color;
+
+    Ok(())
+}
+
 #[allow(clippy::many_single_char_names)]
 pub fn draw_point<T: BitmapImageBuffer>(buf: &mut T, color: u32, x: i64, y: i64) -> GraphicsResult {
     if !buf.is_in_x_range(x) || !buf.is_in_x_range(x) {
         return Err(GraphicsError::OutOfRange);
     }
-    let r: u8 = (color >> 16) as u8;
-    let g: u8 = (color >> 8) as u8;
-    let b: u8 = color as u8;
     unsafe {
-        let p = buf.unchecked_pixel_at(x, y);
-        // ARGB
-        // *p.add(3) = alpha;
-        *p.add(2) = r;
-        *p.add(1) = g;
-        *p.add(0) = b;
+        unchecked_draw_point(buf, color, x, y)?;
     }
     Ok(())
 }
@@ -169,11 +177,74 @@ pub fn draw_char<T: BitmapImageBuffer>(
     Ok(())
 }
 
+/// Transfers the pixels in a rect sized (w, h) from at (sx, sy) to (dx, dy).
+/// Both rects should be in the buffer coordinates.
+#[allow(clippy::many_single_char_names)]
+pub fn transfer_rect<T: BitmapImageBuffer>(
+    buf: &mut T,
+    dx: i64,
+    dy: i64,
+    sx: i64,
+    sy: i64,
+    w: i64,
+    h: i64,
+) -> GraphicsResult {
+    if !buf.is_in_x_range(sx)
+        || !buf.is_in_y_range(sy)
+        || !buf.is_in_x_range(sx + w - 1)
+        || !buf.is_in_y_range(sy + h - 1)
+        || !buf.is_in_x_range(dx)
+        || !buf.is_in_y_range(dy)
+        || !buf.is_in_x_range(dx + w - 1)
+        || !buf.is_in_y_range(dy + h - 1)
+    {
+        return Err(GraphicsError::OutOfRange);
+    }
+
+    match (dy.cmp(&sy), dx.cmp(&sx)) {
+        (Ordering::Less, _) | (Ordering::Equal, Ordering::Less) => {
+            for y in 0..h {
+                for x in 0..w {
+                    unsafe {
+                        let c = *buf.unchecked_pixel_at(sx + x, sy + y);
+                        unchecked_draw_point(buf, c, dx + x, dy + y)?;
+                    }
+                }
+            }
+        }
+        (Ordering::Greater, _) => {
+            for y in (0..h).rev() {
+                for x in 0..w {
+                    unsafe {
+                        let c = *buf.unchecked_pixel_at(sx + x, sy + y);
+                        unchecked_draw_point(buf, c, dx + x, dy + y)?;
+                    }
+                }
+            }
+        }
+        (Ordering::Equal, Ordering::Greater) => {
+            for y in 0..h {
+                for x in (0..w).rev() {
+                    unsafe {
+                        let c = *buf.unchecked_pixel_at(sx + x, sy + y);
+                        unchecked_draw_point(buf, c, dx + x, dy + y)?;
+                    }
+                }
+            }
+        }
+        (Ordering::Equal, Ordering::Equal) => {
+            // Do nothing
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     extern crate alloc;
 
     use super::*;
+    use alloc::vec;
     use alloc::vec::Vec;
 
     pub struct TestBuffer {
@@ -246,6 +317,83 @@ mod tests {
         for y in 0..h {
             for x in 0..w {
                 assert!(buf.pixel_at(x, y) == Some(&mut 0xff0000))
+            }
+        }
+    }
+    mod transfer_rect {
+        use super::*;
+
+        const H: i64 = 4;
+        const W: i64 = 4;
+        const PIXELS_PER_LINE: i64 = 4;
+        #[rustfmt::skip]
+        const INIT: [[u32; W as usize]; H as usize] = [
+            [0u32,   1u32,  2u32,  3u32],
+            [10u32, 11u32, 12u32, 13u32],
+            [20u32, 21u32, 22u32, 23u32],
+            [30u32, 31u32, 32u32, 33u32],
+        ];
+        #[rustfmt::skip]
+        const TR_U: [[u32; W as usize]; H as usize] = [
+            [0u32,  11u32, 12u32,  3u32],
+            [10u32, 21u32, 22u32, 13u32],
+            [20u32, 21u32, 22u32, 23u32],
+            [30u32, 31u32, 32u32, 33u32],
+        ];
+        #[rustfmt::skip]
+        const TR_D: [[u32; W as usize]; H as usize] = [
+            [0u32,   1u32,  2u32,  3u32],
+            [10u32, 11u32, 12u32, 13u32],
+            [20u32, 11u32, 12u32, 23u32],
+            [30u32, 21u32, 22u32, 33u32],
+        ];
+        #[rustfmt::skip]
+        const TR_L: [[u32; W as usize]; H as usize] = [
+            [0u32,  1u32,   2u32,  3u32],
+            [11u32, 12u32, 12u32, 13u32],
+            [21u32, 22u32, 22u32, 23u32],
+            [30u32, 31u32, 32u32, 33u32],
+        ];
+        #[rustfmt::skip]
+        const TR_R: [[u32; W as usize]; H as usize] = [
+            [0u32,  1u32,   2u32,  3u32],
+            [10u32, 11u32, 11u32, 12u32],
+            [20u32, 21u32, 21u32, 22u32],
+            [30u32, 31u32, 32u32, 33u32],
+        ];
+
+        #[test_case]
+        fn transfer_rect_all_dir() {
+            let mut buf = TestBuffer::new(W, H, PIXELS_PER_LINE);
+            let dirs = vec![
+                (0, 0, &INIT),
+                (-1, 0, &TR_L),
+                (1, 0, &TR_R),
+                (0, -1, &TR_U),
+                (0, 1, &TR_D),
+            ];
+            for (dx, dy, expected) in dirs {
+                // Init state
+                for y in 0..H {
+                    for x in 0..W {
+                        unsafe {
+                            *buf.unchecked_pixel_at(x, y) = INIT[y as usize][x as usize];
+                        }
+                    }
+                }
+                // Transfer
+                transfer_rect(&mut buf, 1 + dx, 1 + dy, 1, 1, 2, 2).unwrap();
+                // Check
+                for y in 0..H {
+                    for x in 0..W {
+                        unsafe {
+                            assert_eq!(
+                                *buf.unchecked_pixel_at(x, y),
+                                expected[y as usize][x as usize]
+                            );
+                        }
+                    }
+                }
             }
         }
     }

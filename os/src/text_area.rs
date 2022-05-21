@@ -31,10 +31,29 @@ impl<T: BitmapImageBuffer> TextArea<T> {
     fn new_line(&mut self) -> GraphicsResult {
         self.cx = 0;
         self.cy += 1;
-        if self.cy * 16 + 16 <= self.h {
+        if (self.cy + 1) * 16 <= self.h {
             return Ok(());
         }
-        unimplemented!();
+        // Scroll!
+        self.cy -= 1;
+        transfer_rect(
+            &mut self.buf,
+            self.x,
+            self.y,
+            self.x,
+            self.y + 16,
+            self.w,
+            self.cy * 16,
+        )?;
+        draw_rect(
+            &mut self.buf,
+            0x000000,
+            self.x,
+            self.y + self.cy * 16,
+            self.w,
+            16,
+        )?;
+        Ok(())
     }
     fn advance_cursor(&mut self) -> GraphicsResult {
         self.cx += 1;

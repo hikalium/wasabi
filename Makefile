@@ -79,6 +79,10 @@ run : run_deps
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
 	cd os/examples && cargo run
 
+run_release : run_deps
+	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
+	cd os/examples && cargo run --release
+
 run_example : run_deps
 	cd os/examples && cargo run --example ch2_show_mmap
 
