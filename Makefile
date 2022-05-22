@@ -36,6 +36,7 @@ default: bin
 	# Keep this line blank
 
 bin: font
+	rustup component add rust-src
 	cd font && cargo build
 	cd os && cargo build
 
