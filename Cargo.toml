@@ -3,4 +3,5 @@ members = [
     "font",
     "dbgutil",
     "os",
+    "app/hello",
 ]
