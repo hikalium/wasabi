@@ -1,5 +1,6 @@
 // Needed to solve: can't find crate for `std`
 #![no_std]
+#![no_main]
 #![feature(start)]
 
 // Needed for implementing panic()
@@ -10,7 +11,7 @@ fn panic(_info: &PanicInfo) -> ! {
     unimplemented!();
 }
 
-#[start]
-fn main(_: isize, _: *const *const u8) -> isize {
+#[no_mangle]
+fn entry() -> isize {
     loop {}
 }

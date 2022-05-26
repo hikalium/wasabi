@@ -14,6 +14,6 @@
   "features": "-mmx,-sse,+soft-float",
   "relro-level": "off",
   "pre-link-args": {
-    "ld.lld": ["--no-rosegment", "-eentry", "-vvv"]
+    "ld.lld": ["--static", "--no-rosegment", "-eentry"]
   }
 }
