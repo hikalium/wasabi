@@ -59,12 +59,13 @@ test: font
 	# cd font && cargo test
 
 commit :
+	git add .
+	make filecheck
 	cargo fmt
 	make clippy
 	make spellcheck
 	make # build
 	make test
-	git add .
 	./scripts/ensure_objs_are_not_under_git_control.sh
 	git diff HEAD --color=always | less -R
 	git commit
@@ -72,6 +73,9 @@ commit :
 font:
 	mkdir -p generated
 	cargo run --bin font font/font.txt > generated/font.rs
+
+filecheck:
+	! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore)$$'
 
 spellcheck :
 	@scripts/spellcheck.sh recieve receive
