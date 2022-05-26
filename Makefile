@@ -75,7 +75,8 @@ font:
 	cargo run --bin font font/font.txt > generated/font.rs
 
 filecheck:
-	! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore)$$'
+	@! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore)$$' \
+		|| ! echo "!!! Unknown file type is being added! Do you really want to commit the file above? (if so, just modify filecheck recipe)"
 
 spellcheck :
 	@scripts/spellcheck.sh recieve receive
