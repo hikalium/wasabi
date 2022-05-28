@@ -13,7 +13,7 @@ where
 {
     fn run(&self) {
         serial::com_initialize(serial::IO_ADDR_COM2);
-        let mut writer = serial::SerialConsoleWriter {};
+        let mut writer = serial::SerialConsoleWriter::default();
         write!(writer, "{}...\t", core::any::type_name::<T>()).unwrap();
         self();
         writeln!(writer, "[PASS]").unwrap();
@@ -22,7 +22,7 @@ where
 
 pub fn test_runner(tests: &[&dyn Testable]) -> ! {
     serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut writer = serial::SerialConsoleWriter {};
+    let mut writer = serial::SerialConsoleWriter::default();
     writeln!(writer, "Running {} tests...", tests.len()).unwrap();
     for test in tests {
         test.run();

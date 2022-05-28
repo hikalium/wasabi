@@ -3,8 +3,26 @@ use core::arch::asm;
 use core::convert::TryInto;
 use core::fmt;
 
-// const IO_ADDR_COM1: u16 = 0x3f8;
+// https://wiki.osdev.org/Serial_Ports
+pub const IO_ADDR_COM1: u16 = 0x3f8;
 pub const IO_ADDR_COM2: u16 = 0x2f8;
+pub const IO_ADDR_COM3: u16 = 0x3e8;
+pub const IO_ADDR_COM4: u16 = 0x2e8;
+pub const IO_ADDR_COM5: u16 = 0x5f8;
+pub const IO_ADDR_COM6: u16 = 0x4f8;
+pub const IO_ADDR_COM7: u16 = 0x5e8;
+pub const IO_ADDR_COM8: u16 = 0x4e8;
+pub const IO_ADDR_COM: [u16; 8] = [
+    IO_ADDR_COM1,
+    IO_ADDR_COM2,
+    IO_ADDR_COM3,
+    IO_ADDR_COM4,
+    IO_ADDR_COM5,
+    IO_ADDR_COM6,
+    IO_ADDR_COM7,
+    IO_ADDR_COM8,
+];
+
 pub fn com_initialize(base_io_addr: u16) {
     x86::write_io_port(base_io_addr + 1, 0x00); // Disable all interrupts
     x86::write_io_port(base_io_addr + 3, 0x80); // Enable DLAB (set baud rate divisor)
@@ -16,28 +34,37 @@ pub fn com_initialize(base_io_addr: u16) {
     x86::write_io_port(base_io_addr + 4, 0x0B); // IRQs enabled, RTS/DSR set
 }
 
-pub fn com_send_char(base_io_addr: u16, c: char) {
-    while (x86::read_io_port(base_io_addr + 5) & 0x20) == 0 {
-        unsafe { asm!("pause") }
-    }
-    x86::write_io_port(base_io_addr, c as u8)
+pub struct SerialConsoleWriter {
+    base_io_addr: u16,
 }
 
-pub fn com_send_str(base_io_addr: u16, s: &str) {
-    let mut sc = s.chars();
-    let slen = s.chars().count();
-    for _ in 0..slen {
-        com_send_char(base_io_addr, sc.next().unwrap());
+impl SerialConsoleWriter {
+    pub fn new(base_io_addr: u16) -> Self {
+        Self { base_io_addr }
+    }
+    pub fn default() -> Self {
+        Self::new(IO_ADDR_COM2)
+    }
+    pub fn send_char(&self, c: char) {
+        while (x86::read_io_port(self.base_io_addr + 5) & 0x20) == 0 {
+            unsafe { asm!("pause") }
+        }
+        x86::write_io_port(self.base_io_addr, c as u8)
+    }
+
+    pub fn send_str(&self, s: &str) {
+        let mut sc = s.chars();
+        let slen = s.chars().count();
+        for _ in 0..slen {
+            self.send_char(sc.next().unwrap());
+        }
     }
 }
-
-pub struct SerialConsoleWriter {}
-
-impl SerialConsoleWriter {}
 
 impl fmt::Write for SerialConsoleWriter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        com_send_str(IO_ADDR_COM2, s);
+        let serial = SerialConsoleWriter::default();
+        serial.send_str(s);
         Ok(())
     }
 }

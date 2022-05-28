@@ -7,8 +7,7 @@ use crate::debug_exit;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut serial_writer = serial::SerialConsoleWriter {};
+    let mut serial_writer = serial::SerialConsoleWriter::default();
     writeln!(serial_writer, "panic! {:?}", info).unwrap();
     #[cfg(not(test))]
     loop {
