@@ -126,14 +126,20 @@ impl EfiStatus {
 
 #[repr(C)]
 pub struct EfiSimpleTextOutputProtocol {
-    pub reset: EfiHandle,
-    pub output_string:
+    reset: EfiHandle,
+    output_string:
         extern "win64" fn(this: *const EfiSimpleTextOutputProtocol, str: *const u16) -> EfiStatus,
-    pub test_string: EfiHandle,
-    pub query_mode: EfiHandle,
-    pub set_mode: EfiHandle,
-    pub set_attribute: EfiHandle,
-    pub clear_screen: extern "win64" fn(this: *const EfiSimpleTextOutputProtocol) -> EfiStatus,
+    test_string: EfiHandle,
+    query_mode: EfiHandle,
+    set_mode: EfiHandle,
+    set_attribute: EfiHandle,
+    clear_screen: extern "win64" fn(this: *const EfiSimpleTextOutputProtocol) -> EfiStatus,
+}
+
+impl EfiSimpleTextOutputProtocol {
+    pub fn clear_screen(&self) -> Result<(), EfiStatus> {
+        (self.clear_screen)(self).into_result()
+    }
 }
 
 #[repr(C)]
@@ -514,17 +520,26 @@ impl fmt::Debug for EfiMemoryDescriptor {
 
 #[repr(C)]
 pub struct EfiSystemTable<'a> {
-    pub header: EfiTableHeader,
-    pub firmware_vendor: EfiHandle,
-    pub firmware_revision: u32,
-    pub console_in_handle: EfiHandle,
-    pub con_in: EfiHandle,
-    pub console_out_handle: EfiHandle,
-    pub con_out: &'a EfiSimpleTextOutputProtocol,
-    pub standard_error_handle: EfiHandle,
-    pub std_err: EfiHandle,
-    pub runtime_services: EfiHandle,
-    pub boot_services: &'a EfiBootServicesTable,
+    header: EfiTableHeader,
+    firmware_vendor: EfiHandle,
+    firmware_revision: u32,
+    console_in_handle: EfiHandle,
+    con_in: EfiHandle,
+    console_out_handle: EfiHandle,
+    con_out: &'a EfiSimpleTextOutputProtocol,
+    standard_error_handle: EfiHandle,
+    std_err: EfiHandle,
+    runtime_services: EfiHandle,
+    boot_services: &'a EfiBootServicesTable,
+}
+
+impl<'a> EfiSystemTable<'a> {
+    pub fn con_out(&self) -> &'a EfiSimpleTextOutputProtocol {
+        self.con_out
+    }
+    pub fn boot_services(&self) -> &'a EfiBootServicesTable {
+        self.boot_services
+    }
 }
 
 pub struct EfiSimpleTextOutputProtocolWriter<'a> {

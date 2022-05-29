@@ -25,7 +25,7 @@ impl EfiServices {
         unsafe {
             let status = (self
                 .efi_system_table
-                .boot_services
+                .boot_services()
                 .handle_protocol
                 .handle_loaded_image_protocol)(
                 self.image_handle,
@@ -52,7 +52,7 @@ impl EfiServices {
         unsafe {
             let status = (self
                 .efi_system_table
-                .boot_services
+                .boot_services()
                 .handle_protocol
                 .handle_simple_file_system_protocol)(
                 (*loaded_image_protocol).device_handle,
@@ -99,9 +99,10 @@ impl EfiServices {
         Ok(())
     }
     fn clear_screen(&self) {
-        (self.efi_system_table.con_out.clear_screen)(self.efi_system_table.con_out)
-            .into_result()
-            .unwrap();
+        self.efi_system_table
+            .con_out()
+            .clear_screen()
+            .expect("Failed to clear screen");
     }
     fn get_vram_info(&self) -> VRAMBufferInfo {
         vram::init_vram(self.efi_system_table).unwrap()
