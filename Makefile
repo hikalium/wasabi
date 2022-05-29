@@ -81,22 +81,21 @@ filecheck:
 spellcheck :
 	@scripts/spellcheck.sh recieve receive
 
-run : run_deps
+run :
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
 	cd os/examples && cargo run
 
-run_release : run_deps
+run_release :
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
 	cd os/examples && cargo run --release
 
-run_example : run_deps
+run_example :
 	cd os/examples && cargo run --example ch2_show_mmap
 
-pxe : run_deps
+pxe :
 	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
 
 run_deps :
-	make bin
 	-rm -rf mnt
 	mkdir -p mnt/
 	mkdir -p mnt/EFI/BOOT
@@ -114,19 +113,13 @@ install : run_deps
 	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " && \
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 
-internal_launch_qemu :
+internal_launch_qemu : run_deps
 	@echo Using ${PATH_TO_EFI} as a os...
-	mkdir -p mnt/
-	-rm -rf mnt/*
-	mkdir -p mnt/EFI/BOOT
 	cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
 	$(QEMU) $(QEMU_ARGS)
 
-internal_run_os_test :
+internal_run_os_test : run_deps
 	@echo Using ${LOADER_TEST_EFI} as a os...
-	mkdir -p mnt/
-	-rm -rf mnt/*
-	mkdir -p mnt/EFI/BOOT
 	cp ${LOADER_TEST_EFI} mnt/EFI/BOOT/BOOTX64.EFI
 	$(QEMU) $(QEMU_ARGS) -display none ; \
 		RETCODE=$$? ; \

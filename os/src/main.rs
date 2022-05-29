@@ -62,17 +62,14 @@ pub fn main() -> Result<(), WasabiError> {
     let root_files: alloc::vec::Vec<&os::boot_info::File> =
         root_files.iter().filter_map(|e| e.as_ref()).collect();
     os::println!("Number of root files: {}", root_files.len());
-    /*
     for (i, f) in root_files.iter().enumerate() {
         os::println!("root_files[{}]: {}", i, f.name());
-        os::print::hexdump(f.data());
     }
-    */
     for i in 1..=8 {
         let base_addr = serial::IO_ADDR_COM[i - 1];
         serial::com_initialize(base_addr);
         let mut w = serial::SerialConsoleWriter::new(base_addr);
-        writeln!(w, "COM{}!", i);
+        writeln!(w, "COM{}!", i).expect("Failed to write");
         os::println!("Printed to COM{}", i);
     }
     Ok(())
