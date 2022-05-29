@@ -1,7 +1,7 @@
 use crate::efi::*;
 use crate::graphics::*;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum WasabiError {
     Failed(),
     GraphicsError(GraphicsError),
@@ -21,3 +21,5 @@ impl From<EfiStatus> for WasabiError {
         WasabiError::EfiError(e)
     }
 }
+
+pub type Result<T> = core::result::Result<T, WasabiError>;

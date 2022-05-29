@@ -1,7 +1,6 @@
 use crate::boot_info::File;
 use crate::efi;
 use crate::*;
-use core::ptr::null_mut;
 use error::*;
 
 struct EfiServices {
@@ -20,49 +19,26 @@ impl EfiServices {
         }
     }
     fn get_loaded_image_protocol(&self) -> &'static mut efi::EfiLoadedImageProtocol<'static> {
-        let mut loaded_image_protocol: *mut efi::EfiLoadedImageProtocol =
-            null_mut::<efi::EfiLoadedImageProtocol>();
-        unsafe {
-            let status = (self
-                .efi_system_table
-                .boot_services()
-                .handle_protocol
-                .handle_loaded_image_protocol)(
-                self.image_handle,
-                &efi::EFI_LOADED_IMAGE_PROTOCOL_GUID,
-                &mut loaded_image_protocol,
-            );
-            assert_eq!(status, efi::EfiStatus::SUCCESS);
-            println!(
-                "Got LoadedImageProtocol. Revision: {:#X} system_table: {:#p}",
-                (*loaded_image_protocol).revision,
-                (*loaded_image_protocol).system_table
-            );
-        }
-        unsafe { &mut *loaded_image_protocol }
+        let loaded_image_protocol = self
+            .efi_system_table
+            .boot_services()
+            .handle_loaded_image_protocol(self.image_handle)
+            .expect("Failed to get Loaded Image Protocol");
+        println!(
+            "Got LoadedImageProtocol. Revision: {:#X} system_table: {:#p}",
+            loaded_image_protocol.revision, loaded_image_protocol.system_table
+        );
+        loaded_image_protocol
     }
-    pub fn load_all_root_files(
-        &self,
-        root_files: &mut [Option<File>; 32],
-    ) -> Result<(), WasabiError> {
+    pub fn load_all_root_files(&self, root_files: &mut [Option<File>; 32]) -> Result<()> {
         let loaded_image_protocol = self.get_loaded_image_protocol();
 
-        let mut simple_fs_protocol: *mut efi::EfiSimpleFileSystemProtocol =
-            null_mut::<efi::EfiSimpleFileSystemProtocol>();
-        unsafe {
-            let status = (self
-                .efi_system_table
-                .boot_services()
-                .handle_protocol
-                .handle_simple_file_system_protocol)(
-                (*loaded_image_protocol).device_handle,
-                &efi::EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
-                &mut simple_fs_protocol,
-            );
-            assert_eq!(status, efi::EfiStatus::SUCCESS);
-            println!("Got SimpleFileSystemProtocol.",);
-        }
-        let simple_fs_protocol = unsafe { &*simple_fs_protocol };
+        let simple_fs_protocol = self
+            .efi_system_table
+            .boot_services()
+            .handle_simple_file_system_protocol((*loaded_image_protocol).device_handle)
+            .expect("Failed to get Simple Filesystem Protocol");
+        println!("Got SimpleFileSystemProtocol.",);
         let root_file = simple_fs_protocol.open_volume();
         let root_fs_info = root_file.get_fs_info();
         println!(

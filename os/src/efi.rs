@@ -1,6 +1,7 @@
 use crate::error::*;
 use crate::memory_map_holder;
 use crate::util::*;
+use crate::MemoryMapHolder;
 use core::fmt;
 use core::ptr::null_mut;
 
@@ -42,7 +43,7 @@ impl fmt::Display for CStrPtr16 {
                 index += 1;
             }
         }
-        Result::Ok(())
+        fmt::Result::Ok(())
     }
 }
 
@@ -104,23 +105,13 @@ pub type EfiHandle = u64;
 pub enum EfiStatus {
     SUCCESS = 0,
 }
-
-type EfiResult = Result<(), EfiStatus>;
-
-impl From<EfiStatus> for EfiResult {
-    fn from(e: EfiStatus) -> Self {
-        use EfiStatus::*;
-        if e == SUCCESS {
+impl EfiStatus {
+    pub fn into_result(self) -> Result<()> {
+        if self == EfiStatus::SUCCESS {
             Ok(())
         } else {
-            Err(e)
+            Err(self.into())
         }
-    }
-}
-
-impl EfiStatus {
-    pub fn into_result(&self) -> EfiResult {
-        (*self).into()
     }
 }
 
@@ -137,7 +128,7 @@ pub struct EfiSimpleTextOutputProtocol {
 }
 
 impl EfiSimpleTextOutputProtocol {
-    pub fn clear_screen(&self) -> Result<(), EfiStatus> {
+    pub fn clear_screen(&self) -> Result<()> {
         (self.clear_screen)(self).into_result()
     }
 }
@@ -324,8 +315,6 @@ impl EfiFileProtocol {
         );
         assert_eq!(status, EfiStatus::SUCCESS);
         if size_read > 0 {
-            crate::println!("Read {size_read} bytes");
-            crate::print::hexdump_struct(&data);
             Some(data)
         } else {
             None
@@ -334,7 +323,7 @@ impl EfiFileProtocol {
     pub fn read_file_info(&self) -> Option<EfiFileInfo> {
         self.read_into_type::<EfiFileInfo>()
     }
-    pub fn read_into_slice<T>(&self, buf: &mut [T]) -> Result<(), WasabiError> {
+    pub fn read_into_slice<T>(&self, buf: &mut [T]) -> Result<()> {
         let size_expected = buf.len();
         let mut size_read = size_expected;
         let status = (self.read)(
@@ -439,17 +428,17 @@ pub enum MemoryType {
 }
 
 pub struct EfiBootServicesTable {
-    pub header: EfiTableHeader,
+    _header: EfiTableHeader,
 
     _reserved0: [u64; 2],
-    pub allocate_pages: extern "win64" fn(
+    allocate_pages: extern "win64" fn(
         allocate_type: AllocType,
         memory_type: MemoryType,
         pages: usize,
         mem: &*mut u8,
     ) -> EfiStatus,
     _reserved1: [u64; 1],
-    pub get_memory_map: extern "win64" fn(
+    get_memory_map: extern "win64" fn(
         memory_map_size: *mut usize,
         memory_map: *mut u8,
         map_key: *mut usize,
@@ -457,16 +446,66 @@ pub struct EfiBootServicesTable {
         descriptor_version: *mut u32,
     ) -> EfiStatus,
     _reserved2: [u64; 11],
-    pub handle_protocol: EfiBootServicesTableHandleProtocolVariants,
+    handle_protocol: EfiBootServicesTableHandleProtocolVariants,
     _reserved3: [u64; 9],
-    pub exit_boot_services: extern "win64" fn(image_handle: EfiHandle, map_key: usize) -> EfiStatus,
+    exit_boot_services: extern "win64" fn(image_handle: EfiHandle, map_key: usize) -> EfiStatus,
 
     _reserved4: [u64; 10],
-    pub locate_protocol: extern "win64" fn(
+    locate_protocol: extern "win64" fn(
         protocol: *const EfiGuid,
         registration: *const EfiVoid,
         interface: *mut *mut EfiVoid,
     ) -> EfiStatus,
+}
+
+impl EfiBootServicesTable {
+    pub fn get_memory_map(&self, map: &mut MemoryMapHolder) -> EfiStatus {
+        (self.get_memory_map)(
+            &mut map.memory_map_size,
+            map.memory_map_buffer.as_mut_ptr(),
+            &mut map.map_key,
+            &mut map.descriptor_size,
+            &mut map.descriptor_version,
+        )
+    }
+    pub fn handle_simple_file_system_protocol(
+        &self,
+        device_handle: EfiHandle,
+    ) -> Result<&EfiSimpleFileSystemProtocol> {
+        let mut simple_fs_protocol: *mut EfiSimpleFileSystemProtocol =
+            null_mut::<EfiSimpleFileSystemProtocol>();
+        unsafe {
+            let status = (self.handle_protocol.handle_simple_file_system_protocol)(
+                device_handle,
+                &EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
+                &mut simple_fs_protocol,
+            );
+            if status != EfiStatus::SUCCESS {
+                return Err(status.into());
+            }
+        }
+        let simple_fs_protocol = unsafe { &*simple_fs_protocol };
+        Ok(simple_fs_protocol)
+    }
+    pub fn handle_loaded_image_protocol(
+        &self,
+        image_handle: EfiHandle,
+    ) -> Result<&mut EfiLoadedImageProtocol> {
+        let mut loaded_image_protocol: *mut EfiLoadedImageProtocol =
+            null_mut::<EfiLoadedImageProtocol>();
+        unsafe {
+            let status = (self.handle_protocol.handle_loaded_image_protocol)(
+                image_handle,
+                &EFI_LOADED_IMAGE_PROTOCOL_GUID,
+                &mut loaded_image_protocol,
+            );
+            if status != EfiStatus::SUCCESS {
+                return Err(status.into());
+            }
+        }
+        let loaded_image_protocol = unsafe { &mut *loaded_image_protocol };
+        Ok(loaded_image_protocol)
+    }
 }
 
 #[repr(i64)]
@@ -572,7 +611,7 @@ impl fmt::Write for EfiSimpleTextOutputProtocolWriter<'_> {
 
 pub fn locate_mp_services_protocol<'a>(
     efi_system_table: &'a EfiSystemTable,
-) -> Result<&'a EfiMPServicesProtocol, WasabiError> {
+) -> Result<&'a EfiMPServicesProtocol> {
     let mut protocol: *mut EfiMPServicesProtocol = null_mut::<EfiMPServicesProtocol>();
     let status = (efi_system_table.boot_services.locate_protocol)(
         &EFI_MP_SERVICES_PROTOCOL_GUID,
@@ -588,7 +627,7 @@ pub fn locate_mp_services_protocol<'a>(
 unsafe fn alloc_pages(
     efi_system_table: &EfiSystemTable,
     number_of_pages: usize,
-) -> Result<*mut u8, WasabiError> {
+) -> Result<*mut u8> {
     let mut mem: *mut u8 = null_mut::<u8>();
     let status = (efi_system_table.boot_services.allocate_pages)(
         AllocType::AnyPages,
@@ -596,16 +635,13 @@ unsafe fn alloc_pages(
         number_of_pages,
         &mut mem,
     );
-    status
-        .into_result()
-        .and(Ok(mem))
-        .map_err(WasabiError::EfiError)
+    status.into_result().and(Ok(mem))
 }
 
 pub fn alloc_byte_slice<'a>(
     efi_system_table: &'a EfiSystemTable,
     size: usize,
-) -> Result<&'a mut [u8], WasabiError> {
+) -> Result<&'a mut [u8]> {
     Ok(unsafe {
         core::slice::from_raw_parts_mut(
             alloc_pages(efi_system_table, size_in_pages_from_bytes(size))?,
@@ -616,7 +652,7 @@ pub fn alloc_byte_slice<'a>(
 
 pub fn locate_graphic_protocol<'a>(
     efi_system_table: &'a EfiSystemTable,
-) -> Result<&'a EfiGraphicsOutputProtocol<'a>, WasabiError> {
+) -> Result<&'a EfiGraphicsOutputProtocol<'a>> {
     let mut graphic_output_protocol: *mut EfiGraphicsOutputProtocol =
         null_mut::<EfiGraphicsOutputProtocol>();
     let status = (efi_system_table.boot_services.locate_protocol)(
@@ -639,7 +675,7 @@ pub fn exit_from_efi_boot_services(
     loop {
         // exit_boot_services can fail if the memory map is updated in the logic so keep retrying in the
         // loop.
-        let status = memory_map_holder::get_memory_map(efi_system_table, memory_map);
+        let status = efi_system_table.boot_services.get_memory_map(memory_map);
         assert_eq!(status, EfiStatus::SUCCESS);
         let status =
             (efi_system_table.boot_services.exit_boot_services)(image_handle, memory_map.map_key);

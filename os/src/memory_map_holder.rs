@@ -43,13 +43,3 @@ impl MemoryMapHolder {
         MemoryMapIterator { map: self, ofs: 0 }
     }
 }
-
-pub fn get_memory_map(efi_system_table: &EfiSystemTable, map: &mut MemoryMapHolder) -> EfiStatus {
-    (efi_system_table.boot_services().get_memory_map)(
-        &mut map.memory_map_size,
-        map.memory_map_buffer.as_mut_ptr(),
-        &mut map.map_key,
-        &mut map.descriptor_size,
-        &mut map.descriptor_version,
-    )
-}

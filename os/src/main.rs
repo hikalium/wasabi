@@ -50,7 +50,7 @@ fn paint_wasabi_logo() {
     }
 }
 
-pub fn main() -> Result<(), WasabiError> {
+pub fn main() -> Result<()> {
     use core::fmt::Write;
     use os::*;
     init::init_graphical_terminal();
