@@ -3,7 +3,7 @@ use crate::graphics::*;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum WasabiError {
-    Failed(),
+    Failed(&'static str),
     GraphicsError(GraphicsError),
     EfiError(EfiStatus),
     FileNameTooLong,
@@ -19,6 +19,11 @@ impl From<GraphicsError> for WasabiError {
 impl From<EfiStatus> for WasabiError {
     fn from(e: EfiStatus) -> Self {
         WasabiError::EfiError(e)
+    }
+}
+impl From<&'static str> for WasabiError {
+    fn from(s: &'static str) -> Self {
+        WasabiError::Failed(s)
     }
 }
 

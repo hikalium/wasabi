@@ -48,6 +48,7 @@ impl fmt::Display for CStrPtr16 {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct EfiGuid {
     data0: u32,
     data1: u16,
@@ -61,7 +62,6 @@ pub const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data2: 0x4a38,
     data3: [0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a],
 };
-
 pub const EFI_MP_SERVICES_PROTOCOL_GUID: EfiGuid = EfiGuid {
     data0: 0x3fdda605,
     data1: 0xa76e,
@@ -85,6 +85,12 @@ pub const EFI_FILE_SYSTEM_INFO_GUID: EfiGuid = EfiGuid {
     data1: 0x6d3f,
     data2: 0x11d2,
     data3: [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
+};
+pub const EFI_ACPI_TABLE_GUID: EfiGuid = EfiGuid {
+    data0: 0x8868e871,
+    data1: 0xe4f1,
+    data2: 0x11d3,
+    data3: [0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81],
 };
 
 pub type EfiVoid = u8;
@@ -558,6 +564,12 @@ impl fmt::Debug for EfiMemoryDescriptor {
 }
 
 #[repr(C)]
+struct EfiConfigurationTable {
+    vendor_guid: EfiGuid,
+    vendor_table: *const u8,
+}
+
+#[repr(C)]
 pub struct EfiSystemTable<'a> {
     header: EfiTableHeader,
     firmware_vendor: EfiHandle,
@@ -570,6 +582,8 @@ pub struct EfiSystemTable<'a> {
     std_err: EfiHandle,
     runtime_services: EfiHandle,
     boot_services: &'a EfiBootServicesTable,
+    number_of_table_entries: usize,
+    configuration_table: *const EfiConfigurationTable,
 }
 
 impl<'a> EfiSystemTable<'a> {
@@ -578,6 +592,15 @@ impl<'a> EfiSystemTable<'a> {
     }
     pub fn boot_services(&self) -> &'a EfiBootServicesTable {
         self.boot_services
+    }
+    pub fn get_table_with_guid(&self, guid: &EfiGuid) -> Option<*const u8> {
+        for i in 0..self.number_of_table_entries {
+            let ct = unsafe { &*self.configuration_table.add(i) };
+            if ct.vendor_guid == *guid {
+                return Some(ct.vendor_table);
+            }
+        }
+        None
     }
 }
 
@@ -619,7 +642,7 @@ pub fn locate_mp_services_protocol<'a>(
         &mut protocol as *mut *mut EfiMPServicesProtocol as *mut *mut EfiVoid,
     );
     if status != EfiStatus::SUCCESS {
-        return Err(WasabiError::Failed());
+        return Err("MP services not found".into());
     }
     Ok(unsafe { &*protocol })
 }
@@ -661,7 +684,7 @@ pub fn locate_graphic_protocol<'a>(
         &mut graphic_output_protocol as *mut *mut EfiGraphicsOutputProtocol as *mut *mut EfiVoid,
     );
     if status != EfiStatus::SUCCESS {
-        return Err(WasabiError::Failed());
+        return Err("Failed to locate graphics output protocol".into());
     }
     Ok(unsafe { &*graphic_output_protocol })
 }

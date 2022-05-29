@@ -1,6 +1,7 @@
 use crate::boot_info::File;
 use crate::efi;
 use crate::*;
+use acpi::Acpi;
 use error::*;
 
 struct EfiServices {
@@ -92,6 +93,14 @@ impl EfiServices {
         );
         memory_map
     }
+    fn get_acpi_table(&self) -> Result<Acpi> {
+        let rsdp_struct = self
+            .efi_system_table
+            .get_table_with_guid(&efi::EFI_ACPI_TABLE_GUID)
+            .expect("ACPI table not found");
+
+        Acpi::new(rsdp_struct)
+    }
 }
 
 pub fn init_basic_runtime(
@@ -108,7 +117,10 @@ pub fn init_basic_runtime(
         .load_all_root_files(&mut root_files)
         .expect("Failed to load root files");
     let vram = efi_services.get_vram_info();
-
+    let _acpi_table = efi_services
+        .get_acpi_table()
+        .expect("Failed to get ACPI tables");
+    // Exit from BootServices
     let memory_map = EfiServices::exit_from_boot_services(efi_services);
     let boot_info = BootInfo::new(vram, memory_map, root_files);
     unsafe {
