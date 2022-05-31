@@ -57,6 +57,9 @@ pub fn main() -> Result<()> {
     init::init_global_allocator();
     os::println!("Booting Wasabi OS!!!");
     paint_wasabi_logo();
+
+    init::init_interrupts();
+
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();
     let root_files: alloc::vec::Vec<&os::boot_info::File> =

@@ -139,3 +139,8 @@ pub fn init_graphical_terminal() {
     let textarea = TextArea::new(vram, 8, 16, vram.width() - 16, vram.height() - 32);
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
 }
+
+pub fn init_interrupts() {
+    crate::println!("init_interrupts()");
+    x86::disable_legacy_pic();
+}
