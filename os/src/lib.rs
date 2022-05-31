@@ -7,6 +7,7 @@
 #![reexport_test_harness_main = "test_main"]
 
 pub mod acpi;
+pub mod apic;
 pub mod boot_info;
 pub mod debug_exit;
 pub mod efi;

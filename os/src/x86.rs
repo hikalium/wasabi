@@ -2,6 +2,29 @@ use crate::println;
 use core::arch::asm;
 use core::fmt;
 
+pub const MSR_IA32_APIC_BASE: u32 = 0x1b;
+
+pub fn read_msr(port: u32) -> u64 {
+    let mut high: u32;
+    let mut low: u32;
+    unsafe {
+        asm!("rdmsr",
+            in("ecx") port,
+            out("edx") high,
+            out("eax") low);
+    }
+    ((high as u64) << 32) | low as u64
+}
+
+pub fn write_msr(port: u32, data: u64) {
+    unsafe {
+        asm!("wrmsr",
+            in("ecx") port,
+            in("edx") (data >> 32),
+            in("eax") data as u32);
+    }
+}
+
 pub fn write_io_port(port: u16, data: u8) {
     unsafe {
         asm!("out dx, al",

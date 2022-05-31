@@ -2,6 +2,7 @@ use crate::boot_info::File;
 use crate::efi;
 use crate::*;
 use acpi::Acpi;
+use apic::LocalApic;
 use error::*;
 
 struct EfiServices {
@@ -143,4 +144,5 @@ pub fn init_graphical_terminal() {
 pub fn init_interrupts() {
     crate::println!("init_interrupts()");
     x86::disable_legacy_pic();
+    let bsp_local_apic = LocalApic::new();
 }
