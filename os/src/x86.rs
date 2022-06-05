@@ -25,6 +25,40 @@ pub fn write_msr(port: u32, data: u64) {
     }
 }
 
+pub struct CpuidRequest {
+    pub eax: u32,
+    pub ecx: u32,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct CpuidResponse {
+    ebx: u32,
+    edx: u32,
+    ecx: u32,
+    eax: u32,
+}
+
+pub fn read_cpuid(request: CpuidRequest) -> CpuidResponse {
+    let mut eax: u32 = request.eax;
+    let mut ebx: u32;
+    let mut ecx: u32 = request.ecx;
+    let mut edx: u32;
+    unsafe {
+        asm!(
+            "xchg rsi,rbx",
+            "cpuid",
+            "xchg rsi,rbx",
+            inout("eax") eax,
+            out("esi") ebx,
+            inout("ecx") ecx,
+            out("edx") edx,
+            clobber_abi("C"),
+        );
+    }
+    CpuidResponse { eax, ebx, ecx, edx }
+}
+
 pub fn write_io_port(port: u16, data: u8) {
     unsafe {
         asm!("out dx, al",

@@ -1,8 +1,10 @@
 use crate::boot_info::File;
 use crate::efi;
+use crate::x86::*;
 use crate::*;
 use acpi::Acpi;
 use apic::LocalApic;
+use core::str;
 use error::*;
 
 struct EfiServices {
@@ -144,5 +146,10 @@ pub fn init_graphical_terminal() {
 pub fn init_interrupts() {
     crate::println!("init_interrupts()");
     x86::disable_legacy_pic();
-    let bsp_local_apic = LocalApic::new();
+    let _bsp_local_apic = LocalApic::new();
+    let c = x86::read_cpuid(CpuidRequest { eax: 0, ecx: 0 });
+    crate::println!("cpuid(0, 0) = {:?}", c);
+    let slice = unsafe { core::slice::from_raw_parts(&c as *const CpuidResponse as *const u8, 12) };
+    let vendor = str::from_utf8(slice).expect("failed to parse utf8 str");
+    crate::println!("cpuid(0, 0).vendor = {}", vendor);
 }

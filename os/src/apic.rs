@@ -2,6 +2,7 @@ use crate::println;
 use crate::x86;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct LocalApic {
     base_addr: u64,
 }
@@ -16,6 +17,12 @@ impl LocalApic {
         Self {
             base_addr: apic_base & ((1u64 << 12) - 1),
         }
+    }
+}
+
+impl Default for LocalApic {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
