@@ -68,16 +68,38 @@ impl Mcfg {
         let mcfg: &Self = unsafe { core::mem::transmute(header) };
         mcfg
     }
+    fn header_size(&self) -> usize {
+        size_of::<Self>()
+    }
+    fn num_of_entries(&self) -> usize {
+        (self.header.length as usize - self.header_size()) / core::mem::size_of::<EcamEntry>()
+    }
+    unsafe fn entry(&self, index: usize) -> &EcamEntry {
+        &*((self as *const Self as *const u8).add(self.header_size()) as *const EcamEntry)
+            .add(index)
+    }
 }
 
-#[derive(Debug)]
-#[repr(C)]
+#[repr(packed)]
 struct EcamEntry {
     ecm_base_phys_addr: u64,
-    pci_segment_group: u16,
+    _pci_segment_group: u16,
     start_pci_bus: u8,
     end_pci_bus: u8,
     _reserved: u32,
+}
+impl fmt::Display for EcamEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // To avoid "error: reference to packed field is unaligned"
+        let base = self.ecm_base_phys_addr;
+        let bus_start = self.start_pci_bus;
+        let bus_end = self.end_pci_bus;
+        write!(
+            f,
+            "ECAM: Bus range [{},{}] is mapped at {:#X}",
+            bus_start, bus_end, base
+        )
+    }
 }
 
 trait AcpiIterableTable {
@@ -164,6 +186,12 @@ impl Acpi {
 
         let mcfg = Mcfg::new(xsdt.find_table(b"MCFG").expect("MCFG not found"));
         println!("{:?}", mcfg);
+        for i in 0..mcfg.num_of_entries() {
+            unsafe {
+                let e = mcfg.entry(i);
+                println!("{}", e);
+            }
+        }
         Ok(Acpi {})
     }
 }

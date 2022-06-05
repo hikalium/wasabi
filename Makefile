@@ -110,7 +110,7 @@ watch_qemu_monitor:
 install : run_deps
 	cd os && cargo install --path . --root ../generated/
 	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
-	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " && \
+	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " REPLY && \
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 
 internal_launch_qemu : run_deps
