@@ -59,6 +59,7 @@ pub fn main() -> Result<()> {
     paint_wasabi_logo();
 
     init::init_interrupts();
+    init::init_pci();
 
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();

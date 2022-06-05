@@ -96,7 +96,7 @@ impl EfiServices {
         );
         memory_map
     }
-    fn get_acpi_table(&self) -> Result<Acpi> {
+    fn get_acpi_tables(&self) -> Result<Acpi> {
         let rsdp_struct = self
             .efi_system_table
             .get_table_with_guid(&efi::EFI_ACPI_TABLE_GUID)
@@ -121,7 +121,7 @@ pub fn init_basic_runtime(
         .expect("Failed to load root files");
     let vram = efi_services.get_vram_info();
     let _acpi_table = efi_services
-        .get_acpi_table()
+        .get_acpi_tables()
         .expect("Failed to get ACPI tables");
     // Exit from BootServices
     let memory_map = EfiServices::exit_from_boot_services(efi_services);
@@ -152,4 +152,8 @@ pub fn init_interrupts() {
     let slice = unsafe { core::slice::from_raw_parts(&c as *const CpuidResponse as *const u8, 12) };
     let vendor = str::from_utf8(slice).expect("failed to parse utf8 str");
     crate::println!("cpuid(0, 0).vendor = {}", vendor);
+}
+
+pub fn init_pci() {
+    crate::println!("init_pci()");
 }
