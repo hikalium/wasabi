@@ -593,11 +593,11 @@ impl<'a> EfiSystemTable<'a> {
     pub fn boot_services(&self) -> &'a EfiBootServicesTable {
         self.boot_services
     }
-    pub fn get_table_with_guid(&self, guid: &EfiGuid) -> Option<*const u8> {
+    pub fn get_table_with_guid<T>(&self, guid: &EfiGuid) -> Option<&T> {
         for i in 0..self.number_of_table_entries {
             let ct = unsafe { &*self.configuration_table.add(i) };
             if ct.vendor_guid == *guid {
-                return Some(ct.vendor_table);
+                return Some(unsafe { &*(ct.vendor_table as *const T) });
             }
         }
         None
@@ -647,10 +647,9 @@ pub fn locate_mp_services_protocol<'a>(
     Ok(unsafe { &*protocol })
 }
 
-unsafe fn alloc_pages(
-    efi_system_table: &EfiSystemTable,
-    number_of_pages: usize,
-) -> Result<*mut u8> {
+/// alloc_pages allocates a memory region
+/// with EFI_LOADER_DATA type so that the // region stays even after exiting boot services.
+pub fn alloc_pages(efi_system_table: &EfiSystemTable, number_of_pages: usize) -> Result<*mut u8> {
     let mut mem: *mut u8 = null_mut::<u8>();
     let status = (efi_system_table.boot_services.allocate_pages)(
         AllocType::AnyPages,

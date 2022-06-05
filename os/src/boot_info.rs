@@ -1,3 +1,4 @@
+use crate::acpi::Acpi;
 use crate::efi::EfiFileName;
 use crate::error::WasabiError;
 use crate::*;
@@ -32,17 +33,20 @@ pub struct BootInfo {
     vram: VRAMBufferInfo,
     memory_map: MemoryMapHolder,
     root_files: [Option<File>; 32],
+    acpi: Acpi,
 }
 impl BootInfo {
     pub fn new(
         vram: VRAMBufferInfo,
         memory_map: MemoryMapHolder,
         root_files: [Option<File>; 32],
+        acpi: Acpi,
     ) -> BootInfo {
         BootInfo {
             vram,
             memory_map,
             root_files,
+            acpi,
         }
     }
     pub fn vram(&self) -> VRAMBufferInfo {
@@ -53,6 +57,9 @@ impl BootInfo {
     }
     pub fn root_files(&self) -> &[Option<File>; 32] {
         &self.root_files
+    }
+    pub fn acpi(&self) -> &Acpi {
+        &self.acpi
     }
     /// # Safety
     ///

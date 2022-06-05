@@ -1,13 +1,16 @@
 use crate::boot_info::File;
 use crate::efi;
+use crate::util::size_in_pages_from_bytes;
 use crate::x86::*;
 use crate::*;
 use acpi::Acpi;
 use apic::LocalApic;
+use core::mem::size_of;
+use core::slice;
 use core::str;
 use error::*;
 
-struct EfiServices {
+pub struct EfiServices {
     image_handle: efi::EfiHandle,
     efi_system_table: &'static mut efi::EfiSystemTable<'static>,
 }
@@ -96,13 +99,32 @@ impl EfiServices {
         );
         memory_map
     }
-    fn get_acpi_tables(&self) -> Result<Acpi> {
+    fn setup_acpi_tables(&self) -> Result<Acpi> {
         let rsdp_struct = self
             .efi_system_table
             .get_table_with_guid(&efi::EFI_ACPI_TABLE_GUID)
             .expect("ACPI table not found");
 
-        Acpi::new(rsdp_struct)
+        Acpi::new(rsdp_struct, self)
+    }
+    pub fn alloc_boot_data(&self, size: usize) -> Result<&'static mut [u8]> {
+        // This is safe since it constructs a slice with the same size of allocated buf.
+        Ok(unsafe {
+            slice::from_raw_parts_mut(
+                efi::alloc_pages(self.efi_system_table, size_in_pages_from_bytes(size))?,
+                size,
+            )
+        })
+    }
+    /// # Safety
+    /// this is safe as long as the `size` arg is valid and the data copied does not contain
+    /// pointers nor references.
+    pub unsafe fn alloc_and_copy<T: 'static>(&self, src: &T, size: usize) -> Result<&'static T> {
+        assert!(size_of::<T>() <= size);
+        let src = core::slice::from_raw_parts(src as *const T as *const u8, size);
+        let dst = self.alloc_boot_data(size)?;
+        dst.copy_from_slice(src);
+        Ok(&*(dst.as_ptr() as *const T))
     }
 }
 
@@ -120,12 +142,12 @@ pub fn init_basic_runtime(
         .load_all_root_files(&mut root_files)
         .expect("Failed to load root files");
     let vram = efi_services.get_vram_info();
-    let _acpi_table = efi_services
-        .get_acpi_tables()
-        .expect("Failed to get ACPI tables");
+    let acpi = efi_services
+        .setup_acpi_tables()
+        .expect("Failed to setup ACPI tables");
     // Exit from BootServices
     let memory_map = EfiServices::exit_from_boot_services(efi_services);
-    let boot_info = BootInfo::new(vram, memory_map, root_files);
+    let boot_info = BootInfo::new(vram, memory_map, root_files, acpi);
     unsafe {
         BootInfo::set(boot_info);
     }
@@ -149,11 +171,18 @@ pub fn init_interrupts() {
     let _bsp_local_apic = LocalApic::new();
     let c = x86::read_cpuid(CpuidRequest { eax: 0, ecx: 0 });
     crate::println!("cpuid(0, 0) = {:?}", c);
-    let slice = unsafe { core::slice::from_raw_parts(&c as *const CpuidResponse as *const u8, 12) };
+    let slice = unsafe { slice::from_raw_parts(&c as *const CpuidResponse as *const u8, 12) };
     let vendor = str::from_utf8(slice).expect("failed to parse utf8 str");
     crate::println!("cpuid(0, 0).vendor = {}", vendor);
 }
 
 pub fn init_pci() {
     crate::println!("init_pci()");
+    let acpi = BootInfo::take().acpi();
+    let mcfg = acpi.mcfg();
+    println!("{:?}", mcfg);
+    for i in 0..mcfg.num_of_entries() {
+        let e = mcfg.entry(i).expect("Out of range");
+        println!("{}", e);
+    }
 }
