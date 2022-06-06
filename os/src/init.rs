@@ -1,5 +1,6 @@
 use crate::boot_info::File;
 use crate::efi;
+use crate::pci::Pci;
 use crate::util::size_in_pages_from_bytes;
 use crate::x86::*;
 use crate::*;
@@ -180,9 +181,7 @@ pub fn init_pci() {
     crate::println!("init_pci()");
     let acpi = BootInfo::take().acpi();
     let mcfg = acpi.mcfg();
-    println!("{:?}", mcfg);
-    for i in 0..mcfg.num_of_entries() {
-        let e = mcfg.entry(i).expect("Out of range");
-        println!("{}", e);
-    }
+    let pci = Pci::new(mcfg);
+    // This is safe since it is only called once
+    unsafe { Pci::set(pci) };
 }

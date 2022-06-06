@@ -16,6 +16,7 @@ pub mod graphics;
 pub mod init;
 pub mod memory_map_holder;
 pub mod panic;
+pub mod pci;
 pub mod print;
 pub mod serial;
 pub mod test_runner;

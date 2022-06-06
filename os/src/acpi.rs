@@ -99,16 +99,21 @@ impl Mcfg {
 
 #[repr(packed)]
 pub struct EcamEntry {
-    ecm_base_phys_addr: u64,
+    ecm_base_addr: u64,
     _pci_segment_group: u16,
     start_pci_bus: u8,
     end_pci_bus: u8,
     _reserved: u32,
 }
+impl EcamEntry {
+    pub fn base_address(&self) -> u64 {
+        self.ecm_base_addr
+    }
+}
 impl fmt::Display for EcamEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // To avoid "error: reference to packed field is unaligned"
-        let base = self.ecm_base_phys_addr;
+        let base = self.ecm_base_addr;
         let bus_start = self.start_pci_bus;
         let bus_end = self.end_pci_bus;
         write!(
