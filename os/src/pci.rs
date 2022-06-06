@@ -3,7 +3,7 @@ use crate::println;
 use core::ops::Range;
 
 pub struct Pci {
-    ecm_range: Range<u64>,
+    ecm_range: Range<usize>,
 }
 impl Pci {
     pub fn new(mcfg: &Mcfg) -> Self {
@@ -14,7 +14,7 @@ impl Pci {
         }
         // To simplify, assume that there is one mcfg entry that maps all the pci configuration spaces.
         assert!(mcfg.num_of_entries() == 1);
-        let pci_config_space_base = mcfg.entry(0).expect("Out of range").base_address();
+        let pci_config_space_base = mcfg.entry(0).expect("Out of range").base_address() as usize;
         let pci_config_space_end = pci_config_space_base + (1 << 24);
         println!(
             "PCI config space is mapped at: [{:#018X},{:#018X})",
@@ -22,6 +22,39 @@ impl Pci {
         );
         Pci {
             ecm_range: pci_config_space_base..pci_config_space_end,
+        }
+    }
+    fn ecm_base(&self, bus: usize, device: usize, function: usize) -> *mut u16 {
+        assert!((0..256).contains(&bus));
+        assert!((0..32).contains(&device));
+        assert!((0..8).contains(&function));
+        (self.ecm_range.start + (bus << 20) + (device << 15) + (function << 12)) as *mut u16
+    }
+    pub fn read_register_u16(
+        &self,
+        bus: usize,
+        device: usize,
+        function: usize,
+        byte_offset: usize,
+    ) -> u16 {
+        assert!((0..256).contains(&byte_offset));
+        assert!(byte_offset & 1 == 0);
+        let ecm_base = self.ecm_base(bus, device, function);
+        unsafe { *ecm_base.add(byte_offset >> 1) }
+    }
+    pub fn list_devices(&self) {
+        for bus in 0..256 {
+            for device in 0..32 {
+                for function in 0..8 {
+                    let device_id = self.read_register_u16(bus, device, function, 0);
+                    let vendor_id = self.read_register_u16(bus, device, function, 2);
+                    if device_id == 0xFFFF {
+                        // Not connected
+                        continue;
+                    }
+                    println!("bus:{:#02X}, device:{:#02X}, function: {:#02X}, device_id: {:#04X}, vendor_id: {:#04X}", bus, device, function, device_id, vendor_id);
+                }
+            }
         }
     }
     /// # Safety

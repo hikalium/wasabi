@@ -184,4 +184,6 @@ pub fn init_pci() {
     let pci = Pci::new(mcfg);
     // This is safe since it is only called once
     unsafe { Pci::set(pci) };
+
+    Pci::take().list_devices();
 }
