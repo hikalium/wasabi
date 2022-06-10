@@ -5,6 +5,10 @@ use core::ops::Range;
 pub struct Pci {
     ecm_range: Range<usize>,
 }
+pub struct VendorDeviceId {
+    pub vendor: u16,
+    pub device: u16,
+}
 impl Pci {
     pub fn new(mcfg: &Mcfg) -> Self {
         println!("{:?}", mcfg);
@@ -42,17 +46,30 @@ impl Pci {
         let ecm_base = self.ecm_base(bus, device, function);
         unsafe { *ecm_base.add(byte_offset >> 1) }
     }
+    pub fn read_vendor_id_and_device_id(
+        &self,
+        bus: usize,
+        device: usize,
+        function: usize,
+    ) -> Option<VendorDeviceId> {
+        let vendor = self.read_register_u16(bus, device, function, 0);
+        let device = self.read_register_u16(bus, device, function, 2);
+        if vendor == 0xFFFF || device == 0xFFFF {
+            // Not connected
+            None
+        } else {
+            Some(VendorDeviceId { vendor, device })
+        }
+    }
     pub fn list_devices(&self) {
         for bus in 0..256 {
             for device in 0..32 {
                 for function in 0..8 {
-                    let device_id = self.read_register_u16(bus, device, function, 0);
-                    let vendor_id = self.read_register_u16(bus, device, function, 2);
-                    if device_id == 0xFFFF {
-                        // Not connected
-                        continue;
+                    if let Some(VendorDeviceId { vendor, device }) =
+                        self.read_vendor_id_and_device_id(bus, device, function)
+                    {
+                        println!("bus:{:#02X}, device:{:#02X}, function: {:#02X}, vendor_id: {:#04X}, device_id: {:#04X}", bus, device, function, vendor, device);
                     }
-                    println!("bus:{:#02X}, device:{:#02X}, function: {:#02X}, device_id: {:#04X}, vendor_id: {:#04X}", bus, device, function, device_id, vendor_id);
                 }
             }
         }

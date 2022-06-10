@@ -1,6 +1,7 @@
 use crate::boot_info::File;
 use crate::efi;
 use crate::pci::Pci;
+use crate::pci::VendorDeviceId;
 use crate::util::size_in_pages_from_bytes;
 use crate::x86::*;
 use crate::*;
@@ -186,4 +187,22 @@ pub fn init_pci() {
     unsafe { Pci::set(pci) };
 
     Pci::take().list_devices();
+}
+
+pub fn init_devices() {
+    crate::println!("init_devices()");
+    let pci = Pci::take();
+    for bus in 0..256 {
+        for device in 0..32 {
+            for function in 0..8 {
+                if let Some(VendorDeviceId { vendor, device }) =
+                    pci.read_vendor_id_and_device_id(bus, device, function)
+                {
+                    if (vendor, device) == (0x10ec, 0x8139) {
+                        println!("RTL8139 NIC @ bus:{:#02X}, device:{:#02X}, function: {:#02X}, vendor_id: {:#04X}, device_id: {:#04X}", bus, device, function, vendor, device);
+                    }
+                }
+            }
+        }
+    }
 }
