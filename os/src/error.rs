@@ -3,10 +3,11 @@ use crate::graphics::*;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum WasabiError {
-    Failed(&'static str),
-    GraphicsError(GraphicsError),
     EfiError(EfiStatus),
+    Failed(&'static str),
     FileNameTooLong,
+    GraphicsError(GraphicsError),
+    PciBusDeviceFunctionOutOfRange,
     ReadFileSizeMismatch { expected: usize, actual: usize },
 }
 
