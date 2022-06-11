@@ -4,7 +4,9 @@ use crate::acpi::Mcfg;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
+use crate::x86::busy_loop_hint;
 use crate::x86::read_io_port;
+use crate::x86::write_io_port;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
@@ -153,9 +155,16 @@ pub struct Rtl8139DriverInstance {
     bdf: BusDeviceFunction,
 }
 impl Rtl8139DriverInstance {
+    // https://wiki.osdev.org/RTL8139
     fn new(bdf: BusDeviceFunction) -> Self {
         let pci = Pci::take();
         println!("Instantiating RTL8139 NIC @ {}...", bdf);
+        let cmd_and_status = pci.read_register_u32(bdf, 0x04);
+        pci.write_register_u32(
+            bdf,
+            0x04, /* Command and status */
+            (1 << 2)/* Bus Master Enable */ | (1 << 10) /* Interrupt Disable */ | cmd_and_status,
+        );
         // Assume that BAR0 has IO Port address
         let bar0 = pci.read_register_u32(bdf, 0x10);
         assert_eq!(bar0 & 1, 1 /* I/O space */);
@@ -166,6 +175,15 @@ impl Rtl8139DriverInstance {
         }
         let eth_addr = EthernetAddress::new(&eth_addr);
         println!("eth_addr: {}", eth_addr);
+        // Turn on
+        write_io_port(io_base + 0x52, 0);
+        // Software Reset
+        write_io_port(io_base + 0x37, 0x10);
+        while (read_io_port(io_base + 0x37) & 0x10) != 0 {
+            busy_loop_hint();
+        }
+        println!("Software Reset Done!");
+
         Rtl8139DriverInstance { bdf }
     }
 }
@@ -237,6 +255,13 @@ impl Pci {
         assert!((0..256).contains(&byte_offset));
         assert!(byte_offset & 3 == 0);
         unsafe { *self.ecm_base::<u32>(id).add(byte_offset >> 2) }
+    }
+    pub fn write_register_u32(&self, id: BusDeviceFunction, byte_offset: usize, data: u32) {
+        assert!((0..256).contains(&byte_offset));
+        assert!(byte_offset & 3 == 0);
+        unsafe {
+            *self.ecm_base::<u32>(id).add(byte_offset >> 2) = data;
+        }
     }
     pub fn read_vendor_id_and_device_id(&self, id: BusDeviceFunction) -> Option<VendorDeviceId> {
         let vendor = self.read_register_u16(id, 0);

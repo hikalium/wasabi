@@ -25,6 +25,10 @@ pub fn write_msr(port: u32, data: u64) {
     }
 }
 
+pub fn busy_loop_hint() {
+    unsafe { asm!("pause") }
+}
+
 pub struct CpuidRequest {
     pub eax: u32,
     pub ecx: u32,
