@@ -60,7 +60,6 @@ pub fn main() -> Result<()> {
 
     init::init_interrupts();
     init::init_pci();
-    init::init_devices();
 
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();

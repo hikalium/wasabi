@@ -1,16 +1,25 @@
+extern crate alloc;
+
 use crate::acpi::Mcfg;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
+use alloc::boxed::Box;
+use alloc::collections::btree_map::BTreeMap;
+use alloc::rc::Rc;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::fmt;
 use core::ops::Range;
 
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct VendorDeviceId {
     pub vendor: u16,
     pub device: u16,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BusDeviceFunction {
     id: u16,
 }
@@ -43,9 +52,7 @@ impl BusDeviceFunction {
     pub fn iter() -> BusDeviceFunctionIterator {
         BusDeviceFunctionIterator { next_id: 0 }
     }
-}
-impl fmt::Display for BusDeviceFunction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    pub fn fmt_common(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
             "(bus: {:#04X}, device: {:#04X}, function: {:#03X})",
@@ -53,6 +60,16 @@ impl fmt::Display for BusDeviceFunction {
             self.device(),
             self.function()
         )
+    }
+}
+impl fmt::Debug for BusDeviceFunction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.fmt_common(f)
+    }
+}
+impl fmt::Display for BusDeviceFunction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.fmt_common(f)
     }
 }
 pub struct BusDeviceFunctionIterator {
@@ -72,8 +89,45 @@ impl Iterator for BusDeviceFunctionIterator {
     }
 }
 
+pub struct Rtl8139Driver {}
+impl Rtl8139Driver {
+    fn new() -> Self {
+        Rtl8139Driver {}
+    }
+}
+impl PciDeviceDriver for Rtl8139Driver {
+    fn supports(&self, vp: VendorDeviceId) -> bool {
+        const RTL8139_ID: VendorDeviceId = VendorDeviceId {
+            vendor: 0x10ec,
+            device: 0x8139,
+        };
+        vp == RTL8139_ID
+    }
+    fn attach(&self, bdf: BusDeviceFunction) -> Result<()> {
+        println!("Attaching RTL8139 NIC @ {}...", bdf);
+        Ok(())
+    }
+    fn name(&self) -> &str {
+        "Rtl8139"
+    }
+}
+
+pub trait PciDeviceDriver {
+    fn supports(&self, vp: VendorDeviceId) -> bool;
+    fn attach(&self, bdf: BusDeviceFunction) -> Result<()>;
+    fn name(&self) -> &str;
+}
+
+impl fmt::Debug for dyn PciDeviceDriver {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "PciDeviceDriver{{ name: {} }}", self.name())
+    }
+}
+
 pub struct Pci {
     ecm_range: Range<usize>,
+    drivers: Vec<Rc<Box<dyn PciDeviceDriver>>>,
+    devices: RefCell<BTreeMap<BusDeviceFunction, Rc<Box<dyn PciDeviceDriver>>>>,
 }
 impl Pci {
     pub fn new(mcfg: &Mcfg) -> Self {
@@ -90,8 +144,15 @@ impl Pci {
             "PCI config space is mapped at: [{:#018X},{:#018X})",
             pci_config_space_base, pci_config_space_end
         );
+
+        let drivers = vec![Rc::new(
+            Box::new(Rtl8139Driver::new()) as Box<dyn PciDeviceDriver>
+        )];
+
         Pci {
             ecm_range: pci_config_space_base..pci_config_space_end,
+            drivers,
+            devices: RefCell::new(BTreeMap::new()),
         }
     }
     fn ecm_base(&self, id: BusDeviceFunction) -> *mut u16 {
@@ -113,15 +174,25 @@ impl Pci {
             Some(VendorDeviceId { vendor, device })
         }
     }
-    pub fn list_devices(&self) {
-        for id in BusDeviceFunction::iter() {
-            if let Some(VendorDeviceId { vendor, device }) = self.read_vendor_id_and_device_id(id) {
-                println!(
-                    "{}: vendor_id: {:#04X}, device_id: {:#04X}",
-                    id, vendor, device
-                );
+    pub fn probe_devices(&self) {
+        for bdf in BusDeviceFunction::iter() {
+            if let Some(vd) = self.read_vendor_id_and_device_id(bdf) {
+                if self.devices.borrow_mut().contains_key(&bdf) {
+                    continue;
+                }
+                for d in &self.drivers {
+                    if d.supports(vd) && d.attach(bdf).is_ok() {
+                        self.devices.borrow_mut().insert(bdf, d.clone());
+                    }
+                }
             }
         }
+    }
+    pub fn list_drivers(&self) {
+        println!("{:?}", self.drivers)
+    }
+    pub fn list_devices(&self) {
+        println!("{:?}", self.devices)
     }
     /// # Safety
     ///

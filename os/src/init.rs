@@ -1,8 +1,6 @@
 use crate::boot_info::File;
 use crate::efi;
-use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
-use crate::pci::VendorDeviceId;
 use crate::util::size_in_pages_from_bytes;
 use crate::x86::*;
 use crate::*;
@@ -187,20 +185,7 @@ pub fn init_pci() {
     // This is safe since it is only called once
     unsafe { Pci::set(pci) };
 
+    Pci::take().probe_devices();
     Pci::take().list_devices();
-}
-
-pub fn init_devices() {
-    crate::println!("init_devices()");
-    let pci = Pci::take();
-    for id in BusDeviceFunction::iter() {
-        if let Some(VendorDeviceId { vendor, device }) = pci.read_vendor_id_and_device_id(id) {
-            if (vendor, device) == (0x10ec, 0x8139) {
-                println!(
-                    "RTL8139 NIC @ {}: vendor_id: {:#04X}, device_id: {:#04X}",
-                    id, vendor, device
-                );
-            }
-        }
-    }
+    Pci::take().list_drivers();
 }
