@@ -23,26 +23,20 @@ unsafe impl Sync for SimpleAllocator {}
 
 unsafe impl GlobalAlloc for SimpleAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        serial::com_initialize(serial::IO_ADDR_COM2);
         let mut serial_writer = serial::SerialConsoleWriter {};
-        //writeln!(serial_writer, "alloc: {:?}", layout).unwrap();
         let free_info = (*self.free_info.as_ptr()).expect("free_info is None");
         let pages_needed = (layout.size() + 4095) / 4096;
         if pages_needed > *free_info.num_of_pages.as_ptr() {
-            writeln!(serial_writer, "alloc: {:?}: No more memory", layout).unwrap();
-            core::ptr::null_mut::<u8>()
-        } else {
-            *free_info.num_of_pages.as_ptr() -= pages_needed;
-            if *free_info.num_of_pages.as_ptr() == 0 {
-                // Releases the free info since it is empty
-                *self.free_info.as_ptr() = *free_info.next_free_info.as_ptr();
-            }
-            (free_info as *const FreeInfo as *mut u8).add(*free_info.num_of_pages.as_ptr() * 4096)
+            panic!("alloc: {:?}: No more memory", layout);
         }
+        *free_info.num_of_pages.as_ptr() -= pages_needed;
+        if *free_info.num_of_pages.as_ptr() == 0 {
+            // Releases the free info since it is empty
+            *self.free_info.as_ptr() = *free_info.next_free_info.as_ptr();
+        }
+        (free_info as *const FreeInfo as *mut u8).add(*free_info.num_of_pages.as_ptr() * 4096)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        serial::com_initialize(serial::IO_ADDR_COM2);
-        //writeln!(serial_writer, "dealloc: {:?} ptr {:?}", layout, ptr).unwrap();
         let pages_being_freed = (layout.size() + 4095) / 4096;
         let info = &mut *(ptr as *mut FreeInfo);
         *info.next_free_info.as_ptr() = *self.free_info.as_ptr();

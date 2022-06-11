@@ -107,7 +107,7 @@ unsafe impl GlobalAlloc for FirstFitAllocator {
         let mut header = header.deref_mut();
         loop {
             match header {
-                Some(e) => match e.provide(layout.size()) {
+                Some(e) => match e.provide((layout.size() + 15) & !15usize) {
                     Some(p) => break p,
                     None => {
                         header = e.next_header.borrow_mut();

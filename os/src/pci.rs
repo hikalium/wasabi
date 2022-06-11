@@ -141,9 +141,21 @@ impl PciDeviceDriver for Rtl8139Driver {
         };
         vp == RTL8139_ID
     }
-    fn attach(&self, bdf: BusDeviceFunction) -> Result<()> {
+    fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>> {
+        Ok(Box::new(Rtl8139DriverInstance::new(bdf)) as Box<dyn PciDeviceDriverInstance>)
+    }
+    fn name(&self) -> &str {
+        "Rtl8139Driver"
+    }
+}
+pub struct Rtl8139DriverInstance {
+    #[allow(dead_code)]
+    bdf: BusDeviceFunction,
+}
+impl Rtl8139DriverInstance {
+    fn new(bdf: BusDeviceFunction) -> Self {
         let pci = Pci::take();
-        println!("Attaching RTL8139 NIC @ {}...", bdf);
+        println!("Instantiating RTL8139 NIC @ {}...", bdf);
         // Assume that BAR0 has IO Port address
         let bar0 = pci.read_register_u32(bdf, 0x10);
         assert_eq!(bar0 & 1, 1 /* I/O space */);
@@ -154,16 +166,21 @@ impl PciDeviceDriver for Rtl8139Driver {
         }
         let eth_addr = EthernetAddress::new(&eth_addr);
         println!("eth_addr: {}", eth_addr);
-        Ok(())
+        Rtl8139DriverInstance { bdf }
     }
+}
+impl PciDeviceDriverInstance for Rtl8139DriverInstance {
     fn name(&self) -> &str {
-        "Rtl8139"
+        "Rtl8139DriverInstance"
     }
 }
 
 pub trait PciDeviceDriver {
     fn supports(&self, vp: VendorDeviceId) -> bool;
-    fn attach(&self, bdf: BusDeviceFunction) -> Result<()>;
+    fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>>;
+    fn name(&self) -> &str;
+}
+pub trait PciDeviceDriverInstance {
     fn name(&self) -> &str;
 }
 
