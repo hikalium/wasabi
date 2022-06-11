@@ -4,6 +4,7 @@ use crate::acpi::Mcfg;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
+use crate::x86::read_io_port;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
@@ -17,6 +18,25 @@ use core::ops::Range;
 pub struct VendorDeviceId {
     pub vendor: u16,
     pub device: u16,
+}
+impl VendorDeviceId {
+    pub fn fmt_common(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "(vendor: {:#06X}, device: {:#06X})",
+            self.vendor, self.device,
+        )
+    }
+}
+impl fmt::Debug for VendorDeviceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.fmt_common(f)
+    }
+}
+impl fmt::Display for VendorDeviceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.fmt_common(f)
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -89,6 +109,24 @@ impl Iterator for BusDeviceFunctionIterator {
     }
 }
 
+pub struct EthernetAddress {
+    mac: [u8; 6],
+}
+impl EthernetAddress {
+    fn new(mac: &[u8; 6]) -> Self {
+        EthernetAddress { mac: *mac }
+    }
+}
+impl fmt::Display for EthernetAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:",
+            self.mac[0], self.mac[1], self.mac[2], self.mac[3], self.mac[4], self.mac[5],
+        )
+    }
+}
+
 pub struct Rtl8139Driver {}
 impl Rtl8139Driver {
     fn new() -> Self {
@@ -104,7 +142,18 @@ impl PciDeviceDriver for Rtl8139Driver {
         vp == RTL8139_ID
     }
     fn attach(&self, bdf: BusDeviceFunction) -> Result<()> {
+        let pci = Pci::take();
         println!("Attaching RTL8139 NIC @ {}...", bdf);
+        // Assume that BAR0 has IO Port address
+        let bar0 = pci.read_register_u32(bdf, 0x10);
+        assert_eq!(bar0 & 1, 1 /* I/O space */);
+        let io_base = (bar0 ^ 1) as u16;
+        let mut eth_addr = [0u8; 6];
+        for (i, e) in eth_addr.iter_mut().enumerate() {
+            *e = read_io_port(io_base + i as u16);
+        }
+        let eth_addr = EthernetAddress::new(&eth_addr);
+        println!("eth_addr: {}", eth_addr);
         Ok(())
     }
     fn name(&self) -> &str {
@@ -155,14 +204,22 @@ impl Pci {
             devices: RefCell::new(BTreeMap::new()),
         }
     }
-    fn ecm_base(&self, id: BusDeviceFunction) -> *mut u16 {
-        (self.ecm_range.start + ((id.id as usize) << 12)) as *mut u16
+    fn ecm_base<T>(&self, id: BusDeviceFunction) -> *mut T {
+        (self.ecm_range.start + ((id.id as usize) << 12)) as *mut T
+    }
+    pub fn read_register_u8(&self, id: BusDeviceFunction, byte_offset: usize) -> u8 {
+        assert!((0..256).contains(&byte_offset));
+        unsafe { *self.ecm_base::<u8>(id).add(byte_offset) }
     }
     pub fn read_register_u16(&self, id: BusDeviceFunction, byte_offset: usize) -> u16 {
         assert!((0..256).contains(&byte_offset));
         assert!(byte_offset & 1 == 0);
-        let ecm_base = self.ecm_base(id);
-        unsafe { *ecm_base.add(byte_offset >> 1) }
+        unsafe { *self.ecm_base::<u16>(id).add(byte_offset >> 1) }
+    }
+    pub fn read_register_u32(&self, id: BusDeviceFunction, byte_offset: usize) -> u32 {
+        assert!((0..256).contains(&byte_offset));
+        assert!(byte_offset & 3 == 0);
+        unsafe { *self.ecm_base::<u32>(id).add(byte_offset >> 2) }
     }
     pub fn read_vendor_id_and_device_id(&self, id: BusDeviceFunction) -> Option<VendorDeviceId> {
         let vendor = self.read_register_u16(id, 0);
@@ -175,8 +232,23 @@ impl Pci {
         }
     }
     pub fn probe_devices(&self) {
+        println!("Probing PCI devices...");
         for bdf in BusDeviceFunction::iter() {
             if let Some(vd) = self.read_vendor_id_and_device_id(bdf) {
+                println!("{:?}: {:?}", bdf, vd);
+                let header_type = self.read_register_u8(bdf, 0x0e);
+                println!("  header_type: {:#02X}", header_type);
+                if header_type != 0 {
+                    // Support only header_type == 0 for now
+                    continue;
+                }
+                for i in 0..6 {
+                    let bar = self.read_register_u32(bdf, 0x10 + i * 4);
+                    if bar == 0 {
+                        continue;
+                    }
+                    println!("  BAR{}: {:#010X}", i, bar);
+                }
                 if self.devices.borrow_mut().contains_key(&bdf) {
                     continue;
                 }
