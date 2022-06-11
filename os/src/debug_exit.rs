@@ -9,7 +9,7 @@ pub enum QemuExitCode {
 
 pub fn exit_qemu(exit_code: QemuExitCode) -> ! {
     // https://github.com/qemu/qemu/blob/master/hw/misc/debugexit.c
-    x86::write_io_port(0xf4, exit_code as u8);
+    x86::write_io_port_u8(0xf4, exit_code as u8);
     loop {
         x86::hlt();
     }

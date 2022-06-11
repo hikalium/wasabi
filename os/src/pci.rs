@@ -1,17 +1,21 @@
 extern crate alloc;
 
 use crate::acpi::Mcfg;
+use crate::allocator::ALLOCATOR;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
 use crate::x86::busy_loop_hint;
 use crate::x86::read_io_port;
-use crate::x86::write_io_port;
+use crate::x86::write_io_port_u16;
+use crate::x86::write_io_port_u32;
+use crate::x86::write_io_port_u8;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::alloc::Layout;
 use core::cell::RefCell;
 use core::fmt;
 use core::ops::Range;
@@ -150,11 +154,14 @@ impl PciDeviceDriver for Rtl8139Driver {
         "Rtl8139Driver"
     }
 }
-pub struct Rtl8139DriverInstance {
+const RTL8139_RXBUF_SIZE: usize = 8208;
+pub struct Rtl8139DriverInstance<'a> {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
+    #[allow(dead_code)]
+    rx_buffer: &'a mut [u8; RTL8139_RXBUF_SIZE],
 }
-impl Rtl8139DriverInstance {
+impl<'a> Rtl8139DriverInstance<'a> {
     // https://wiki.osdev.org/RTL8139
     fn new(bdf: BusDeviceFunction) -> Self {
         let pci = Pci::take();
@@ -176,18 +183,36 @@ impl Rtl8139DriverInstance {
         let eth_addr = EthernetAddress::new(&eth_addr);
         println!("eth_addr: {}", eth_addr);
         // Turn on
-        write_io_port(io_base + 0x52, 0);
+        write_io_port_u8(io_base + 0x52, 0);
         // Software Reset
-        write_io_port(io_base + 0x37, 0x10);
+        write_io_port_u8(io_base + 0x37, 0x10);
         while (read_io_port(io_base + 0x37) & 0x10) != 0 {
             busy_loop_hint();
         }
         println!("Software Reset Done!");
+        let rx_buffer = unsafe {
+            &mut *(ALLOCATOR.alloc_with_options(
+                Layout::from_size_align(RTL8139_RXBUF_SIZE, 1).expect("Invalid Layout"),
+            ) as *mut [u8; RTL8139_RXBUF_SIZE])
+        };
+        assert!(
+            (rx_buffer.as_ptr() as usize)
+                < ((core::primitive::u32::MAX) as usize - RTL8139_RXBUF_SIZE)
+        );
+        println!("rx_buffer is at {:#p}", rx_buffer);
 
-        Rtl8139DriverInstance { bdf }
+        write_io_port_u32(io_base + 0x30, rx_buffer.as_ptr() as usize as u32);
+
+        write_io_port_u32(io_base + 0x3C, 0x0005); // Interrupts: Transmit OK, Receive OK
+
+        write_io_port_u16(io_base + 0x44, 0xf); // AB+AM+APM+AAP
+
+        write_io_port_u8(io_base + 0x37, 0x0C); // RE+TE
+
+        Rtl8139DriverInstance { bdf, rx_buffer }
     }
 }
-impl PciDeviceDriverInstance for Rtl8139DriverInstance {
+impl<'a> PciDeviceDriverInstance for Rtl8139DriverInstance<'a> {
     fn name(&self) -> &str {
         "Rtl8139DriverInstance"
     }

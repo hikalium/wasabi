@@ -103,6 +103,19 @@ unsafe impl Sync for FirstFitAllocator {}
 unsafe impl GlobalAlloc for FirstFitAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         log_malloc!("alloc! {:?}", layout);
+        self.alloc_with_options(layout)
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        log_malloc!("free! {:#p} {:?}", ptr, layout);
+        let mut region = Header::from_allocated_region(ptr);
+        region.is_allocated = false;
+        Box::leak(region);
+        // region is leaked here to avoid dropping the free info on the memory.
+    }
+}
+
+impl FirstFitAllocator {
+    pub fn alloc_with_options(&self, layout: Layout) -> *mut u8 {
         let mut header = self.first_header.borrow_mut();
         let mut header = header.deref_mut();
         loop {
@@ -120,16 +133,6 @@ unsafe impl GlobalAlloc for FirstFitAllocator {
             }
         }
     }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        log_malloc!("free! {:#p} {:?}", ptr, layout);
-        let mut region = Header::from_allocated_region(ptr);
-        region.is_allocated = false;
-        Box::leak(region);
-        // region is leaked here to avoid dropping the free info on the memory.
-    }
-}
-
-impl FirstFitAllocator {
     pub fn init_with_mmap(&self, memory_map: &MemoryMapHolder) {
         println!("Using mmap at {:#p}", memory_map);
         println!("Loader Info:");

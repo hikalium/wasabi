@@ -11,6 +11,7 @@ QEMU_ARGS=\
 		-netdev user,id=net0 -device usb-net,netdev=net0 \
 		-object filter-dump,id=f1,netdev=net0,file=dump_net0.dat \
 		-netdev user,id=net1 -device rtl8139,netdev=net1 \
+		-object filter-dump,id=f2,netdev=net1,file=dump_net1.dat \
 		-m 1024M \
 		-drive format=raw,file=fat:rw:mnt \
 		-chardev file,id=char_com1,mux=on,path=com1.log \

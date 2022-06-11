@@ -63,10 +63,24 @@ pub fn read_cpuid(request: CpuidRequest) -> CpuidResponse {
     CpuidResponse { eax, ebx, ecx, edx }
 }
 
-pub fn write_io_port(port: u16, data: u8) {
+pub fn write_io_port_u8(port: u16, data: u8) {
     unsafe {
         asm!("out dx, al",
             in("al") data,
+            in("dx") port)
+    }
+}
+pub fn write_io_port_u16(port: u16, data: u16) {
+    unsafe {
+        asm!("out dx, ax",
+            in("ax") data,
+            in("dx") port)
+    }
+}
+pub fn write_io_port_u32(port: u16, data: u32) {
+    unsafe {
+        asm!("out dx, eax",
+            in("eax") data,
             in("dx") port)
     }
 }
@@ -83,8 +97,8 @@ pub fn read_io_port(port: u16) -> u8 {
 
 pub fn disable_legacy_pic() {
     // https://wiki.osdev.org/8259_PIC#Disabling
-    write_io_port(0xa1, 0xff);
-    write_io_port(0x21, 0xff);
+    write_io_port_u8(0xa1, 0xff);
+    write_io_port_u8(0x21, 0xff);
     println!("Disabled legacy PIC");
 }
 
