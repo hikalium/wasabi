@@ -85,11 +85,29 @@ pub fn write_io_port_u32(port: u16, data: u32) {
     }
 }
 
-pub fn read_io_port(port: u16) -> u8 {
+pub fn read_io_port_u8(port: u16) -> u8 {
     let mut data: u8;
     unsafe {
         asm!("in al, dx",
             out("al") data,
+            in("dx") port)
+    }
+    data
+}
+pub fn read_io_port_u16(port: u16) -> u16 {
+    let mut data: u16;
+    unsafe {
+        asm!("in ax, dx",
+            out("ax") data,
+            in("dx") port)
+    }
+    data
+}
+pub fn read_io_port_u32(port: u16) -> u32 {
+    let mut data: u32;
+    unsafe {
+        asm!("in eax, dx",
+            out("eax") data,
             in("dx") port)
     }
     data

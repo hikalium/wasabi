@@ -4,9 +4,11 @@ use crate::acpi::Mcfg;
 use crate::allocator::ALLOCATOR;
 use crate::error::Result;
 use crate::error::WasabiError;
+use crate::print::hexdump;
 use crate::println;
 use crate::x86::busy_loop_hint;
-use crate::x86::read_io_port;
+use crate::x86::read_io_port_u16;
+use crate::x86::read_io_port_u8;
 use crate::x86::write_io_port_u16;
 use crate::x86::write_io_port_u32;
 use crate::x86::write_io_port_u8;
@@ -19,6 +21,7 @@ use core::alloc::Layout;
 use core::cell::RefCell;
 use core::fmt;
 use core::ops::Range;
+use core::slice;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct VendorDeviceId {
@@ -145,6 +148,16 @@ impl PciDeviceDriver for Rtl8139Driver {
             vendor: 0x10ec,
             device: 0x8139,
         };
+        // akemi
+        // 8086:02ed Comet Lake PCH-LP USB 3.1 xHCI Host Controller
+        // 8086:02f0 Comet Lake PCH-LP CNVi WiFi
+        // 8086:02e8 Serial IO I2C Host Controller
+        // 8086:02e9 Comet Lake Serial IO I2C Host Controller
+        // 8086:02c5 Comet Lake Serial IO I2C Host Controller
+        // 8086:02c8 Comet Lake PCH-LP cAVS
+        // 8086:02a3 Comet Lake PCH-LP SMBus Host Controller
+        // 8086:02a4 Comet Lake SPI (flash) Controller
+
         vp == RTL8139_ID
     }
     fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>> {
@@ -192,7 +205,7 @@ impl<'a> Rtl8139DriverInstance<'a> {
         let io_base = (bar0 ^ 1) as u16;
         let mut eth_addr = [0u8; 6];
         for (i, e) in eth_addr.iter_mut().enumerate() {
-            *e = read_io_port(io_base + i as u16);
+            *e = read_io_port_u8(io_base + i as u16);
         }
         let eth_addr = EthernetAddress::new(&eth_addr);
         println!("eth_addr: {}", eth_addr);
@@ -200,7 +213,7 @@ impl<'a> Rtl8139DriverInstance<'a> {
         write_io_port_u8(io_base + 0x52, 0);
         // Software Reset
         write_io_port_u8(io_base + 0x37, 0x10);
-        while (read_io_port(io_base + 0x37) & 0x10) != 0 {
+        while (read_io_port_u8(io_base + 0x37) & 0x10) != 0 {
             busy_loop_hint();
         }
         println!("Software Reset Done!");
@@ -231,6 +244,19 @@ impl<'a> Rtl8139DriverInstance<'a> {
             io_base + 0x10, /* TSD[0] */
             ARP_REQ_SAMPLE_DATA.len() as u32,
         );
+        let write_count = loop {
+            let write_count = read_io_port_u16(io_base + 0x3A);
+            if write_count != 0 {
+                break write_count;
+            }
+            busy_loop_hint();
+        };
+        println!("write_count: {}", write_count);
+        let rx_status = unsafe { *(rx_buffer.as_ptr() as *const u16) };
+        println!("rx_status: {}", rx_status);
+        let packet_len = unsafe { *(rx_buffer.as_ptr().offset(2) as *const u16) };
+        println!("packet_len: {}", packet_len);
+        hexdump(unsafe { slice::from_raw_parts(rx_buffer.as_ptr().offset(4), packet_len.into()) });
 
         Rtl8139DriverInstance { bdf, rx_buffer }
     }

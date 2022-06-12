@@ -46,7 +46,7 @@ impl SerialConsoleWriter {
         Self::new(IO_ADDR_COM2)
     }
     pub fn send_char(&self, c: char) {
-        while (x86::read_io_port(self.base_io_addr + 5) & 0x20) == 0 {
+        while (x86::read_io_port_u8(self.base_io_addr + 5) & 0x20) == 0 {
             unsafe { asm!("pause") }
         }
         x86::write_io_port_u8(self.base_io_addr, c as u8)
