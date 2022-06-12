@@ -85,11 +85,11 @@ spellcheck :
 
 run :
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
-	cd os/examples && cargo run
-
-run_release :
-	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
 	cd os/examples && cargo run --release
+
+run_debug :
+	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
+	cd os/examples && cargo run
 
 run_example :
 	cd os/examples && cargo run --example ch2_show_mmap
