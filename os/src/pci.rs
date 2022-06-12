@@ -155,6 +155,20 @@ impl PciDeviceDriver for Rtl8139Driver {
     }
 }
 const RTL8139_RXBUF_SIZE: usize = 8208;
+const ARP_REQ_SAMPLE_DATA: [u8; 42] = [
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // dst eth addr
+    0x52, 0x54, 0x00, 0x12, 0x34, 0x57, // src eth addr
+    0x08, 0x06, // eth_type = ARP
+    0x00, 0x01, // hw_type = Ethernet
+    0x08, 0x00, // proto_type = IPv4
+    0x06, // hw_addr_size = 6 bytes
+    0x04, // proto_addr_type = 4 bytes
+    0x00, 0x01, // operation = ARP request
+    0x52, 0x54, 0x00, 0x12, 0x34, 0x57, // sender_mac = 52:54:00:12:34:57
+    0x0A, 0x00, 0x02, 0x0F, // sender_ip = 10.0.2.15
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // target_mac = Unknown
+    0x0A, 0x00, 0x02, 0x02, // target_ip = 10.0.2.2
+];
 pub struct Rtl8139DriverInstance<'a> {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
@@ -208,6 +222,15 @@ impl<'a> Rtl8139DriverInstance<'a> {
         write_io_port_u16(io_base + 0x44, 0xf); // AB+AM+APM+AAP
 
         write_io_port_u8(io_base + 0x37, 0x0C); // RE+TE
+
+        write_io_port_u32(
+            io_base + 0x20, /* TSAD[0] */
+            ARP_REQ_SAMPLE_DATA.as_ptr() as usize as u32,
+        );
+        write_io_port_u32(
+            io_base + 0x10, /* TSD[0] */
+            ARP_REQ_SAMPLE_DATA.len() as u32,
+        );
 
         Rtl8139DriverInstance { bdf, rx_buffer }
     }
