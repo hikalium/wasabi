@@ -29,18 +29,54 @@ pub fn busy_loop_hint() {
     unsafe { asm!("pause") }
 }
 
+#[derive(Copy, Clone)]
 pub struct CpuidRequest {
     pub eax: u32,
     pub ecx: u32,
+}
+impl fmt::Display for CpuidRequest {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "CpuidRequest(EAX: {:#010X}, ECX:{:#010X})",
+            self.eax, self.ecx,
+        )
+    }
 }
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct CpuidResponse {
+    // Do not reorder the members!
+    // This order matches the internal
+    // encodings of the registers.
     ebx: u32,
     edx: u32,
     ecx: u32,
     eax: u32,
+}
+impl CpuidResponse {
+    pub fn eax(&self) -> u32 {
+        self.eax
+    }
+    pub fn ebx(&self) -> u32 {
+        self.ebx
+    }
+    pub fn ecx(&self) -> u32 {
+        self.ecx
+    }
+    pub fn edx(&self) -> u32 {
+        self.edx
+    }
+}
+impl fmt::Display for CpuidResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "CpuidResponse(EAX: {:#010X}, EBX:{:#010X}, ECX:{:#010X}, EDX:{:#010X})",
+            self.eax, self.ebx, self.ecx, self.edx
+        )
+    }
 }
 
 pub fn read_cpuid(request: CpuidRequest) -> CpuidResponse {

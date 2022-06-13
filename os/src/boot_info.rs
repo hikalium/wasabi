@@ -1,7 +1,13 @@
 use crate::acpi::Acpi;
 use crate::efi::EfiFileName;
 use crate::error::WasabiError;
-use crate::*;
+use crate::x86::read_cpuid;
+use crate::x86::CpuidRequest;
+use crate::x86::CpuidResponse;
+use crate::MemoryMapHolder;
+use crate::VRAMBufferInfo;
+use core::slice;
+use core::str;
 
 pub struct File {
     name: EfiFileName,
@@ -29,11 +35,39 @@ impl File {
     }
 }
 
+#[derive(Debug)]
+pub struct CpuFeatures {
+    pub max_basic_cpuid: u32,
+    pub has_x2apic: bool,
+}
+impl CpuFeatures {
+    fn inspect() -> Self {
+        let query = |q: CpuidRequest| -> CpuidResponse {
+            let r = read_cpuid(q);
+            crate::println!("{} -> {}", q, r);
+            r
+        };
+        let c = query(CpuidRequest { eax: 0, ecx: 0 });
+        let max_basic_cpuid = c.eax();
+        let slice = unsafe { slice::from_raw_parts(&c as *const CpuidResponse as *const u8, 12) };
+        let vendor = str::from_utf8(slice).expect("failed to parse utf8 str");
+        crate::println!("cpuid(0, 0).vendor = {}", vendor);
+
+        let eax01 = query(CpuidRequest { eax: 1, ecx: 0 });
+
+        CpuFeatures {
+            max_basic_cpuid,
+            has_x2apic: (eax01.ecx() >> 21) != 0,
+        }
+    }
+}
+
 pub struct BootInfo {
     vram: VRAMBufferInfo,
     memory_map: MemoryMapHolder,
     root_files: [Option<File>; 32],
     acpi: Acpi,
+    cpu_features: CpuFeatures,
 }
 impl BootInfo {
     pub fn new(
@@ -47,6 +81,7 @@ impl BootInfo {
             memory_map,
             root_files,
             acpi,
+            cpu_features: CpuFeatures::inspect(),
         }
     }
     pub fn vram(&self) -> VRAMBufferInfo {
@@ -60,6 +95,9 @@ impl BootInfo {
     }
     pub fn acpi(&self) -> &Acpi {
         &self.acpi
+    }
+    pub fn cpu_features(&self) -> &CpuFeatures {
+        &self.cpu_features
     }
     /// # Safety
     ///

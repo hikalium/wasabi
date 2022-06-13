@@ -1,21 +1,31 @@
 use crate::println;
 use crate::x86;
+use crate::x86::CpuidRequest;
+use crate::BootInfo;
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct LocalApic {
+    x2apic_id: u32,
+    status: LocalApicStatus,
     base_addr: u64,
 }
 
 impl LocalApic {
     /// creates an instance to manage Local APIC for the current processor
     pub fn new() -> Self {
+        let cpu_features = BootInfo::take().cpu_features();
+        println!("{:?}", cpu_features);
+        let x2apic_id = x86::read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx();
+        println!("x2APIC ID: {}", x2apic_id);
         let apic_base = x86::read_msr(x86::MSR_IA32_APIC_BASE);
         println!("MSR_IA32_APIC_BASE={:#X}", apic_base);
-        let apic_status = LocalApicStatus::new(apic_base);
-        println!("{:?}", apic_status);
+        let status = LocalApicStatus::new(apic_base);
+        println!("{:?}", status);
         Self {
+            x2apic_id,
             base_addr: apic_base & ((1u64 << 12) - 1),
+            status,
         }
     }
 }
