@@ -1,12 +1,12 @@
+use crate::acpi::Acpi;
 use crate::boot_info::File;
 use crate::efi;
 use crate::pci::Pci;
 use crate::util::size_in_pages_from_bytes;
 use crate::*;
-use acpi::Acpi;
-use apic::IoApic;
-use apic::LocalApic;
 use arch::x86_64;
+use arch::x86_64::apic::IoApic;
+use arch::x86_64::apic::LocalApic;
 use core::mem::size_of;
 use core::slice;
 use error::*;
