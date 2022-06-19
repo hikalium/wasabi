@@ -32,7 +32,7 @@ fn main() -> io::Result<()> {
     let re_objdump_section_text = Regex::new(r"([a-zA-Z0-9]+) <.text>").unwrap();
     let objdump_output = Command::new("objdump")
         .arg("-d")
-        .arg("../mnt/EFI/BOOT/BOOTX64.EFI")
+        .arg("target/x86_64-unknown-uefi/release/os.efi")
         .output()
         .expect("failed to execute objdump");
     let input = String::from_utf8(objdump_output.stdout).unwrap();
@@ -51,9 +51,8 @@ fn main() -> io::Result<()> {
     println!(".text base   ={:#018X}", text_base);
     println!("addr_in_text ={:#018X}", addr_in_text);
 
-    let file = std::fs::File::open(
-        "/Users/hikalium/repo/wasabi/target/x86_64-unknown-uefi/debug/deps/os-e980f412818cdec7.pdb",
-    )?;
+    let file =
+        std::fs::File::open("target/x86_64-unknown-uefi/release/deps/os-618bacc84cc7d911.pdb")?;
     let mut pdb = pdb::PDB::open(file).unwrap();
 
     let symbol_table = pdb.global_symbols().unwrap();

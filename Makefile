@@ -94,6 +94,9 @@ run_debug :
 run_example :
 	cd os/examples && cargo run --example ch2_show_mmap
 
+run_dbgutil :
+	make run MORE_QEMU_FLAGS="-d int,cpu_reset --no-reboot" 2>&1 | cargo run --bin=dbgutil
+
 pxe :
 	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
 

@@ -4,6 +4,95 @@ use core::fmt;
 
 pub const MSR_IA32_APIC_BASE: u32 = 0x1b;
 
+#[repr(packed)]
+struct GdtrParameters {
+    limit: u16,
+    base: &'static Gdt,
+}
+#[repr(packed)]
+pub struct Gdt {
+    null_segment: GdtSegmentDescriptor,
+    kernel_code_segment: GdtSegmentDescriptor,
+    kernel_data_segment: GdtSegmentDescriptor,
+    user_code_segment_32: GdtSegmentDescriptor,
+    user_data_segment: GdtSegmentDescriptor,
+    user_code_segment_64: GdtSegmentDescriptor,
+}
+const _: () = assert!(core::mem::size_of::<Gdt>() / 8 == 6);
+impl Gdt {
+    pub fn load(&'static self) {
+        let params = GdtrParameters {
+            limit: (core::mem::size_of::<Gdt>() - 1) as u16,
+            base: self,
+        };
+        unsafe {
+            asm!("lgdt [rcx]",
+                in("rcx") &params)
+        }
+    }
+}
+
+pub static GDT: Gdt = Gdt {
+    null_segment: GdtSegmentDescriptor::null(),
+    kernel_code_segment: GdtSegmentDescriptor::new(GdtAttr::KernelCode),
+    kernel_data_segment: GdtSegmentDescriptor::new(GdtAttr::KernelData),
+    user_code_segment_32: GdtSegmentDescriptor::null(),
+    user_data_segment: GdtSegmentDescriptor::null(),
+    user_code_segment_64: GdtSegmentDescriptor::null(),
+};
+
+mod attr_bits {
+    pub const BIT_TYPE_DATA: u64 = 0b10u64 << 43;
+    pub const BIT_TYPE_CODE: u64 = 0b11u64 << 43;
+
+    pub const BIT_PRESENT: u64 = 1u64 << 47;
+    pub const BIT_ACCESSED: u64 = 1u64 << 47;
+    pub const BIT_CS_LONG_MODE: u64 = 1u64 << 53;
+    pub const BIT_CS_READABLE: u64 = 1u64 << 53;
+    pub const BIT_DS_WRITABLE: u64 = 1u64 << 41;
+
+    pub const MASK_DPL: u64 = 0b11u64 << 45;
+}
+
+pub mod segment_selector {
+    use super::*;
+    pub const KERNEL_CS: u16 = (1 << 3);
+    pub const KERNEL_DS: u16 = (2 << 3);
+    pub fn write_cs(cs: u16) {
+        // The MOV instruction CANNOT be used to load the CS register.
+        // Use far-jump(ljmp) instead.
+        unsafe {
+            asm!(
+	"lea rax, [rip + 1f]", // Target address (label 1 below)
+	"push cx", // Construct a far pointer on the stack
+	"push rax",
+	"ljmp [rsp]",
+        "1:",
+        "add rsp, 8 + 2", // Cleanup the far pointer on the stack
+                in("cx") cs)
+        }
+    }
+}
+
+use attr_bits::*;
+#[repr(u64)]
+enum GdtAttr {
+    KernelCode = BIT_TYPE_CODE | BIT_PRESENT | BIT_CS_LONG_MODE | BIT_CS_READABLE,
+    KernelData = BIT_TYPE_DATA | BIT_PRESENT | BIT_DS_WRITABLE,
+}
+
+struct GdtSegmentDescriptor {
+    value: u64,
+}
+impl GdtSegmentDescriptor {
+    const fn null() -> Self {
+        Self { value: 0 }
+    }
+    const fn new(attr: GdtAttr) -> Self {
+        Self { value: attr as u64 }
+    }
+}
+
 pub fn read_msr(port: u32) -> u64 {
     let mut high: u32;
     let mut low: u32;
@@ -158,6 +247,14 @@ pub fn disable_legacy_pic() {
 
 pub fn hlt() {
     unsafe { asm!("hlt") }
+}
+
+pub fn rest_in_peace() {
+    unsafe {
+        loop {
+            core::arch::asm!("cli;hlt;")
+        }
+    }
 }
 
 pub fn read_cr3() -> *mut PML4 {
