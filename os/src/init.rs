@@ -6,6 +6,7 @@ use crate::*;
 use acpi::Acpi;
 use apic::IoApic;
 use apic::LocalApic;
+use arch::x86_64;
 use core::mem::size_of;
 use core::slice;
 use error::*;
@@ -167,12 +168,12 @@ pub fn init_graphical_terminal() {
 
 pub fn init_interrupts() {
     unsafe {
-        crate::x86::GDT.load();
-        crate::x86::segment_selector::write_cs(crate::x86::segment_selector::KERNEL_CS);
-        crate::x86::segment_selector::write_ds(crate::x86::segment_selector::KERNEL_DS);
+        x86_64::GDT.load();
+        x86_64::segment_selector::write_cs(x86_64::segment_selector::KERNEL_CS);
+        x86_64::segment_selector::write_ds(x86_64::segment_selector::KERNEL_DS);
     }
     crate::println!("init_interrupts()");
-    x86::disable_legacy_pic();
+    x86_64::disable_legacy_pic();
     let bsp_local_apic = LocalApic::new();
     IoApic::init(&bsp_local_apic).expect("Failed to init I/O APIC");
 }

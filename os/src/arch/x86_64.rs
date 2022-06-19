@@ -1,3 +1,5 @@
+pub mod idt;
+
 use crate::println;
 use core::arch::asm;
 use core::fmt;

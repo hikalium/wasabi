@@ -8,6 +8,7 @@
 
 pub mod acpi;
 pub mod apic;
+pub mod arch;
 pub mod boot_info;
 pub mod debug_exit;
 pub mod efi;
@@ -23,7 +24,6 @@ pub mod test_runner;
 pub mod text_area;
 pub mod util;
 pub mod vram;
-pub mod x86;
 
 // #[path = "simple_allocator.rs"]
 #[path = "first_fit_allocator.rs"]

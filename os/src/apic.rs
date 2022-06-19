@@ -1,8 +1,8 @@
+use crate::arch::x86_64;
+use crate::arch::x86_64::CpuidRequest;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
-use crate::x86;
-use crate::x86::CpuidRequest;
 use crate::BootInfo;
 
 #[derive(Debug)]
@@ -18,9 +18,9 @@ impl LocalApic {
     pub fn new() -> Self {
         let cpu_features = BootInfo::take().cpu_features();
         println!("{:?}", cpu_features);
-        let x2apic_id = x86::read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx();
+        let x2apic_id = x86_64::read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx();
         println!("x2APIC ID: {}", x2apic_id);
-        let apic_base = x86::read_msr(x86::MSR_IA32_APIC_BASE);
+        let apic_base = x86_64::read_msr(x86_64::MSR_IA32_APIC_BASE);
         println!("MSR_IA32_APIC_BASE={:#X}", apic_base);
         let status = LocalApicStatus::new(apic_base);
         println!("{:?}", status);

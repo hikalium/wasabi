@@ -1,4 +1,4 @@
-use crate::x86;
+use crate::arch::x86_64;
 use core::arch::asm;
 use core::convert::TryInto;
 use core::fmt;
@@ -24,14 +24,14 @@ pub const IO_ADDR_COM: [u16; 8] = [
 ];
 
 pub fn com_initialize(base_io_addr: u16) {
-    x86::write_io_port_u8(base_io_addr + 1, 0x00); // Disable all interrupts
-    x86::write_io_port_u8(base_io_addr + 3, 0x80); // Enable DLAB (set baud rate divisor)
+    x86_64::write_io_port_u8(base_io_addr + 1, 0x00); // Disable all interrupts
+    x86_64::write_io_port_u8(base_io_addr + 3, 0x80); // Enable DLAB (set baud rate divisor)
     const BAUD_DIVISOR: u16 = 0x0001; // baud rate = (115200 / BAUD_DIVISOR)
-    x86::write_io_port_u8(base_io_addr, (BAUD_DIVISOR & 0xff).try_into().unwrap());
-    x86::write_io_port_u8(base_io_addr + 1, (BAUD_DIVISOR >> 8).try_into().unwrap());
-    x86::write_io_port_u8(base_io_addr + 3, 0x03); // 8 bits, no parity, one stop bit
-    x86::write_io_port_u8(base_io_addr + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
-    x86::write_io_port_u8(base_io_addr + 4, 0x0B); // IRQs enabled, RTS/DSR set
+    x86_64::write_io_port_u8(base_io_addr, (BAUD_DIVISOR & 0xff).try_into().unwrap());
+    x86_64::write_io_port_u8(base_io_addr + 1, (BAUD_DIVISOR >> 8).try_into().unwrap());
+    x86_64::write_io_port_u8(base_io_addr + 3, 0x03); // 8 bits, no parity, one stop bit
+    x86_64::write_io_port_u8(base_io_addr + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
+    x86_64::write_io_port_u8(base_io_addr + 4, 0x0B); // IRQs enabled, RTS/DSR set
 }
 
 pub struct SerialConsoleWriter {
@@ -46,10 +46,10 @@ impl SerialConsoleWriter {
         Self::new(IO_ADDR_COM2)
     }
     pub fn send_char(&self, c: char) {
-        while (x86::read_io_port_u8(self.base_io_addr + 5) & 0x20) == 0 {
+        while (x86_64::read_io_port_u8(self.base_io_addr + 5) & 0x20) == 0 {
             unsafe { asm!("pause") }
         }
-        x86::write_io_port_u8(self.base_io_addr, c as u8)
+        x86_64::write_io_port_u8(self.base_io_addr, c as u8)
     }
 
     pub fn send_str(&self, s: &str) {

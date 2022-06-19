@@ -1,9 +1,9 @@
 use crate::acpi::Acpi;
+use crate::arch::x86_64::read_cpuid;
+use crate::arch::x86_64::CpuidRequest;
+use crate::arch::x86_64::CpuidResponse;
 use crate::efi::EfiFileName;
 use crate::error::WasabiError;
-use crate::x86::read_cpuid;
-use crate::x86::CpuidRequest;
-use crate::x86::CpuidResponse;
 use crate::MemoryMapHolder;
 use crate::VRAMBufferInfo;
 use core::slice;
