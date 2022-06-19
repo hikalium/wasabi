@@ -4,6 +4,7 @@ use crate::pci::Pci;
 use crate::util::size_in_pages_from_bytes;
 use crate::*;
 use acpi::Acpi;
+use apic::IoApic;
 use apic::LocalApic;
 use core::mem::size_of;
 use core::slice;
@@ -167,7 +168,8 @@ pub fn init_graphical_terminal() {
 pub fn init_interrupts() {
     crate::println!("init_interrupts()");
     x86::disable_legacy_pic();
-    let _bsp_local_apic = LocalApic::new();
+    let bsp_local_apic = LocalApic::new();
+    IoApic::init(&bsp_local_apic);
 }
 
 pub fn init_pci() {

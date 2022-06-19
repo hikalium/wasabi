@@ -9,6 +9,7 @@ pub enum WasabiError {
     GraphicsError(GraphicsError),
     PciBusDeviceFunctionOutOfRange,
     ReadFileSizeMismatch { expected: usize, actual: usize },
+    ApicRegIndexOutOfRange,
 }
 
 impl From<GraphicsError> for WasabiError {
