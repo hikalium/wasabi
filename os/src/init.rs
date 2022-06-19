@@ -166,8 +166,11 @@ pub fn init_graphical_terminal() {
 }
 
 pub fn init_interrupts() {
-    crate::x86::GDT.load();
-    crate::x86::segment_selector::write_cs(crate::x86::segment_selector::KERNEL_CS);
+    unsafe {
+        crate::x86::GDT.load();
+        crate::x86::segment_selector::write_cs(crate::x86::segment_selector::KERNEL_CS);
+        crate::x86::segment_selector::write_ds(crate::x86::segment_selector::KERNEL_DS);
+    }
     crate::println!("init_interrupts()");
     x86::disable_legacy_pic();
     let bsp_local_apic = LocalApic::new();

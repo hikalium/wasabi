@@ -23,15 +23,17 @@ pub struct Gdt {
 }
 const _: () = assert!(core::mem::size_of::<Gdt>() / 8 == 6);
 impl Gdt {
-    pub fn load(&'static self) {
+    /// # Safety
+    /// Anything can happen if the GDT given is invalid
+    /// and latter segment register modification does something
+    /// that is not matched with the GDT.
+    pub unsafe fn load(&'static self) {
         let params = GdtrParameters {
             limit: (core::mem::size_of::<Gdt>() - 1) as u16,
             base: self,
         };
-        unsafe {
-            asm!("lgdt [rcx]",
+        asm!("lgdt [rcx]",
                 in("rcx") &params)
-        }
     }
 }
 
@@ -58,11 +60,12 @@ pub mod segment_selector {
     use super::*;
     pub const KERNEL_CS: u16 = 1 << 3;
     pub const KERNEL_DS: u16 = 2 << 3;
-    pub fn write_cs(cs: u16) {
+    /// # Safety
+    /// Anything can happen if the CS given is invalid.
+    pub unsafe fn write_cs(cs: u16) {
         // The MOV instruction CANNOT be used to load the CS register.
         // Use far-jump(ljmp) instead.
-        unsafe {
-            asm!(
+        asm!(
 	"lea rax, [rip + 1f]", // Target address (label 1 below)
 	"push cx", // Construct a far pointer on the stack
 	"push rax",
@@ -70,7 +73,13 @@ pub mod segment_selector {
         "1:",
         "add rsp, 8 + 2", // Cleanup the far pointer on the stack
                 in("cx") cs)
-        }
+    }
+    /// # Safety
+    /// Anything can happen if the DS given is invalid.
+    pub unsafe fn write_ds(ds: u16) {
+        asm!(
+	"mov ds, ax",
+                in("ax") ds)
     }
 }
 
