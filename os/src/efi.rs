@@ -106,7 +106,7 @@ pub struct EfiTableHeader {
 
 pub type EfiHandle = u64;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[must_use]
 pub enum EfiStatus {
     SUCCESS = 0,

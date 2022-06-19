@@ -1,7 +1,7 @@
 use crate::efi::*;
 use crate::graphics::*;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum WasabiError {
     EfiError(EfiStatus),
     Failed(&'static str),

@@ -7,6 +7,7 @@ use crate::*;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
 use arch::x86_64::apic::LocalApic;
+use arch::x86_64::gdt::GDT;
 use core::mem::size_of;
 use core::slice;
 use error::*;
@@ -168,9 +169,9 @@ pub fn init_graphical_terminal() {
 
 pub fn init_interrupts() {
     unsafe {
-        x86_64::GDT.load();
-        x86_64::segment_selector::write_cs(x86_64::segment_selector::KERNEL_CS);
-        x86_64::segment_selector::write_ds(x86_64::segment_selector::KERNEL_DS);
+        GDT.load();
+        x86_64::write_cs(x86_64::KERNEL_CS);
+        x86_64::write_ds(x86_64::KERNEL_DS);
     }
     crate::println!("init_interrupts()");
     x86_64::disable_legacy_pic();

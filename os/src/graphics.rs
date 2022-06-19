@@ -37,7 +37,7 @@ pub trait BitmapImageBuffer {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GraphicsError {
     OutOfRange,
 }
