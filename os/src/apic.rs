@@ -108,7 +108,7 @@ impl IoApic {
         let entry: u64 = ((to_apic as u64) << 56) | (to_vector as u64);
         Self::write_redirection_entry(from_irq, entry)
     }
-    pub fn init(bsp_lapic: &LocalApic) {
+    pub fn init(bsp_lapic: &LocalApic) -> Result<()> {
         println!("Initial redirection:");
         for i in 0..24 {
             println!(
@@ -119,9 +119,9 @@ impl IoApic {
         }
 
         let to_apic_id = bsp_lapic.id();
-        Self::set_redirection(2, 0x20, to_apic_id); // HPET
-        Self::set_redirection(1, 0x21, to_apic_id); // KBC
-        Self::set_redirection(12, 0x22, to_apic_id); // Mouse
+        Self::set_redirection(2, 0x20, to_apic_id)?; // HPET
+        Self::set_redirection(1, 0x21, to_apic_id)?; // KBC
+        Self::set_redirection(12, 0x22, to_apic_id)?; // Mouse
 
         println!("After redirection:");
         for i in 0..24 {
@@ -131,5 +131,6 @@ impl IoApic {
                 Self::read_redirection_entry(i).expect("Failed to read redirection table")
             );
         }
+        Ok(())
     }
 }

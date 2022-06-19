@@ -171,7 +171,7 @@ pub fn init_interrupts() {
     crate::println!("init_interrupts()");
     x86::disable_legacy_pic();
     let bsp_local_apic = LocalApic::new();
-    IoApic::init(&bsp_local_apic);
+    IoApic::init(&bsp_local_apic).expect("Failed to init I/O APIC");
 }
 
 pub fn init_pci() {

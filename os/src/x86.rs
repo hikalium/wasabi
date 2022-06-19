@@ -4,11 +4,14 @@ use core::fmt;
 
 pub const MSR_IA32_APIC_BASE: u32 = 0x1b;
 
+#[allow(dead_code)]
 #[repr(packed)]
 struct GdtrParameters {
     limit: u16,
     base: &'static Gdt,
 }
+
+#[allow(dead_code)]
 #[repr(packed)]
 pub struct Gdt {
     null_segment: GdtSegmentDescriptor,
@@ -46,18 +49,15 @@ mod attr_bits {
     pub const BIT_TYPE_CODE: u64 = 0b11u64 << 43;
 
     pub const BIT_PRESENT: u64 = 1u64 << 47;
-    pub const BIT_ACCESSED: u64 = 1u64 << 47;
     pub const BIT_CS_LONG_MODE: u64 = 1u64 << 53;
     pub const BIT_CS_READABLE: u64 = 1u64 << 53;
     pub const BIT_DS_WRITABLE: u64 = 1u64 << 41;
-
-    pub const MASK_DPL: u64 = 0b11u64 << 45;
 }
 
 pub mod segment_selector {
     use super::*;
-    pub const KERNEL_CS: u16 = (1 << 3);
-    pub const KERNEL_DS: u16 = (2 << 3);
+    pub const KERNEL_CS: u16 = 1 << 3;
+    pub const KERNEL_DS: u16 = 2 << 3;
     pub fn write_cs(cs: u16) {
         // The MOV instruction CANNOT be used to load the CS register.
         // Use far-jump(ljmp) instead.
@@ -81,7 +81,7 @@ enum GdtAttr {
     KernelData = BIT_TYPE_DATA | BIT_PRESENT | BIT_DS_WRITABLE,
 }
 
-struct GdtSegmentDescriptor {
+pub struct GdtSegmentDescriptor {
     value: u64,
 }
 impl GdtSegmentDescriptor {
@@ -90,6 +90,11 @@ impl GdtSegmentDescriptor {
     }
     const fn new(attr: GdtAttr) -> Self {
         Self { value: attr as u64 }
+    }
+}
+impl fmt::Display for GdtSegmentDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:#18X}", self.value)
     }
 }
 
