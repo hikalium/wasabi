@@ -168,15 +168,19 @@ pub fn init_graphical_terminal() {
 }
 
 pub fn init_interrupts() {
+    crate::println!("init_interrupts()");
     unsafe {
         GDT.load();
         x86_64::write_cs(x86_64::KERNEL_CS);
         x86_64::write_ds(x86_64::KERNEL_DS);
     }
-    crate::println!("init_interrupts()");
     x86_64::disable_legacy_pic();
     let bsp_local_apic = LocalApic::new();
     IoApic::init(&bsp_local_apic).expect("Failed to init I/O APIC");
+    unsafe {
+        x86_64::idt::IDT.init(x86_64::KERNEL_CS);
+        x86_64::idt::IDT.load();
+    }
 }
 
 pub fn init_pci() {
@@ -186,7 +190,6 @@ pub fn init_pci() {
     let pci = Pci::new(mcfg);
     // This is safe since it is only called once
     unsafe { Pci::set(pci) };
-
     Pci::take().probe_devices();
     Pci::take().list_devices();
     Pci::take().list_drivers();

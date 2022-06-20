@@ -5,6 +5,7 @@
 #![feature(associated_type_defaults)]
 #![test_runner(crate::test_runner::test_runner)]
 #![reexport_test_harness_main = "test_main"]
+#![feature(const_maybe_uninit_zeroed)]
 
 pub mod acpi;
 pub mod arch;

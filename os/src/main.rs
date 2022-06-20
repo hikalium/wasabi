@@ -76,6 +76,9 @@ pub fn main() -> Result<()> {
         writeln!(w, "COM{}!", i).expect("Failed to write");
         os::println!("Printed to COM{}", i);
     }
+    unsafe {
+        core::arch::asm!("ud2");
+    }
     Ok(())
 }
 
