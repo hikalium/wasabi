@@ -2,29 +2,165 @@ use crate::println;
 use core::arch::asm;
 use core::arch::global_asm;
 use core::cell::RefCell;
+use core::fmt;
 use core::mem::MaybeUninit;
 
+#[allow(dead_code)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FPUContenxt {
+    data: [u8; 512],
+}
+#[allow(dead_code)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GeneralRegisterContext {
+    rax: u64,
+    rdx: u64,
+    rbx: u64,
+    rbp: u64,
+    rsi: u64,
+    rdi: u64,
+    r8: u64,
+    r9: u64,
+    r10: u64,
+    r11: u64,
+    r12: u64,
+    r13: u64,
+    r14: u64,
+    r15: u64,
+    rcx: u64,
+}
+const _: () = assert!(core::mem::size_of::<GeneralRegisterContext>() == (16 - 1) * 8);
+#[allow(dead_code)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct InterruptContext {
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+    rsp: u64,
+    ss: u64,
+}
+const _: () = assert!(core::mem::size_of::<InterruptContext>() == 8 * 5);
+#[allow(dead_code)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct InterruptInfo {
+    // This struct is placed at top of the interrupt stack.
+    fpu_context: FPUContenxt, // used by FXSAVE / FXRSTOR
+    _dummy: u64,
+    greg: GeneralRegisterContext,
+    error_code: u64,
+    ctx: InterruptContext,
+}
+const _: () = assert!(core::mem::size_of::<InterruptInfo>() == (16 + 4 + 1) * 8 + 8 + 512);
+impl fmt::Debug for InterruptInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "
+        {{
+            rip: {:#018X}, CS: {:#06X},
+            rsp: {:#018X}, SS: {:#06X},
+            rbp: {:#018X},
+
+            rflags:     {:#018X},
+            error_code: {:#018X},
+
+            rax: {:#018X}, rcx: {:#018X},
+            rdx: {:#018X}, rbx: {:#018X},
+            rsi: {:#018X}, rdi: {:#018X},
+            r8:  {:#018X}, r9:  {:#018X},
+            r10: {:#018X}, r11: {:#018X},
+            r12: {:#018X}, r13: {:#018X},
+            r14: {:#018X}, r15: {:#018X},
+        }}",
+            self.ctx.rip,
+            self.ctx.cs,
+            self.ctx.rsp,
+            self.ctx.ss,
+            self.greg.rbp,
+            self.ctx.rflags,
+            self.error_code,
+            //
+            self.greg.rax,
+            self.greg.rcx,
+            self.greg.rdx,
+            self.greg.rbx,
+            //
+            self.greg.rsi,
+            self.greg.rdi,
+            //
+            self.greg.r8,
+            self.greg.r9,
+            self.greg.r10,
+            self.greg.r11,
+            self.greg.r12,
+            self.greg.r13,
+            self.greg.r14,
+            self.greg.r15,
+        )
+    }
+}
+
+// SDM Vol.3: 6.14.2 64-Bit Mode Stack Frame
+// In IA-32e mode, the RSP is aligned to a 16-byte boundary
+// before pushing the stack frame
 global_asm!(
     r#"
 .global asm_int06
 asm_int06:
     push 0 // No error code
-    jmp int06
+    push rcx // Save rcx first to reuse
+    mov rcx, 0x06 // INT#
+    jmp inthandler_common
+
+.global inthandler_common
+inthandler_common:
+    // General purpose registers (except rsp and rcx)
+    push r15
+    push r14
+    push r13
+    push r12
+    push r11
+    push r10
+    push r9
+    push r8
+    push rdi
+    push rsi
+    push rbp
+    push rbx
+    push rdx
+    push rax
+    // FPU State
+    sub rsp, 512 + 8
+    fxsave64[rsp]
+    // First parameter: pointer to the saved CPU state
+    mov rdi, rsp
+    // Align the stack to 16-bytes boundary
+    mov rbp, rsp
+    and rsp, -16
+    call inthandler
 "#
 );
 
-extern "C" {
+extern "sysv64" {
     fn asm_int06();
 }
 
 #[no_mangle]
-extern "C" fn int06() {
+extern "sysv64" fn int06() {
     panic!("Exception 0x06: Undefined Opcode");
+}
+#[no_mangle]
+extern "sysv64" fn inthandler(info: &InterruptInfo) {
+    println!("Interrupt Info: {:?}", info);
+    panic!("Exception 0x06: Undefined Opcode (generic one!)");
 }
 
 #[no_mangle]
-extern "C" fn int_handler_unimplemented() {
-    println!("hey!!!");
+extern "sysv64" fn int_handler_unimplemented() {
     panic!("unexpected interrupt!");
 }
 
@@ -56,8 +192,13 @@ pub struct IdtDescriptor {
 }
 const _: () = assert!(core::mem::size_of::<IdtDescriptor>() == 16);
 impl IdtDescriptor {
-    fn new(segment_selector: u16, ist_index: u8, attr: IdtAttr, f: unsafe extern "C" fn()) -> Self {
-        let handler_addr = f as *const unsafe extern "C" fn() as usize;
+    fn new(
+        segment_selector: u16,
+        ist_index: u8,
+        attr: IdtAttr,
+        f: unsafe extern "sysv64" fn(),
+    ) -> Self {
+        let handler_addr = f as *const unsafe extern "sysv64" fn() as usize;
         Self {
             offset_low: handler_addr as u16,
             offset_mid: (handler_addr >> 16) as u16,
@@ -101,7 +242,7 @@ impl Idt {
         entries[0x06] = IdtDescriptor::new(segment_selector, 0, IdtAttr::IntGateDPL0, asm_int06);
     }
     /// # Safety
-    /// It is programmer's responsible to call this method
+    /// It is programmer's responsibility to call this method
     /// with a valid, correct IDT.
     pub unsafe fn load(&'static self) {
         let entries = &*self.entries.borrow();
