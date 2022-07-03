@@ -63,6 +63,8 @@ test: font
 commit :
 	git add .
 	make filecheck
+	rustup component add rustfmt
+	rustup component add clippy
 	cargo fmt
 	make clippy
 	make spellcheck

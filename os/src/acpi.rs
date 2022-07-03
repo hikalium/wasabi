@@ -26,12 +26,13 @@ impl RsdpStruct {
 #[repr(packed)]
 #[derive(Clone, Copy)]
 struct SystemDescriptionTableHeader {
-    // acpi_6_4.pdf#page=166
-    // 32 bytes
+    // 5.2. ACPI System Description Tables
+    // Table 5.4: DESCRIPTION_HEADER Fields
     signature: [u8; 4],
     length: u32,
-    _unused: [u8; 24],
+    _unused: [u8; 28],
 }
+const _: () = assert!(core::mem::size_of::<SystemDescriptionTableHeader>() == 36);
 
 impl SystemDescriptionTableHeader {
     fn expect_signature(&self, sig: &'static [u8; 4]) {
@@ -62,11 +63,11 @@ impl fmt::Debug for SystemDescriptionTableHeader {
 pub struct Mcfg {
     // https://wiki.osdev.org/PCI_Express
     header: SystemDescriptionTableHeader,
-    _unused: [u8; 12],
+    _unused: [u8; 8],
     // 44 + (16 * n) -> Configuration space base address allocation structures
     // [EcamEntry; ?]
 }
-
+const _: () = assert!(core::mem::size_of::<Mcfg>() == 44);
 impl Mcfg {
     fn new(header: &SystemDescriptionTableHeader) -> &Self {
         header.expect_signature(b"MCFG");
@@ -131,8 +132,8 @@ trait AcpiIterableTable {
 #[repr(packed)]
 struct Xsdt {
     header: SystemDescriptionTableHeader,
-    _unused: [u8; 4],
 }
+const _: () = assert!(core::mem::size_of::<Xsdt>() == 36);
 
 impl Xsdt {
     fn list_all_tables(&self) {

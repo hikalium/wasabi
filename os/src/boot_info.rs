@@ -76,7 +76,7 @@ impl ModelFamilyStepping {
         let model = (self.value >> 4) & 0b1111;
         if model == 0x06 || model == 0x0F {
             let extended_model = (self.value >> 16) & 0b1111;
-            extended_model << 4 + model
+            (extended_model << 4) + model
         } else {
             model
         }

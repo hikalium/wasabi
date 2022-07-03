@@ -22,6 +22,10 @@ pub unsafe fn read_msr(msr: u32) -> u64 {
     ((high as u64) << 32) | low as u64
 }
 
+/// # Safety
+/// wrmsr will cause #GP(0) if the specified MSR is not implemented,
+/// reserved fields have non-zero values and
+/// non-canonical address values are being set to address fields.
 pub unsafe fn write_msr(port: u32, data: u64) {
     asm!("wrmsr",
             in("ecx") port,
