@@ -183,6 +183,38 @@ pub fn init_interrupts() {
     }
 }
 
+fn detect_fsb_freq() -> Option<u64> {
+    let fsb_freq_msr = x86_64::read_msr(x86_64::MSR_FSB_FREQ);
+    crate::println!("fsb_freq_msr = {}", fsb_freq_msr);
+    let fsb_khz = match fsb_freq_msr & 0b111 {
+        0b101 => 100_000,
+        0b001 => 133_333,
+        0b011 => 166_666,
+        0b010 => 200_000,
+        0b000 => 266_666,
+        0b100 => 333_333,
+        0b110 => 400_000,
+        _ => return None,
+    };
+    Some(fsb_khz)
+}
+
+pub fn init_timer() {
+    crate::println!("init_timer()");
+    let fsb_freq = detect_fsb_freq();
+    crate::println!("fsb_freq = {:?}", fsb_freq);
+    // But qemu uses ns resolution for APIC timer so just use that...
+    unsafe {
+        (0xFEE0_03E0 as *mut u32).write_volatile(0b1011); // divide by 1
+        (0xFEE0_0320 as *mut u32).write_volatile(0x20); // vector 0x20, One shot, not masked
+        (0xFEE0_0380 as *mut u32).write_volatile(3_000_000_000); // 3s = 3e9 ns
+    }
+    unsafe { core::arch::asm!("sti") }
+    loop {
+        arch::x86_64::hlt();
+    }
+}
+
 pub fn init_pci() {
     crate::println!("init_pci()");
     let acpi = BootInfo::take().acpi();

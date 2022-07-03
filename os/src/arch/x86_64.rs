@@ -7,6 +7,7 @@ use core::arch::asm;
 use core::fmt;
 
 pub const MSR_IA32_APIC_BASE: u32 = 0x1b;
+pub const MSR_FSB_FREQ: u32 = 0xcd;
 
 pub fn read_msr(port: u32) -> u64 {
     let mut high: u32;
