@@ -20,7 +20,11 @@ impl LocalApic {
         println!("{:?}", cpu_features);
         let x2apic_id = x86_64::read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx();
         println!("x2APIC ID: {}", x2apic_id);
-        let apic_base = x86_64::read_msr(x86_64::MSR_IA32_APIC_BASE);
+        let apic_base = unsafe {
+            // This is safe since IA32_APIC_BASE is one of IA-32 Architectural MSRs
+            // so it always exists on x86_64 platform.
+            x86_64::read_msr(x86_64::MSR_IA32_APIC_BASE)
+        };
         println!("MSR_IA32_APIC_BASE={:#X}", apic_base);
         let status = LocalApicStatus::new(apic_base);
         println!("{:?}", status);
@@ -87,7 +91,7 @@ impl IoApic {
             Ok(())
         }
     }
-    fn read_redirection_entry(irq: usize) -> Result<u64> {
+    pub fn read_redirection_entry(irq: usize) -> Result<u64> {
         if irq < 24 {
             let v = (
                 Self::read_register(0x10 + irq * 2),
@@ -109,28 +113,10 @@ impl IoApic {
         Self::write_redirection_entry(from_irq, entry)
     }
     pub fn init(bsp_lapic: &LocalApic) -> Result<()> {
-        println!("Initial redirection:");
-        for i in 0..24 {
-            println!(
-                "{:#04X}: {:#018X}",
-                i,
-                Self::read_redirection_entry(i).expect("Failed to read redirection table")
-            );
-        }
-
         let to_apic_id = bsp_lapic.id();
         // Self::set_redirection(2, 0x20, to_apic_id)?; // HPET
         Self::set_redirection(1, 0x21, to_apic_id)?; // KBC
         Self::set_redirection(12, 0x22, to_apic_id)?; // Mouse
-
-        println!("After redirection:");
-        for i in 0..24 {
-            println!(
-                "{:#04X}: {:#018X}",
-                i,
-                Self::read_redirection_entry(i).expect("Failed to read redirection table")
-            );
-        }
         Ok(())
     }
 }

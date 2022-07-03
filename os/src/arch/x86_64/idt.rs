@@ -186,7 +186,8 @@ inthandler_common:
 #[no_mangle]
 extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
     println!("Interrupt Info: {:?}", info);
-    panic!("Exception {index:#04X}: ???");
+    println!("Exception {index:#04X}: ???");
+    panic!();
 }
 
 #[no_mangle]

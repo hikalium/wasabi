@@ -8,6 +8,7 @@ use arch::x86_64;
 use arch::x86_64::apic::IoApic;
 use arch::x86_64::apic::LocalApic;
 use arch::x86_64::gdt::GDT;
+use arch::x86_64::CpuidRequest;
 use core::mem::size_of;
 use core::slice;
 use error::*;
@@ -183,8 +184,8 @@ pub fn init_interrupts() {
     }
 }
 
-fn detect_fsb_freq() -> Option<u64> {
-    let fsb_freq_msr = x86_64::read_msr(x86_64::MSR_FSB_FREQ);
+pub fn detect_fsb_freq() -> Option<u64> {
+    let fsb_freq_msr = unsafe { x86_64::read_msr(x86_64::MSR_FSB_FREQ) };
     crate::println!("fsb_freq_msr = {}", fsb_freq_msr);
     let fsb_khz = match fsb_freq_msr & 0b111 {
         0b101 => 100_000,
@@ -199,15 +200,35 @@ fn detect_fsb_freq() -> Option<u64> {
     Some(fsb_khz)
 }
 
+fn detect_core_clock_freq() -> u32 {
+    let res = x86_64::read_cpuid(CpuidRequest { eax: 0x15, ecx: 0 });
+    println!("{:?}", res);
+    let freq = res.ecx();
+    if freq != 0 {
+        freq
+    } else if res.ebx() != 0 && res.eax() != 0 {
+        let platform_info = unsafe { x86_64::read_msr(x86_64::MSR_PLATFORM_INFO) };
+        println!("MSR_PLATFORM_INFO={:#010X}", platform_info);
+        ((platform_info as u32 >> 8) & 0xFF) * 1_000_000_000
+    } else {
+        // Assume that this is QEMU which has ns resolution clock
+        1_000_000_000
+    }
+}
+
 pub fn init_timer() {
     crate::println!("init_timer()");
+    /*
     let fsb_freq = detect_fsb_freq();
     crate::println!("fsb_freq = {:?}", fsb_freq);
+    */
+    let core_crystal_freq = detect_core_clock_freq();
+    crate::println!("core_crystal_freq = {:?}", core_crystal_freq);
     // But qemu uses ns resolution for APIC timer so just use that...
     unsafe {
         (0xFEE0_03E0 as *mut u32).write_volatile(0b1011); // divide by 1
         (0xFEE0_0320 as *mut u32).write_volatile(0x20); // vector 0x20, One shot, not masked
-        (0xFEE0_0380 as *mut u32).write_volatile(3_000_000_000); // 3s = 3e9 ns
+        (0xFEE0_0380 as *mut u32).write_volatile(core_crystal_freq * 3);
     }
     unsafe { core::arch::asm!("sti") }
     loop {

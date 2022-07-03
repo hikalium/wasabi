@@ -8,26 +8,25 @@ use core::fmt;
 
 pub const MSR_IA32_APIC_BASE: u32 = 0x1b;
 pub const MSR_FSB_FREQ: u32 = 0xcd;
+pub const MSR_PLATFORM_INFO: u32 = 0xce;
 
-pub fn read_msr(port: u32) -> u64 {
+/// # Safety
+/// rdmsr will cause #GP(0) if the specified MSR is not implemented.
+pub unsafe fn read_msr(msr: u32) -> u64 {
     let mut high: u32;
     let mut low: u32;
-    unsafe {
-        asm!("rdmsr",
-            in("ecx") port,
+    asm!("rdmsr",
+            in("ecx") msr,
             out("edx") high,
             out("eax") low);
-    }
     ((high as u64) << 32) | low as u64
 }
 
-pub fn write_msr(port: u32, data: u64) {
-    unsafe {
-        asm!("wrmsr",
+pub unsafe fn write_msr(port: u32, data: u64) {
+    asm!("wrmsr",
             in("ecx") port,
             in("edx") (data >> 32),
             in("eax") data as u32);
-    }
 }
 
 pub const KERNEL_CS: u16 = 1 << 3;
@@ -108,6 +107,8 @@ impl fmt::Display for CpuidResponse {
     }
 }
 
+// Returned values will be all zero if the requested leaf
+// does not exist.
 pub fn read_cpuid(request: CpuidRequest) -> CpuidResponse {
     let mut eax: u32 = request.eax;
     let mut ebx: u32;
