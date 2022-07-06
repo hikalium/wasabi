@@ -114,7 +114,7 @@ impl IoApic {
     }
     pub fn init(bsp_lapic: &LocalApic) -> Result<()> {
         let to_apic_id = bsp_lapic.id();
-        // Self::set_redirection(2, 0x20, to_apic_id)?; // HPET
+        Self::set_redirection(2, 0x20, to_apic_id)?; // HPET
         Self::set_redirection(1, 0x21, to_apic_id)?; // KBC
         Self::set_redirection(12, 0x22, to_apic_id)?; // Mouse
         Ok(())

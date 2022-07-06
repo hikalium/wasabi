@@ -12,6 +12,7 @@ use arch::x86_64::CpuidRequest;
 use core::mem::size_of;
 use core::slice;
 use error::*;
+use hpet::Hpet;
 
 pub struct EfiServices {
     image_handle: efi::EfiHandle,
@@ -200,7 +201,7 @@ pub fn detect_fsb_freq() -> Option<u64> {
     Some(fsb_khz)
 }
 
-fn detect_core_clock_freq() -> u32 {
+pub fn detect_core_clock_freq() -> u32 {
     let res = x86_64::read_cpuid(CpuidRequest { eax: 0x15, ecx: 0 });
     println!("{:?}", res);
     let freq = res.ecx();
@@ -218,19 +219,26 @@ fn detect_core_clock_freq() -> u32 {
 
 pub fn init_timer() {
     crate::println!("init_timer()");
-    /*
-    let fsb_freq = detect_fsb_freq();
-    crate::println!("fsb_freq = {:?}", fsb_freq);
-    */
-    let core_crystal_freq = detect_core_clock_freq();
-    crate::println!("core_crystal_freq = {:?}", core_crystal_freq);
-    // But qemu uses ns resolution for APIC timer so just use that...
-    unsafe {
-        (0xFEE0_03E0 as *mut u32).write_volatile(0b1011); // divide by 1
-        (0xFEE0_0320 as *mut u32).write_volatile(0x20); // vector 0x20, One shot, not masked
-        (0xFEE0_0380 as *mut u32).write_volatile(core_crystal_freq * 3);
-    }
-    unsafe { core::arch::asm!("sti") }
+    let acpi = BootInfo::take().acpi();
+    let hpet = unsafe {
+        // This is safe since this is the only place to create HPET instance.
+        Hpet::new(
+            acpi.hpet()
+                .base_address()
+                .expect("Failed to get HPET base address"),
+        )
+    };
+    crate::println!("{}", hpet.main_counter());
+    crate::println!("{}", hpet.main_counter());
+    crate::println!("{}", hpet.main_counter());
+    crate::println!("{}", hpet.main_counter());
+    crate::println!("{}", hpet.main_counter());
+
+    unsafe { core::arch::asm!("int3") }
+
+    crate::println!("I'm back!");
+
+    //unsafe { core::arch::asm!("sti") }
     loop {
         arch::x86_64::hlt();
     }

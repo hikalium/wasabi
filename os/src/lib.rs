@@ -14,6 +14,7 @@ pub mod debug_exit;
 pub mod efi;
 pub mod error;
 pub mod graphics;
+pub mod hpet;
 pub mod init;
 pub mod memory_map_holder;
 pub mod panic;

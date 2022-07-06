@@ -142,11 +142,15 @@ macro_rules! interrupt_entrypoint {
     };
 }
 
+interrupt_entrypoint!(3);
 interrupt_entrypoint!(6);
+interrupt_entrypoint!(13);
 interrupt_entrypoint!(32);
 
 extern "sysv64" {
+    fn interrupt_entrypoint3();
     fn interrupt_entrypoint6();
+    fn interrupt_entrypoint13();
     fn interrupt_entrypoint32();
 }
 
@@ -179,7 +183,33 @@ inthandler_common:
     and rsp, -16
     // 2nd parameter: Int#
     mov rsi, rcx
+
     call inthandler
+
+    mov rsp, rbp
+    //
+    fxrstor64[rsp]
+    add rsp, 512 + 8
+    //
+    pop rax
+    pop rdx
+    pop rbx
+    pop rbp
+    pop rsi
+    pop rdi
+    pop r8
+    pop r9
+    pop r10
+    pop r11
+    pop r12
+    pop r13
+    pop r14
+    pop r15
+    //
+	pop rcx
+	add rsp, 8 // for Error Code
+	iretq
+
 "#
 );
 
@@ -187,6 +217,9 @@ inthandler_common:
 extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
     println!("Interrupt Info: {:?}", info);
     println!("Exception {index:#04X}: ???");
+    if index == 3 {
+        return;
+    }
     panic!();
 }
 
@@ -270,13 +303,25 @@ impl Idt {
                 int_handler_unimplemented,
             );
         }
-        entries[0x06] = IdtDescriptor::new(
+        entries[3] = IdtDescriptor::new(
+            segment_selector,
+            0,
+            IdtAttr::IntGateDPL0,
+            interrupt_entrypoint3,
+        );
+        entries[6] = IdtDescriptor::new(
             segment_selector,
             0,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint6,
         );
-        entries[0x20] = IdtDescriptor::new(
+        entries[13] = IdtDescriptor::new(
+            segment_selector,
+            0,
+            IdtAttr::IntGateDPL0,
+            interrupt_entrypoint13,
+        );
+        entries[32] = IdtDescriptor::new(
             segment_selector,
             0,
             IdtAttr::IntGateDPL0,
