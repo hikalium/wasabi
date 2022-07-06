@@ -169,6 +169,8 @@ pub fn init_graphical_terminal() {
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
 }
 
+pub fn init_paging() {}
+
 pub fn init_interrupts() {
     crate::println!("init_interrupts()");
     unsafe {
