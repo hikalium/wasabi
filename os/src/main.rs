@@ -54,7 +54,6 @@ pub fn main() -> Result<()> {
     use core::fmt::Write;
     use os::*;
     init::init_graphical_terminal();
-    init::init_global_allocator();
     os::println!("Booting Wasabi OS!!!");
     paint_wasabi_logo();
 
@@ -84,24 +83,22 @@ pub fn main() -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(test))]
-#[no_mangle]
-fn efi_main(
-    image_handle: os::efi::EfiHandle,
-    efi_system_table: &'static mut os::efi::EfiSystemTable,
-) -> ! {
-    os::init::init_basic_runtime(image_handle, efi_system_table);
-    main().unwrap();
-    loop {
-        unsafe { core::arch::asm!("cli; hlt") }
-    }
-}
-
-#[cfg(test)]
 #[no_mangle]
 fn efi_main(
     image_handle: os::efi::EfiHandle,
     efi_system_table: &'static mut os::efi::EfiSystemTable,
 ) {
-    os::test_runner::run_tests(image_handle, efi_system_table, &test_main);
+    os::init::init_basic_runtime(image_handle, efi_system_table);
+
+    // For normal boot
+    #[cfg(not(test))]
+    main().unwrap();
+
+    // For unit tests in main.rs
+    #[cfg(test)]
+    test_main();
+
+    loop {
+        unsafe { core::arch::asm!("cli; hlt") }
+    }
 }

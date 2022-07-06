@@ -1,5 +1,4 @@
 use crate::debug_exit;
-use crate::efi;
 use crate::serial;
 use core::fmt::Write;
 
@@ -29,18 +28,4 @@ pub fn test_runner(tests: &[&dyn Testable]) -> ! {
     }
     write!(writer, "Done!").unwrap();
     debug_exit::exit_qemu(debug_exit::QemuExitCode::Success)
-}
-
-/// This function is called before the tests run and
-/// responsible to exit from EfiBootServices and setting up
-/// a global allocator for tests.
-pub fn run_tests(
-    image_handle: efi::EfiHandle,
-    efi_system_table: &'static mut efi::EfiSystemTable,
-    test_main: &dyn Fn(),
-) {
-    use crate::init::*;
-    init_basic_runtime(image_handle, efi_system_table);
-    init_global_allocator();
-    test_main();
 }

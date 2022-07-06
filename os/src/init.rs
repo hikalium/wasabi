@@ -132,7 +132,7 @@ impl EfiServices {
     }
 }
 
-pub fn init_basic_runtime(
+pub fn init_with_boot_services(
     image_handle: efi::EfiHandle,
     efi_system_table: &'static mut efi::EfiSystemTable,
 ) {
@@ -155,6 +155,15 @@ pub fn init_basic_runtime(
     unsafe {
         BootInfo::set(boot_info);
     }
+}
+
+// Common initialization for a normal boot and tests
+pub fn init_basic_runtime(
+    image_handle: efi::EfiHandle,
+    efi_system_table: &'static mut efi::EfiSystemTable,
+) {
+    init_with_boot_services(image_handle, efi_system_table);
+    init_global_allocator();
 }
 
 pub fn init_global_allocator() {

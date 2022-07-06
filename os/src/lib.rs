@@ -32,8 +32,10 @@ pub mod allocator;
 
 #[cfg(test)]
 #[no_mangle]
+// For unit tests except that are in main.rs
 fn efi_main(image_handle: efi::EfiHandle, efi_system_table: &'static mut efi::EfiSystemTable) {
-    test_runner::run_tests(image_handle, efi_system_table, &test_main);
+    crate::init::init_basic_runtime(image_handle, efi_system_table);
+    test_main();
 }
 
 // Structs
