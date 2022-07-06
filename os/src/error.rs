@@ -10,6 +10,8 @@ pub enum WasabiError {
     PciBusDeviceFunctionOutOfRange,
     ReadFileSizeMismatch { expected: usize, actual: usize },
     ApicRegIndexOutOfRange,
+    Infallible,
+    CalcOutOfRange,
 }
 
 impl From<GraphicsError> for WasabiError {

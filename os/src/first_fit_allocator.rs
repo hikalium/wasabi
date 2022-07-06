@@ -2,6 +2,8 @@ extern crate alloc;
 
 use crate::efi::EfiMemoryDescriptor;
 use crate::efi::EfiMemoryType;
+use crate::error::Result;
+use crate::error::WasabiError;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::println;
 use alloc::alloc::GlobalAlloc;
@@ -9,47 +11,60 @@ use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use core::borrow::BorrowMut;
 use core::cell::RefCell;
+use core::cmp::max;
 use core::ops::DerefMut;
 
-/*
-macro_rules! log_malloc {
-        () => ($crate::print!("\n"));
-            ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-*/
-macro_rules! log_malloc {
-        () => ($crate::print_nothing!("\n"));
-            ($($arg:tt)*) => ($crate::print_nothing!("{}\n", format_args!($($arg)*)));
-}
+/// Each char represents 32-byte chunks.
+/// Vertical bar `|` represents the chunk that has a Header
+/// before: |-- prev -------|---- self ---------------
+/// align:  |--------|-------|-------|-------|-------|
+/// after:  |---------------||-------|----------------
 
-/*
-<- free --------------------><- used --><- free ---------------->
-|- FreeInfo ---|- unused ---|           |- FreeInfo ---|--------|
-^ &FreeInfo                             ^ &FreeInfo
-<- bytes ------------------->           <- ---------bytes ------>
-|--next_free_info --------------------->|
-*/
+fn round_up_to_nearest_pow2(v: usize) -> Result<usize> {
+    1usize
+        .checked_shl(usize::BITS - v.wrapping_sub(1).leading_zeros())
+        .ok_or(WasabiError::CalcOutOfRange)
+}
+#[test_case]
+fn round_up_to_nearest_pow2_tests() {
+    assert_eq!(
+        round_up_to_nearest_pow2(0),
+        Err(WasabiError::CalcOutOfRange)
+    );
+    assert_eq!(round_up_to_nearest_pow2(1), Ok(1));
+    assert_eq!(round_up_to_nearest_pow2(2), Ok(2));
+    assert_eq!(round_up_to_nearest_pow2(3), Ok(4));
+    assert_eq!(round_up_to_nearest_pow2(4), Ok(4));
+    assert_eq!(round_up_to_nearest_pow2(5), Ok(8));
+    assert_eq!(round_up_to_nearest_pow2(6), Ok(8));
+    assert_eq!(round_up_to_nearest_pow2(7), Ok(8));
+    assert_eq!(round_up_to_nearest_pow2(8), Ok(8));
+    assert_eq!(round_up_to_nearest_pow2(9), Ok(16));
+    assert_eq!(round_up_to_nearest_pow2(9), Ok(16));
+}
 #[derive(Debug)]
 struct Header {
     next_header: Option<Box<Header>>,
-    size: usize,
+    size: u32,
     is_allocated: bool,
 }
+const HEADER_SIZE: usize = core::mem::size_of::<Header>();
+#[allow(clippy::assertions_on_constants)]
+const _: () = assert!(HEADER_SIZE == 16);
+// Size of Header should be power of 2
+const _: () = assert!(HEADER_SIZE.count_ones() == 1);
 impl Header {
-    fn can_provide(&self, size: usize) -> bool {
-        self.size >= size + Self::header_size() * 2
+    fn can_provide(&self, size: usize, _align: usize) -> bool {
+        self.size() >= size + HEADER_SIZE * 3
     }
     fn is_allocated(&self) -> bool {
         self.is_allocated
     }
-    fn header_size() -> usize {
-        core::mem::size_of::<Self>()
-    }
     fn size(&self) -> usize {
-        self.size
+        self.size as usize
     }
     fn body_addr(&self) -> usize {
-        self as *const Header as usize + Self::header_size()
+        self as *const Header as usize + HEADER_SIZE
     }
     fn end_addr(&self) -> usize {
         self as *const Header as usize + self.size()
@@ -64,19 +79,24 @@ impl Header {
         alloc::boxed::Box::from_raw(addr as *mut Header)
     }
     unsafe fn from_allocated_region(addr: *mut u8) -> Box<Header> {
-        let header = addr.sub(Self::header_size()) as *mut Header;
+        let header = addr.sub(HEADER_SIZE) as *mut Header;
         alloc::boxed::Box::from_raw(header)
     }
-    fn provide(&mut self, size: usize) -> Option<*mut u8> {
-        if self.is_allocated() || !self.can_provide(size) {
+    fn provide(&mut self, size: usize, align: usize) -> Option<*mut u8> {
+        // std::alloc::Layout doc says:
+        // > All layouts have an associated size and a power-of-two alignment.
+        let size = max(round_up_to_nearest_pow2(size).ok()?, HEADER_SIZE);
+        if self.is_allocated() || !self.can_provide(size, align) {
             None
         } else {
             let mut header_for_allocated =
-                unsafe { Self::new_from_addr(self.end_addr() - size - Self::header_size()) };
+                unsafe { Self::new_from_addr(self.end_addr() - size - HEADER_SIZE) };
             header_for_allocated.is_allocated = true;
-            header_for_allocated.size = size + Self::header_size();
+            header_for_allocated.size = (size + HEADER_SIZE).try_into().ok()?;
             header_for_allocated.next_header = self.next_header.take();
-            self.size -= header_for_allocated.size();
+            self.size = (self.size() - header_for_allocated.size())
+                .try_into()
+                .ok()?;
             let addr = header_for_allocated.body_addr();
             self.next_header = Some(header_for_allocated);
             Some(addr as *mut u8)
@@ -102,11 +122,9 @@ unsafe impl Sync for FirstFitAllocator {}
 
 unsafe impl GlobalAlloc for FirstFitAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        log_malloc!("alloc! {:?}", layout);
         self.alloc_with_options(layout)
     }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        log_malloc!("free! {:#p} {:?}", ptr, layout);
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
         let mut region = Header::from_allocated_region(ptr);
         region.is_allocated = false;
         Box::leak(region);
@@ -120,7 +138,7 @@ impl FirstFitAllocator {
         let mut header = header.deref_mut();
         loop {
             match header {
-                Some(e) => match e.provide((layout.size() + 15) & !15usize) {
+                Some(e) => match e.provide(layout.size(), layout.align()) {
                     Some(p) => break p,
                     None => {
                         header = e.next_header.borrow_mut();
@@ -163,7 +181,7 @@ impl FirstFitAllocator {
         let mut header = unsafe { Header::new_from_addr(desc.physical_start as usize) };
         header.next_header = None;
         header.is_allocated = false;
-        header.size = (desc.number_of_pages as usize) * 4096;
+        header.size = desc.number_of_pages as u32 * 4096;
         let mut first_header = self.first_header.borrow_mut();
         let prev_last = first_header.replace(header);
         drop(first_header);
@@ -187,5 +205,20 @@ fn malloc_iterate_free_and_alloc() {
         let mut vec = Vec::new();
         vec.resize(i, 10);
         // vec will be deallocatad at the end of this scope
+    }
+}
+
+#[test_case]
+fn malloc_align() {
+    let mut pointers = [core::ptr::null_mut::<u8>(); 100];
+    for align in [1, 2, 4, 8, 16, 32, 4096] {
+        println!("trying align = {}", align);
+        for e in pointers.iter_mut() {
+            *e = ALLOCATOR.alloc_with_options(
+                Layout::from_size_align(1234, align).expect("Faild to create Layout"),
+            );
+            assert!(*e as usize != 0);
+            assert!((*e as usize) % align == 0);
+        }
     }
 }
