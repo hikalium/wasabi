@@ -1,11 +1,15 @@
 extern crate alloc;
 
+use crate::allocator::ALLOCATOR;
+use crate::allocator::LAYOUT_PAGE_4K;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
+use crate::util::PAGE_SIZE;
 use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
+use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 
 pub fn read_cr3() -> *mut PML4 {
@@ -25,9 +29,11 @@ pub unsafe fn write_cr3(table: *const PML4) {
 }
 
 const ATTR_MASK: u64 = 0x0000_0000_0000_0FFF;
+// Access rights will be ANDed over all levels
 const ATTR_PRESENT: u64 = 1 << 0;
 const ATTR_WRITABLE: u64 = 1 << 1;
 const ATTR_USER: u64 = 1 << 2;
+// Cache control is only effective for the region referred by the entry
 const ATTR_WRITE_THROUGH: u64 = 1 << 3;
 const ATTR_CACHE_DISABLE: u64 = 1 << 4;
 
@@ -40,17 +46,14 @@ pub enum PageAttr {
     ReadWriteIo = ATTR_PRESENT | ATTR_WRITABLE | ATTR_WRITE_THROUGH | ATTR_CACHE_DISABLE,
 }
 
-#[derive(Debug)]
 #[repr(transparent)]
-pub struct Entry<const LEVEL: &'static str, const SHIFT: usize> {
+pub struct Entry<const LEVEL: &'static str, const SHIFT: usize, NEXT> {
     value: u64,
+    next_type: PhantomData<NEXT>,
 }
-impl<const LEVEL: &'static str, const SHIFT: usize> Entry<LEVEL, SHIFT> {
+impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NEXT> {
     fn read_value(&self) -> u64 {
         self.value
-    }
-    fn write_value(&mut self, value: u64) {
-        self.value = value;
     }
     fn format_additional_attrs(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Result::Ok(())
@@ -67,7 +70,7 @@ impl<const LEVEL: &'static str, const SHIFT: usize> Entry<LEVEL, SHIFT> {
     fn format(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{:9}Entry @ {:#p} {{ {:#018X} {}{}{} ",
+            "{}Entry @ {:#p} {{ {:#018X} {}{}{} ",
             LEVEL,
             self,
             self.read_value(),
@@ -78,8 +81,39 @@ impl<const LEVEL: &'static str, const SHIFT: usize> Entry<LEVEL, SHIFT> {
         self.format_additional_attrs(f)?;
         write!(f, " }}")
     }
+    fn table_mut(&mut self) -> Result<&mut NEXT> {
+        if self.is_present() {
+            Ok(unsafe { &mut *((self.value & !ATTR_MASK) as *mut NEXT) })
+        } else {
+            Err(WasabiError::Failed("Next level is not present"))
+        }
+    }
+    fn populate(&mut self) -> Result<&mut Self> {
+        if self.is_present() {
+            Err(WasabiError::Failed("Page is already populated"))
+        } else {
+            let phys = ALLOCATOR.alloc_with_options(LAYOUT_PAGE_4K) as u64;
+            self.value = phys | PageAttr::ReadWriteUser as u64;
+            Ok(self)
+        }
+    }
+    fn ensure_populated(&mut self) -> Result<&mut Self> {
+        if self.is_present() {
+            Ok(self)
+        } else {
+            self.populate()
+        }
+    }
 }
-impl<const LEVEL: &'static str, const SHIFT: usize> fmt::Display for Entry<LEVEL, SHIFT> {
+
+impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> fmt::Display
+    for Entry<LEVEL, SHIFT, NEXT>
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.format(f)
+    }
+}
+impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> fmt::Debug for Entry<LEVEL, SHIFT, NEXT> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.format(f)
     }
@@ -88,11 +122,12 @@ impl<const LEVEL: &'static str, const SHIFT: usize> fmt::Display for Entry<LEVEL
 //
 // Tables
 //
-pub struct Table<const LEVEL: &'static str, const SHIFT: usize> {
-    pub entry: [Entry<LEVEL, SHIFT>; 512],
+pub struct Table<const LEVEL: &'static str, const SHIFT: usize, NEXT> {
+    entry: [Entry<LEVEL, SHIFT, NEXT>; 512],
 }
-impl<const LEVEL: &'static str, const SHIFT: usize> Table<LEVEL, SHIFT> {
-    const SHIFT: usize = SHIFT;
+impl<const LEVEL: &'static str, const SHIFT: usize, NEXT: core::fmt::Debug>
+    Table<LEVEL, SHIFT, NEXT>
+{
     fn format(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{:5} @ {:#p} {{", LEVEL, self)?;
         for i in 0..512 {
@@ -104,20 +139,22 @@ impl<const LEVEL: &'static str, const SHIFT: usize> Table<LEVEL, SHIFT> {
         }
         writeln!(f, "}}")
     }
-    fn calc_index(addr: u64) -> usize {
+    fn calc_index(&self, addr: u64) -> usize {
         ((addr >> SHIFT) & 0b1_1111_1111) as usize
     }
 }
-impl<const LEVEL: &'static str, const SHIFT: usize> fmt::Debug for Table<LEVEL, SHIFT> {
+impl<const LEVEL: &'static str, const SHIFT: usize, NEXT: fmt::Debug> fmt::Debug
+    for Table<LEVEL, SHIFT, NEXT>
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.format(f)
     }
 }
 
-pub type PT = Table<"PT", 12>;
-pub type PD = Table<"PD", 21>;
-pub type PDPT = Table<"PDPT", 30>;
-pub type PML4 = Table<"PML4", 39>;
+pub type PT = Table<"PT", 12, [u8; PAGE_SIZE]>;
+pub type PD = Table<"PD", 21, PT>;
+pub type PDPT = Table<"PDPT", 30, PD>;
+pub type PML4 = Table<"PML4", 39, PDPT>;
 
 impl PML4 {
     pub fn new() -> Box<Self> {
@@ -144,12 +181,16 @@ impl PML4 {
         if phys & ATTR_MASK != 0 {
             return Err(WasabiError::Failed("Invalid phys"));
         }
-        let mut ofs = 0;
-        let index_range =
-            Self::calc_index(virt_start)..Self::calc_index(virt_end + (1 << Self::SHIFT) - 1);
-        println!("range: {:?}", index_range);
-        for i in index_range {
-            let e = &mut self.entry[i];
+        for addr in (virt_start..virt_end).step_by(PAGE_SIZE) {
+            let index = self.calc_index(addr);
+            let table = self.entry[index].ensure_populated()?.table_mut()?;
+            let index = table.calc_index(addr);
+            let table = table.entry[index].ensure_populated()?.table_mut()?;
+            let index = table.calc_index(addr);
+            let table = table.entry[index].ensure_populated()?.table_mut()?;
+            let index = table.calc_index(addr);
+            let pte = &table.entry[index];
+            println!("{:?}", pte);
         }
         Ok(())
     }

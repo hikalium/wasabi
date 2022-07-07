@@ -30,6 +30,7 @@ const HEADER_SIZE: usize = core::mem::size_of::<Header>();
 const _: () = assert!(HEADER_SIZE == 16);
 // Size of Header should be power of 2
 const _: () = assert!(HEADER_SIZE.count_ones() == 1);
+pub const LAYOUT_PAGE_4K: Layout = Layout::from_size_align(4096, 4096).ok().unwrap();
 impl Header {
     fn can_provide(&self, size: usize, _align: usize) -> bool {
         self.size() >= size + HEADER_SIZE * 3

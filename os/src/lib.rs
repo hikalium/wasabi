@@ -8,6 +8,8 @@
 #![feature(const_maybe_uninit_zeroed)]
 #![allow(incomplete_features)]
 #![feature(adt_const_params)]
+#![feature(const_option)]
+#![feature(const_result_drop)]
 
 pub mod acpi;
 pub mod arch;
