@@ -1,5 +1,9 @@
+extern crate alloc;
+
+use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
+use core::mem::MaybeUninit;
 
 pub fn read_cr3() -> *mut PML4 {
     let mut cr3: *mut PML4;
@@ -17,9 +21,13 @@ pub unsafe fn write_cr3(table: *const PML4) {
             in("rax") table)
 }
 
+//
+// Entries
+//
 pub trait PageTableEntry {
     const LEVEL: &'static str;
     fn read_value(&self) -> u64;
+    fn write_value(&mut self, value: u64);
     fn format_additional_attrs(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         Result::Ok(())
     }
@@ -35,8 +43,9 @@ pub trait PageTableEntry {
     fn format(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{:9} {{ {:#018X} {}{}{} ",
+            "{:9} @ {:#p} {{ {:#018X} {}{}{} ",
             Self::LEVEL,
+            self,
             self.read_value(),
             if self.is_present() { "P" } else { "N" },
             if self.is_writable() { "W" } else { "R" },
@@ -57,6 +66,9 @@ impl PageTableEntry for PTEntry {
     fn read_value(&self) -> u64 {
         self.value
     }
+    fn write_value(&mut self, value: u64) {
+        self.value = value;
+    }
 }
 impl fmt::Display for PTEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -73,6 +85,9 @@ impl PageTableEntry for PDEntry {
     const LEVEL: &'static str = "PDEntry";
     fn read_value(&self) -> u64 {
         self.value
+    }
+    fn write_value(&mut self, value: u64) {
+        self.value = value;
     }
     fn format_additional_attrs(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.read_value() & 0x80 != 0 {
@@ -97,6 +112,9 @@ impl PageTableEntry for PDPTEntry {
     fn read_value(&self) -> u64 {
         self.value
     }
+    fn write_value(&mut self, value: u64) {
+        self.value = value;
+    }
 }
 impl fmt::Display for PDPTEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -114,6 +132,9 @@ impl PageTableEntry for PML4Entry {
     fn read_value(&self) -> u64 {
         self.value
     }
+    fn write_value(&mut self, value: u64) {
+        self.value = value;
+    }
 }
 impl fmt::Display for PML4Entry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -121,6 +142,9 @@ impl fmt::Display for PML4Entry {
     }
 }
 
+//
+// Tables
+//
 pub trait PageTable<T: 'static + PageTableEntry + core::fmt::Debug + core::fmt::Display> {
     const LEVEL: &'static str;
     fn read_entry(&self, index: usize) -> &T;
@@ -137,7 +161,9 @@ pub trait PageTable<T: 'static + PageTableEntry + core::fmt::Debug + core::fmt::
         Result::Ok(())
     }
 }
+
 #[derive(Debug)]
+#[repr(align(4096))]
 pub struct PT {
     pub entry: [PTEntry; 512],
 }
@@ -157,6 +183,7 @@ pub fn get_pt(e: &PDEntry) -> &'static mut PT {
 }
 
 #[derive(Debug)]
+#[repr(align(4096))]
 pub struct PD {
     pub entry: [PDEntry; 512],
 }
@@ -176,6 +203,7 @@ pub fn get_pd(e: &PDPTEntry) -> &'static mut PD {
 }
 
 #[derive(Debug)]
+#[repr(align(4096))]
 pub struct PDPT {
     pub entry: [PDPTEntry; 512],
 }
@@ -194,9 +222,17 @@ pub fn get_pdpt(e: &PML4Entry) -> &'static mut PDPT {
     unsafe { &mut *(((e.read_value() & !0xFFF) as usize) as *mut PDPT) }
 }
 
-#[derive(Debug)]
+#[repr(align(4096))]
 pub struct PML4 {
     pub entry: [PML4Entry; 512],
+}
+impl PML4 {
+    pub fn new() -> Box<Self> {
+        Box::new(Self::default())
+    }
+    fn default() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
 }
 impl PageTable<PML4Entry> for PML4 {
     const LEVEL: &'static str = "PML4";
@@ -204,7 +240,7 @@ impl PageTable<PML4Entry> for PML4 {
         &self.entry[index]
     }
 }
-impl fmt::Display for PML4 {
+impl fmt::Debug for PML4 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.format(f)
     }

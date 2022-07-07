@@ -1,13 +1,17 @@
+extern crate alloc;
+
 use crate::acpi::Acpi;
 use crate::boot_info::File;
 use crate::efi;
 use crate::pci::Pci;
+use crate::println;
 use crate::util::size_in_pages_from_bytes;
 use crate::*;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
 use arch::x86_64::apic::LocalApic;
 use arch::x86_64::gdt::GDT;
+use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
 use core::mem::size_of;
 use core::slice;
@@ -137,7 +141,7 @@ pub fn init_with_boot_services(
     efi_system_table: &'static mut efi::EfiSystemTable,
 ) {
     serial::com_initialize(serial::IO_ADDR_COM2);
-    crate::println!("init_basic_runtime()");
+    println!("init_basic_runtime()");
     let efi_services = EfiServices::new(image_handle, efi_system_table);
     efi_services.clear_screen();
     const FILE_NONE: Option<File> = None;
@@ -167,21 +171,25 @@ pub fn init_basic_runtime(
 }
 
 pub fn init_global_allocator() {
-    crate::println!("init_global_allocator()");
+    println!("init_global_allocator()");
     crate::allocator::ALLOCATOR.init_with_mmap(BootInfo::take().memory_map());
 }
 
 pub fn init_graphical_terminal() {
-    crate::println!("init_graphical_terminal()");
+    println!("init_graphical_terminal()");
     let vram = BootInfo::take().vram();
     let textarea = TextArea::new(vram, 8, 16, vram.width() - 16, vram.height() - 32);
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
 }
 
-pub fn init_paging() {}
+pub fn init_paging() {
+    println!("init_paging");
+    let table = PML4::new();
+    println!("{:?}", table);
+}
 
 pub fn init_interrupts() {
-    crate::println!("init_interrupts()");
+    println!("init_interrupts()");
     unsafe {
         GDT.load();
         x86_64::write_cs(x86_64::KERNEL_CS);
@@ -198,7 +206,7 @@ pub fn init_interrupts() {
 
 pub fn detect_fsb_freq() -> Option<u64> {
     let fsb_freq_msr = unsafe { x86_64::read_msr(x86_64::MSR_FSB_FREQ) };
-    crate::println!("fsb_freq_msr = {}", fsb_freq_msr);
+    println!("fsb_freq_msr = {}", fsb_freq_msr);
     let fsb_khz = match fsb_freq_msr & 0b111 {
         0b101 => 100_000,
         0b001 => 133_333,
@@ -229,7 +237,7 @@ pub fn detect_core_clock_freq() -> u32 {
 }
 
 pub fn init_timer() {
-    crate::println!("init_timer()");
+    println!("init_timer()");
     let acpi = BootInfo::take().acpi();
     let hpet = unsafe {
         // This is safe since this is the only place to create HPET instance.
@@ -239,15 +247,15 @@ pub fn init_timer() {
                 .expect("Failed to get HPET base address"),
         )
     };
-    crate::println!("{}", hpet.main_counter());
-    crate::println!("{}", hpet.main_counter());
-    crate::println!("{}", hpet.main_counter());
-    crate::println!("{}", hpet.main_counter());
-    crate::println!("{}", hpet.main_counter());
+    println!("{}", hpet.main_counter());
+    println!("{}", hpet.main_counter());
+    println!("{}", hpet.main_counter());
+    println!("{}", hpet.main_counter());
+    println!("{}", hpet.main_counter());
 
     unsafe { core::arch::asm!("int3") }
 
-    crate::println!("I'm back!");
+    println!("I'm back!");
 
     //unsafe { core::arch::asm!("sti") }
     loop {
@@ -256,7 +264,7 @@ pub fn init_timer() {
 }
 
 pub fn init_pci() {
-    crate::println!("init_pci()");
+    println!("init_pci()");
     let acpi = BootInfo::take().acpi();
     let mcfg = acpi.mcfg();
     let pci = Pci::new(mcfg);
