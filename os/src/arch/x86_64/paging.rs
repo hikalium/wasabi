@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::println;
 use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
@@ -19,6 +20,28 @@ pub fn read_cr3() -> *mut PML4 {
 pub unsafe fn write_cr3(table: *const PML4) {
     asm!("mov cr3, rax",
             in("rax") table)
+}
+
+mod mask {
+    const PAGE: u64 = 0xFFFF_FFFF_FFFF_F000;
+    const ATTR: u64 = 0x0000_0000_0000_0FFF;
+}
+mod attr {
+    pub const PRESENT: u64 = 1 << 0;
+    pub const WRITABLE: u64 = 1 << 1;
+    pub const USER: u64 = 1 << 2;
+    pub const WRITE_THROUGH: u64 = 1 << 3;
+    pub const CACHE_DISABLE: u64 = 1 << 4;
+}
+use attr::*;
+
+#[derive(Debug)]
+#[repr(u64)]
+pub enum PageAttr {
+    NotPresent = 0,
+    ReadWriteKernel = PRESENT | WRITABLE,
+    ReadWriteUser = PRESENT | WRITABLE | USER,
+    ReadWriteIo = PRESENT | WRITABLE | WRITE_THROUGH | CACHE_DISABLE,
 }
 
 //
@@ -231,7 +254,11 @@ impl PML4 {
         Box::new(Self::default())
     }
     fn default() -> Self {
+        // This is safe since entries filled with 0 is valid.
         unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+    pub fn create_mappng(&mut self, virt_start: u64, virt_end: u64, phys: u64, attr: PageAttr) {
+        println!("create_mappng(virt_start={virt_start:#018X}, virt_end={virt_end:#018X}, phys={phys:#018X}, attr={attr:?})");
     }
 }
 impl PageTable<PML4Entry> for PML4 {

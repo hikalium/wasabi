@@ -2,10 +2,9 @@ extern crate alloc;
 
 use crate::efi::EfiMemoryDescriptor;
 use crate::efi::EfiMemoryType;
-use crate::error::Result;
-use crate::error::WasabiError;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::println;
+use crate::util::round_up_to_nearest_pow2;
 use alloc::alloc::GlobalAlloc;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
@@ -20,28 +19,6 @@ use core::ops::DerefMut;
 /// align:  |--------|-------|-------|-------|-------|
 /// after:  |---------------||-------|----------------
 
-fn round_up_to_nearest_pow2(v: usize) -> Result<usize> {
-    1usize
-        .checked_shl(usize::BITS - v.wrapping_sub(1).leading_zeros())
-        .ok_or(WasabiError::CalcOutOfRange)
-}
-#[test_case]
-fn round_up_to_nearest_pow2_tests() {
-    assert_eq!(
-        round_up_to_nearest_pow2(0),
-        Err(WasabiError::CalcOutOfRange)
-    );
-    assert_eq!(round_up_to_nearest_pow2(1), Ok(1));
-    assert_eq!(round_up_to_nearest_pow2(2), Ok(2));
-    assert_eq!(round_up_to_nearest_pow2(3), Ok(4));
-    assert_eq!(round_up_to_nearest_pow2(4), Ok(4));
-    assert_eq!(round_up_to_nearest_pow2(5), Ok(8));
-    assert_eq!(round_up_to_nearest_pow2(6), Ok(8));
-    assert_eq!(round_up_to_nearest_pow2(7), Ok(8));
-    assert_eq!(round_up_to_nearest_pow2(8), Ok(8));
-    assert_eq!(round_up_to_nearest_pow2(9), Ok(16));
-    assert_eq!(round_up_to_nearest_pow2(9), Ok(16));
-}
 #[derive(Debug)]
 struct Header {
     next_header: Option<Box<Header>>,

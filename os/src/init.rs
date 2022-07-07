@@ -183,9 +183,28 @@ pub fn init_graphical_terminal() {
 }
 
 pub fn init_paging() {
+    use arch::x86_64::paging::PageAttr;
+    use core::cmp::max;
+    use efi::EfiMemoryType::*;
+    use util::PAGE_SIZE;
     println!("init_paging");
-    let table = PML4::new();
+    let mut table = PML4::new();
+    let memory_map = BootInfo::take().memory_map();
+    let mut end_of_mem = 0x1_0000_0000u64;
+    for e in memory_map.iter() {
+        match e.memory_type {
+            CONVENTIONAL_MEMORY | LOADER_CODE | LOADER_DATA => {
+                end_of_mem = max(
+                    end_of_mem,
+                    e.physical_start + e.number_of_pages * (PAGE_SIZE as u64),
+                );
+            }
+            _ => (),
+        }
+    }
+    table.create_mappng(0, end_of_mem, 0, PageAttr::ReadWriteKernel);
     println!("{:?}", table);
+    unimplemented!();
 }
 
 pub fn init_interrupts() {
