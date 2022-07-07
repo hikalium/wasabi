@@ -63,9 +63,6 @@ impl Header {
     fn size(&self) -> usize {
         self.size as usize
     }
-    fn body_addr(&self) -> usize {
-        self as *const Header as usize + HEADER_SIZE
-    }
     fn end_addr(&self) -> usize {
         self as *const Header as usize + self.size()
     }
@@ -82,24 +79,49 @@ impl Header {
         let header = addr.sub(HEADER_SIZE) as *mut Header;
         alloc::boxed::Box::from_raw(header)
     }
+    //
+    // Note: std::alloc::Layout doc says:
+    // > All layouts have an associated size and a power-of-two alignment.
     fn provide(&mut self, size: usize, align: usize) -> Option<*mut u8> {
-        // std::alloc::Layout doc says:
-        // > All layouts have an associated size and a power-of-two alignment.
         let size = max(round_up_to_nearest_pow2(size).ok()?, HEADER_SIZE);
+        let align = max(align, HEADER_SIZE);
         if self.is_allocated() || !self.can_provide(size, align) {
             None
         } else {
+            // |-----|----------------- self ---------|----------
+            // |-----|----------------------          |----------
+            //                                        ^ self.end_addr()
+            //                              |-------|-
+            //                               ^ allocated_addr
+            //                              ^ header_for_allocated
+            //                                      ^ header_for_padding
+            //                                      ^ header_for_allocated.end_addr()
+            // self has enough space to allocate the requested object.
+
+            // Make a Header for the allocated object
+            let mut size_used = 0;
+            let allocated_addr = (self.end_addr() - size) & !(align - 1);
             let mut header_for_allocated =
-                unsafe { Self::new_from_addr(self.end_addr() - size - HEADER_SIZE) };
+                unsafe { Self::new_from_addr(allocated_addr - HEADER_SIZE) };
             header_for_allocated.is_allocated = true;
             header_for_allocated.size = (size + HEADER_SIZE).try_into().ok()?;
+            size_used += header_for_allocated.size;
             header_for_allocated.next_header = self.next_header.take();
-            self.size = (self.size() - header_for_allocated.size())
-                .try_into()
-                .ok()?;
-            let addr = header_for_allocated.body_addr();
+            if header_for_allocated.end_addr() != self.end_addr() {
+                // Make a Header for padding
+                let mut header_for_padding =
+                    unsafe { Self::new_from_addr(header_for_allocated.end_addr()) };
+                header_for_padding.is_allocated = false;
+                header_for_padding.size =
+                    (self.end_addr() - header_for_allocated.end_addr()) as u32;
+                size_used += header_for_padding.size;
+                header_for_padding.next_header = header_for_allocated.next_header.take();
+                header_for_allocated.next_header = Some(header_for_padding);
+            }
+            // Shrink self
+            self.size -= size_used;
             self.next_header = Some(header_for_allocated);
-            Some(addr as *mut u8)
+            Some(allocated_addr as *mut u8)
         }
     }
 }
