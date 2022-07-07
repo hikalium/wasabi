@@ -214,7 +214,7 @@ fn malloc_align() {
         println!("trying align = {}", align);
         for e in pointers.iter_mut() {
             *e = ALLOCATOR.alloc_with_options(
-                Layout::from_size_align(1234, align).expect("Faild to create Layout"),
+                Layout::from_size_align(1234, align).expect("Failed to create Layout"),
             );
             assert!(*e as usize != 0);
             assert!((*e as usize) % align == 0);

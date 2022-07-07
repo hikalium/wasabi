@@ -6,6 +6,8 @@
 #![test_runner(crate::test_runner::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 #![feature(const_maybe_uninit_zeroed)]
+#![allow(incomplete_features)]
+#![feature(adt_const_params)]
 
 pub mod acpi;
 pub mod arch;

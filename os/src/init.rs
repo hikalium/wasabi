@@ -182,7 +182,7 @@ pub fn init_graphical_terminal() {
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
 }
 
-pub fn init_paging() {
+pub fn init_paging() -> Result<()> {
     use arch::x86_64::paging::PageAttr;
     use core::cmp::max;
     use efi::EfiMemoryType::*;
@@ -202,7 +202,7 @@ pub fn init_paging() {
             _ => (),
         }
     }
-    table.create_mappng(0, end_of_mem, 0, PageAttr::ReadWriteKernel);
+    table.create_mappng(0, end_of_mem, 0, PageAttr::ReadWriteKernel)?;
     println!("{:?}", table);
     unimplemented!();
 }
