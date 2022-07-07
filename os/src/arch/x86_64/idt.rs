@@ -145,12 +145,14 @@ macro_rules! interrupt_entrypoint {
 interrupt_entrypoint!(3);
 interrupt_entrypoint!(6);
 interrupt_entrypoint!(13);
+interrupt_entrypoint!(14);
 interrupt_entrypoint!(32);
 
 extern "sysv64" {
     fn interrupt_entrypoint3();
     fn interrupt_entrypoint6();
     fn interrupt_entrypoint13();
+    fn interrupt_entrypoint14();
     fn interrupt_entrypoint32();
 }
 
@@ -320,6 +322,12 @@ impl Idt {
             0,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint13,
+        );
+        entries[14] = IdtDescriptor::new(
+            segment_selector,
+            0,
+            IdtAttr::IntGateDPL0,
+            interrupt_entrypoint14,
         );
         entries[32] = IdtDescriptor::new(
             segment_selector,

@@ -7,6 +7,7 @@ use crate::pci::Pci;
 use crate::println;
 use crate::util::size_in_pages_from_bytes;
 use crate::*;
+use alloc::boxed::Box;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
 use arch::x86_64::apic::LocalApic;
@@ -204,15 +205,22 @@ pub fn init_paging() -> Result<()> {
     }
     table.create_mappng(0, end_of_mem, 0, PageAttr::ReadWriteKernel)?;
     println!("{:?}", table);
-    unimplemented!();
+    unsafe {
+        crate::arch::x86_64::paging::write_cr3(Box::into_raw(table));
+    }
+    Ok(())
 }
 
 pub fn init_interrupts() {
     println!("init_interrupts()");
     unsafe {
         GDT.load();
+        x86_64::write_es(x86_64::KERNEL_DS);
         x86_64::write_cs(x86_64::KERNEL_CS);
+        x86_64::write_ss(x86_64::KERNEL_DS);
         x86_64::write_ds(x86_64::KERNEL_DS);
+        x86_64::write_fs(x86_64::KERNEL_DS);
+        x86_64::write_gs(x86_64::KERNEL_DS);
     }
     x86_64::disable_legacy_pic();
     let bsp_local_apic = LocalApic::new();

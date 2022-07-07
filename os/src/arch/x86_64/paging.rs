@@ -1,7 +1,5 @@
 extern crate alloc;
 
-use crate::allocator::ALLOCATOR;
-use crate::allocator::LAYOUT_PAGE_4K;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
@@ -37,7 +35,7 @@ const ATTR_USER: u64 = 1 << 2;
 const ATTR_WRITE_THROUGH: u64 = 1 << 3;
 const ATTR_CACHE_DISABLE: u64 = 1 << 4;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 #[repr(u64)]
 pub enum PageAttr {
     NotPresent = 0,
@@ -54,9 +52,6 @@ pub struct Entry<const LEVEL: &'static str, const SHIFT: usize, NEXT> {
 impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NEXT> {
     fn read_value(&self) -> u64 {
         self.value
-    }
-    fn format_additional_attrs(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Result::Ok(())
     }
     fn is_present(&self) -> bool {
         (self.read_value() & (1 << 0)) != 0
@@ -78,7 +73,6 @@ impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NE
             if self.is_writable() { "W" } else { "R" },
             if self.is_user() { "U" } else { "S" }
         )?;
-        self.format_additional_attrs(f)?;
         write!(f, " }}")
     }
     fn table_mut(&mut self) -> Result<&mut NEXT> {
@@ -92,8 +86,8 @@ impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NE
         if self.is_present() {
             Err(WasabiError::Failed("Page is already populated"))
         } else {
-            let phys = ALLOCATOR.alloc_with_options(LAYOUT_PAGE_4K) as u64;
-            self.value = phys | PageAttr::ReadWriteUser as u64;
+            let next: Box<NEXT> = Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
+            self.value = Box::into_raw(next) as u64 | PageAttr::ReadWriteUser as u64;
             Ok(self)
         }
     }
@@ -102,6 +96,16 @@ impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NE
             Ok(self)
         } else {
             self.populate()
+        }
+    }
+    fn set_page(&mut self, phys: u64, attr: PageAttr) -> Result<()> {
+        if self.is_present() {
+            Err(WasabiError::Failed("Page is already populated"))
+        } else if phys & ATTR_MASK != 0 {
+            Err(WasabiError::Failed("phys is not aligned"))
+        } else {
+            self.value = phys | attr as u64;
+            Ok(())
         }
     }
 }
@@ -122,6 +126,7 @@ impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> fmt::Debug for Entry<L
 //
 // Tables
 //
+#[repr(align(4096))]
 pub struct Table<const LEVEL: &'static str, const SHIFT: usize, NEXT> {
     entry: [Entry<LEVEL, SHIFT, NEXT>; 512],
 }
@@ -189,8 +194,8 @@ impl PML4 {
             let index = table.calc_index(addr);
             let table = table.entry[index].ensure_populated()?.table_mut()?;
             let index = table.calc_index(addr);
-            let pte = &table.entry[index];
-            println!("{:?}", pte);
+            let pte = &mut table.entry[index];
+            pte.set_page(phys + addr - virt_start, attr)?;
         }
         Ok(())
     }

@@ -37,6 +37,13 @@ pub unsafe fn write_msr(port: u32, data: u64) {
 pub const KERNEL_CS: u16 = 1 << 3;
 pub const KERNEL_DS: u16 = 2 << 3;
 /// # Safety
+/// Anything can happen if the given selector is invalid.
+pub unsafe fn write_es(selector: u16) {
+    asm!(
+	"mov es, ax",
+                in("ax") selector)
+}
+/// # Safety
 /// Anything can happen if the CS given is invalid.
 pub unsafe fn write_cs(cs: u16) {
     // The MOV instruction CANNOT be used to load the CS register.
@@ -51,11 +58,32 @@ pub unsafe fn write_cs(cs: u16) {
                 in("cx") cs)
 }
 /// # Safety
-/// Anything can happen if the DS given is invalid.
+/// Anything can happen if the given selector is invalid.
+pub unsafe fn write_ss(selector: u16) {
+    asm!(
+	"mov ss, ax",
+                in("ax") selector)
+}
+/// # Safety
+/// Anything can happen if the given selector is invalid.
 pub unsafe fn write_ds(ds: u16) {
     asm!(
 	"mov ds, ax",
                 in("ax") ds)
+}
+/// # Safety
+/// Anything can happen if the given selector is invalid.
+pub unsafe fn write_fs(selector: u16) {
+    asm!(
+	"mov fs, ax",
+                in("ax") selector)
+}
+/// # Safety
+/// Anything can happen if the given selector is invalid.
+pub unsafe fn write_gs(selector: u16) {
+    asm!(
+	"mov gs, ax",
+                in("ax") selector)
 }
 
 pub fn busy_loop_hint() {
