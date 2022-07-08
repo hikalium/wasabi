@@ -1,9 +1,10 @@
 use crate::arch::x86_64;
 use crate::arch::x86_64::CpuidRequest;
+use crate::boot_info::CpuFeatures;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
-use crate::BootInfo;
+use core::ptr::write_volatile;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -15,9 +16,7 @@ pub struct LocalApic {
 
 impl LocalApic {
     /// creates an instance to manage Local APIC for the current processor
-    pub fn new() -> Self {
-        let cpu_features = BootInfo::take().cpu_features();
-        println!("{:?}", cpu_features);
+    pub fn new(cpu_features: &CpuFeatures) -> Self {
         let x2apic_id = x86_64::read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx();
         println!("x2APIC ID: {}", x2apic_id);
         let apic_base = unsafe {
@@ -37,11 +36,11 @@ impl LocalApic {
     fn id(&self) -> u32 {
         self.x2apic_id
     }
-}
-
-impl Default for LocalApic {
-    fn default() -> Self {
-        Self::new()
+    pub fn notify_end_of_interrupt(&self) {
+        // This is safe as far as this LocalApic struct is properly set up.
+        unsafe {
+            write_volatile((self.base_addr as usize + 0xB0) as *mut u32, 0);
+        }
     }
 }
 

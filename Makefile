@@ -85,6 +85,7 @@ filecheck:
 spellcheck :
 	@scripts/spellcheck.sh recieve receive
 	@scripts/spellcheck.sh faild failed
+	@scripts/spellcheck.sh mappng mapping
 
 run :
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh

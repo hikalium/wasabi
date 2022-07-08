@@ -11,6 +11,15 @@ pub const MSR_IA32_APIC_BASE: u32 = 0x1b;
 pub const MSR_FSB_FREQ: u32 = 0xcd;
 pub const MSR_PLATFORM_INFO: u32 = 0xce;
 
+pub fn read_rsp() -> u64 {
+    let mut value;
+    unsafe {
+        asm!("mov rax, rsp",
+            out("rax") value);
+    }
+    value
+}
+
 /// # Safety
 /// rdmsr will cause #GP(0) if the specified MSR is not implemented.
 pub unsafe fn read_msr(msr: u32) -> u64 {

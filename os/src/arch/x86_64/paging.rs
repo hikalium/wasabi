@@ -43,6 +43,12 @@ pub enum PageAttr {
     ReadWriteUser = ATTR_PRESENT | ATTR_WRITABLE | ATTR_USER,
     ReadWriteIo = ATTR_PRESENT | ATTR_WRITABLE | ATTR_WRITE_THROUGH | ATTR_CACHE_DISABLE,
 }
+#[derive(Debug, Eq, PartialEq)]
+pub enum TranslationResult {
+    PageMapped4K { phys: u64 },
+    PageMapped2M { phys: u64 },
+    PageMapped1G { phys: u64 },
+}
 
 #[repr(transparent)]
 pub struct Entry<const LEVEL: &'static str, const SHIFT: usize, NEXT> {
@@ -75,11 +81,25 @@ impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NE
         )?;
         write!(f, " }}")
     }
+    fn table(&self) -> Result<&NEXT> {
+        if self.is_present() {
+            Ok(unsafe { &*((self.value & !ATTR_MASK) as *const NEXT) })
+        } else {
+            Err(WasabiError::PageNotFound)
+        }
+    }
     fn table_mut(&mut self) -> Result<&mut NEXT> {
         if self.is_present() {
             Ok(unsafe { &mut *((self.value & !ATTR_MASK) as *mut NEXT) })
         } else {
-            Err(WasabiError::Failed("Next level is not present"))
+            Err(WasabiError::PageNotFound)
+        }
+    }
+    fn page(&self) -> Result<u64> {
+        if self.is_present() {
+            Ok(self.value & !ATTR_MASK)
+        } else {
+            Err(WasabiError::PageNotFound)
         }
     }
     fn populate(&mut self) -> Result<&mut Self> {
@@ -169,14 +189,14 @@ impl PML4 {
         // This is safe since entries filled with 0 is valid.
         unsafe { MaybeUninit::zeroed().assume_init() }
     }
-    pub fn create_mappng(
+    pub fn create_mapping(
         &mut self,
         virt_start: u64,
         virt_end: u64,
         phys: u64,
         attr: PageAttr,
     ) -> Result<()> {
-        println!("create_mappng(virt_start={virt_start:#018X}, virt_end={virt_end:#018X}, phys={phys:#018X}, attr={attr:?})");
+        println!("create_mapping(virt_start={virt_start:#018X}, virt_end={virt_end:#018X}, phys={phys:#018X}, attr={attr:?})");
         if virt_start & ATTR_MASK != 0 {
             return Err(WasabiError::Failed("Invalid virt_start"));
         }
@@ -199,4 +219,61 @@ impl PML4 {
         }
         Ok(())
     }
+    /*
+    pub fn dump_mappings(&self, virt_start: u64, virt_end: u64) -> Result<()> {
+        println!("Mappings in [{virt_start:#018X}, {virt_end:#018X}]:");
+        for addr in (virt_start..virt_end).step_by(PAGE_SIZE) {
+            let index = self.calc_index(addr);
+            let table = self.entry[index].table_mut()?;
+            let index = table.calc_index(addr);
+            let table = table.entry[index].ensure_populated()?.table_mut()?;
+            let index = table.calc_index(addr);
+            let table = table.entry[index].ensure_populated()?.table_mut()?;
+            let index = table.calc_index(addr);
+            let pte = &mut table.entry[index];
+            pte.set_page(phys + addr - virt_start, attr)?;
+        }
+        Ok(())
+    }
+    */
+    pub fn translate(&self, virt: u64) -> Result<TranslationResult> {
+        let index = self.calc_index(virt);
+        let entry = &self.entry[index];
+        let table = entry.table()?;
+
+        let index = table.calc_index(virt);
+        let entry = &table.entry[index];
+        let table = entry.table()?;
+
+        let index = table.calc_index(virt);
+        let entry = &table.entry[index];
+        let table = entry.table()?;
+
+        let index = table.calc_index(virt);
+        let entry = &table.entry[index];
+        let page = entry.page()?;
+
+        Ok(TranslationResult::PageMapped4K { phys: page })
+    }
 }
+
+/*
+#[test_case]
+fn page_translation() {
+    use TranslationResult::*;
+    // Identity-mapped 4K
+    let mut table = PML4::new();
+    table
+        .create_mapping(0, 0x1000, 0, PageAttr::ReadWriteKernel)
+        .expect("Failed to create mapping");
+    assert_eq!(table.translate(0x0000), Ok(PageMapped4K { phys: 0x0000 }));
+    assert_eq!(table.translate(0x1000), Err(WasabiError::PageNotFound));
+    // Non-identity-mapped 4K
+    let mut table = PML4::new();
+    table
+        .create_mapping(0, 0x1000, 0x1000, PageAttr::ReadWriteKernel)
+        .expect("Failed to create mapping");
+    assert_eq!(table.translate(0x0000), Ok(PageMapped4K { phys: 0x1000 }));
+    assert_eq!(table.translate(0x1000), Err(WasabiError::PageNotFound));
+}
+*/

@@ -1,3 +1,4 @@
+use crate::boot_info::BootInfo;
 use crate::println;
 use core::arch::asm;
 use core::arch::global_asm;
@@ -218,9 +219,21 @@ inthandler_common:
 #[no_mangle]
 extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
     println!("Interrupt Info: {:?}", info);
-    println!("Exception {index:#04X}: ???");
     if index == 3 {
+        println!("Exception {index:#04X}: Breakpoint");
         return;
+    }
+    if index == 32 {
+        println!("Exception {index:#04X}: Timer!");
+        let bsp_local_apic = BootInfo::take().bsp_local_apic();
+        bsp_local_apic.notify_end_of_interrupt();
+        return;
+    }
+    // Fatal
+    if index == 6 {
+        println!("Exception {index:#04X}: Invalid Opcode");
+    } else {
+        println!("Exception {index:#04X}: Not handled");
     }
     panic!();
 }

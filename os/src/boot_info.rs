@@ -1,4 +1,5 @@
 use crate::acpi::Acpi;
+use crate::arch::x86_64::apic::LocalApic;
 use crate::arch::x86_64::read_cpuid;
 use crate::arch::x86_64::CpuidRequest;
 use crate::arch::x86_64::CpuidResponse;
@@ -192,6 +193,7 @@ pub struct BootInfo {
     root_files: [Option<File>; 32],
     acpi: Acpi,
     cpu_features: CpuFeatures,
+    bsp_local_apic: LocalApic,
 }
 impl BootInfo {
     pub fn new(
@@ -200,12 +202,15 @@ impl BootInfo {
         root_files: [Option<File>; 32],
         acpi: Acpi,
     ) -> BootInfo {
+        let cpu_features = CpuFeatures::inspect();
+        let bsp_local_apic = LocalApic::new(&cpu_features);
         BootInfo {
             vram,
             memory_map,
             root_files,
             acpi,
-            cpu_features: CpuFeatures::inspect(),
+            cpu_features,
+            bsp_local_apic,
         }
     }
     pub fn vram(&self) -> VRAMBufferInfo {
@@ -223,6 +228,9 @@ impl BootInfo {
     pub fn cpu_features(&self) -> &CpuFeatures {
         &self.cpu_features
     }
+    pub fn bsp_local_apic(&self) -> &LocalApic {
+        &self.bsp_local_apic
+    }
     /// # Safety
     ///
     /// Taking static immutable reference here is safe because BOOT_INFO is only set once and no
@@ -236,6 +244,7 @@ impl BootInfo {
     /// lifetime
     pub unsafe fn set(boot_info: BootInfo) {
         assert!(BOOT_INFO.is_none());
+        crate::println!("BOOT_INFO populated!");
         BOOT_INFO = Some(boot_info);
     }
 }

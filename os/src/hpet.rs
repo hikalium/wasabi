@@ -15,20 +15,22 @@ struct TimerRegister {
     comparator_value: u64,
     _reserved: [u64; 2],
 }
+const _: () = assert!(core::mem::size_of::<TimerRegister>() == 0x20);
 impl TimerRegister {
     fn available_interrupt_routes(&self) -> u32 {
         unsafe { (read_volatile(&self.configuration_and_capability) >> 32) as u32 }
     }
     fn disable(&mut self) {
         unsafe {
-            write_volatile(&mut self.configuration_and_capability, 0);
+            let old = read_volatile(&self.configuration_and_capability);
+            write_volatile(&mut self.configuration_and_capability, old & !(1 << 2));
         }
     }
     /// # Safety
     /// This is safe only when HPET is globally disabled.
     unsafe fn setup(&mut self, comparator_value: u64, gsi: u64) {
         self.disable();
-        write_volatile(&mut self.comparator_value, 0);
+        println!("comparator_value: {}", comparator_value);
         let mut config = 0;
         config |= TIMER_CONFIG_SET_COMPARATOR_VALUE;
         write_volatile(&mut self.configuration_and_capability, config);
@@ -61,6 +63,7 @@ pub struct Registers {
     reserved3: u64,
     timers: [TimerRegister; 32],
 }
+const _: () = assert!(core::mem::size_of::<Registers>() == 0x500);
 
 pub struct Hpet {
     registers: &'static mut Registers,
@@ -101,6 +104,10 @@ impl Hpet {
     unsafe fn init(&mut self) {
         // c.f. 2.3.9.2.2 Periodic Mode
         self.globally_disable();
+        write_volatile(
+            &mut self.registers.interrupt_status,
+            1 << self.num_of_timers,
+        );
         write_volatile(&mut self.registers.main_counter_value, 0);
         for i in 0..self.num_of_timers {
             self.registers.timers[i].disable();

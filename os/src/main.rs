@@ -57,8 +57,9 @@ pub fn main() -> Result<()> {
     os::println!("Booting Wasabi OS!!!");
     paint_wasabi_logo();
 
-    init::init_paging()?;
+    unsafe { core::arch::asm!("cli") }
     init::init_interrupts();
+    init::init_paging()?;
     init::init_timer();
     init::init_pci();
 

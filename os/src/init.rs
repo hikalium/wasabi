@@ -203,7 +203,7 @@ pub fn init_paging() -> Result<()> {
             _ => (),
         }
     }
-    table.create_mappng(0, end_of_mem, 0, PageAttr::ReadWriteKernel)?;
+    table.create_mapping(0, end_of_mem, 0, PageAttr::ReadWriteKernel)?;
     println!("{:?}", table);
     unsafe {
         crate::arch::x86_64::paging::write_cr3(Box::into_raw(table));
@@ -213,6 +213,7 @@ pub fn init_paging() -> Result<()> {
 
 pub fn init_interrupts() {
     println!("init_interrupts()");
+    println!("Initial rsp = {:#018X}", x86_64::read_rsp());
     unsafe {
         GDT.load();
         x86_64::write_es(x86_64::KERNEL_DS);
@@ -223,8 +224,8 @@ pub fn init_interrupts() {
         x86_64::write_gs(x86_64::KERNEL_DS);
     }
     x86_64::disable_legacy_pic();
-    let bsp_local_apic = LocalApic::new();
-    IoApic::init(&bsp_local_apic).expect("Failed to init I/O APIC");
+    let bsp_local_apic = BootInfo::take().bsp_local_apic();
+    IoApic::init(bsp_local_apic).expect("Failed to init I/O APIC");
     unsafe {
         x86_64::idt::IDT.init(x86_64::KERNEL_CS);
         x86_64::idt::IDT.load();
@@ -265,6 +266,7 @@ pub fn detect_core_clock_freq() -> u32 {
 
 pub fn init_timer() {
     println!("init_timer()");
+    /*
     let acpi = BootInfo::take().acpi();
     let hpet = unsafe {
         // This is safe since this is the only place to create HPET instance.
@@ -279,12 +281,14 @@ pub fn init_timer() {
     println!("{}", hpet.main_counter());
     println!("{}", hpet.main_counter());
     println!("{}", hpet.main_counter());
+    */
 
     unsafe { core::arch::asm!("int3") }
-
     println!("I'm back!");
+    unsafe { core::arch::asm!("int3") }
+    println!("I'm back again!");
 
-    //unsafe { core::arch::asm!("sti") }
+    unsafe { core::arch::asm!("sti") }
     loop {
         arch::x86_64::hlt();
     }
