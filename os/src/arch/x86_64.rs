@@ -21,6 +21,19 @@ pub fn read_rsp() -> u64 {
 }
 
 /// # Safety
+/// Switching rsp to another value can break execution.
+/// Programmer should provide valid rsp value as new_rsp.
+/// Note: we cannot return to the caller function so this
+/// function is marked as never `!`.
+pub unsafe fn switch_rsp(new_rsp: u64, jump_after: fn() -> !) -> ! {
+    asm!("mov rsp, rax",
+            "jmp rcx",
+            in("rax") new_rsp,
+            in("rcx") jump_after);
+    unreachable!()
+}
+
+/// # Safety
 /// rdmsr will cause #GP(0) if the specified MSR is not implemented.
 pub unsafe fn read_msr(msr: u32) -> u64 {
     let mut high: u32;
@@ -232,7 +245,7 @@ pub fn hlt() {
     unsafe { asm!("hlt") }
 }
 
-pub fn rest_in_peace() {
+pub fn rest_in_peace() -> ! {
     unsafe {
         loop {
             core::arch::asm!("cli;hlt;")

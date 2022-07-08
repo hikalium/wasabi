@@ -194,6 +194,7 @@ pub struct BootInfo {
     acpi: Acpi,
     cpu_features: CpuFeatures,
     bsp_local_apic: LocalApic,
+    kernel_stack: &'static [u8],
 }
 impl BootInfo {
     pub fn new(
@@ -201,9 +202,10 @@ impl BootInfo {
         memory_map: MemoryMapHolder,
         root_files: [Option<File>; 32],
         acpi: Acpi,
+        kernel_stack: &'static [u8],
     ) -> BootInfo {
         let cpu_features = CpuFeatures::inspect();
-        let bsp_local_apic = LocalApic::new(&cpu_features);
+        let bsp_local_apic = LocalApic::default();
         BootInfo {
             vram,
             memory_map,
@@ -211,6 +213,7 @@ impl BootInfo {
             acpi,
             cpu_features,
             bsp_local_apic,
+            kernel_stack,
         }
     }
     pub fn vram(&self) -> VRAMBufferInfo {
@@ -230,6 +233,9 @@ impl BootInfo {
     }
     pub fn bsp_local_apic(&self) -> &LocalApic {
         &self.bsp_local_apic
+    }
+    pub fn kernel_stack(&self) -> &'static [u8] {
+        self.kernel_stack
     }
     /// # Safety
     ///

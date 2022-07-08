@@ -1,6 +1,5 @@
 use crate::arch::x86_64;
 use crate::arch::x86_64::CpuidRequest;
-use crate::boot_info::CpuFeatures;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
@@ -16,7 +15,7 @@ pub struct LocalApic {
 
 impl LocalApic {
     /// creates an instance to manage Local APIC for the current processor
-    pub fn new(cpu_features: &CpuFeatures) -> Self {
+    pub fn default() -> Self {
         let x2apic_id = x86_64::read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx();
         println!("x2APIC ID: {}", x2apic_id);
         let apic_base = unsafe {

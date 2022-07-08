@@ -219,23 +219,6 @@ impl PML4 {
         }
         Ok(())
     }
-    /*
-    pub fn dump_mappings(&self, virt_start: u64, virt_end: u64) -> Result<()> {
-        println!("Mappings in [{virt_start:#018X}, {virt_end:#018X}]:");
-        for addr in (virt_start..virt_end).step_by(PAGE_SIZE) {
-            let index = self.calc_index(addr);
-            let table = self.entry[index].table_mut()?;
-            let index = table.calc_index(addr);
-            let table = table.entry[index].ensure_populated()?.table_mut()?;
-            let index = table.calc_index(addr);
-            let table = table.entry[index].ensure_populated()?.table_mut()?;
-            let index = table.calc_index(addr);
-            let pte = &mut table.entry[index];
-            pte.set_page(phys + addr - virt_start, attr)?;
-        }
-        Ok(())
-    }
-    */
     pub fn translate(&self, virt: u64) -> Result<TranslationResult> {
         let index = self.calc_index(virt);
         let entry = &self.entry[index];
@@ -257,7 +240,6 @@ impl PML4 {
     }
 }
 
-/*
 #[test_case]
 fn page_translation() {
     use TranslationResult::*;
@@ -276,4 +258,3 @@ fn page_translation() {
     assert_eq!(table.translate(0x0000), Ok(PageMapped4K { phys: 0x1000 }));
     assert_eq!(table.translate(0x1000), Err(WasabiError::PageNotFound));
 }
-*/

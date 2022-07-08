@@ -8,12 +8,14 @@ use crate::util::round_up_to_nearest_pow2;
 use alloc::alloc::GlobalAlloc;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
-use alloc::vec;
 use core::borrow::BorrowMut;
 use core::cell::RefCell;
 use core::cmp::max;
 use core::fmt;
 use core::ops::DerefMut;
+
+#[cfg(test)]
+use alloc::vec;
 
 /// Each char represents 32-byte chunks.
 /// Vertical bar `|` represents the chunk that has a Header
@@ -23,27 +25,25 @@ use core::ops::DerefMut;
 
 struct Header {
     next_header: Option<Box<Header>>,
-    size: u32,
+    size: usize,
     is_allocated: bool,
+    _reserved: usize,
 }
 const HEADER_SIZE: usize = core::mem::size_of::<Header>();
 #[allow(clippy::assertions_on_constants)]
-const _: () = assert!(HEADER_SIZE == 16);
+const _: () = assert!(HEADER_SIZE == 32);
 // Size of Header should be power of 2
 const _: () = assert!(HEADER_SIZE.count_ones() == 1);
 pub const LAYOUT_PAGE_4K: Layout = Layout::from_size_align(4096, 4096).ok().unwrap();
 impl Header {
     fn can_provide(&self, size: usize, _align: usize) -> bool {
-        self.size() >= size + HEADER_SIZE * 3
+        self.size >= size + HEADER_SIZE * 3
     }
     fn is_allocated(&self) -> bool {
         self.is_allocated
     }
-    fn size(&self) -> usize {
-        self.size as usize
-    }
     fn end_addr(&self) -> usize {
-        self as *const Header as usize + self.size()
+        self as *const Header as usize + self.size
     }
     unsafe fn new_from_addr(addr: usize) -> Box<Header> {
         let header = addr as *mut Header;
@@ -51,6 +51,7 @@ impl Header {
             next_header: None,
             size: 0,
             is_allocated: false,
+            _reserved: 0,
         });
         alloc::boxed::Box::from_raw(addr as *mut Header)
     }
@@ -78,32 +79,28 @@ impl Header {
             // self has enough space to allocate the requested object.
 
             // Make a Header for the allocated object
-            println!("Selected(before): {self:?}");
             let mut size_used = 0;
             let allocated_addr = (self.end_addr() - size) & !(align - 1);
             let mut header_for_allocated =
                 unsafe { Self::new_from_addr(allocated_addr - HEADER_SIZE) };
             header_for_allocated.is_allocated = true;
-            header_for_allocated.size = (size + HEADER_SIZE).try_into().ok()?;
+            header_for_allocated.size = size + HEADER_SIZE;
             size_used += header_for_allocated.size;
             header_for_allocated.next_header = self.next_header.take();
-            println!("Allocated: {self:?}");
             if header_for_allocated.end_addr() != self.end_addr() {
                 // Make a Header for padding
                 let mut header_for_padding =
                     unsafe { Self::new_from_addr(header_for_allocated.end_addr()) };
                 header_for_padding.is_allocated = false;
-                header_for_padding.size =
-                    (self.end_addr() - header_for_allocated.end_addr()) as u32;
+                header_for_padding.size = self.end_addr() - header_for_allocated.end_addr();
                 size_used += header_for_padding.size;
                 header_for_padding.next_header = header_for_allocated.next_header.take();
                 header_for_allocated.next_header = Some(header_for_padding);
-                println!("Padding: {self:?}");
             }
             // Shrink self
+            assert!(self.size >= size_used + HEADER_SIZE);
             self.size -= size_used;
             self.next_header = Some(header_for_allocated);
-            println!("Selected(after): {self:?}");
             Some(allocated_addr as *mut u8)
         }
     }
@@ -119,7 +116,7 @@ impl fmt::Debug for Header {
             f,
             "Header @ {:#018X} {{ size: {:#018X}, is_allocated: {} }}",
             self as *const Header as usize,
-            self.size(),
+            self.size,
             self.is_allocated()
         )
     }
@@ -198,7 +195,7 @@ impl FirstFitAllocator {
         let mut header = unsafe { Header::new_from_addr(desc.physical_start as usize) };
         header.next_header = None;
         header.is_allocated = false;
-        header.size = desc.number_of_pages as u32 * 4096;
+        header.size = desc.number_of_pages as usize * 4096;
         let mut first_header = self.first_header.borrow_mut();
         let prev_last = first_header.replace(header);
         drop(first_header);
@@ -215,7 +212,6 @@ fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)
 }
 
-/*
 #[test_case]
 fn malloc_iterate_free_and_alloc() {
     use alloc::vec::Vec;
@@ -225,9 +221,7 @@ fn malloc_iterate_free_and_alloc() {
         // vec will be deallocatad at the end of this scope
     }
 }
-*/
 
-/*
 #[test_case]
 fn malloc_align() {
     let mut pointers = [core::ptr::null_mut::<u8>(); 100];
@@ -242,9 +236,7 @@ fn malloc_align() {
         }
     }
 }
-*/
 
-/*
 #[test_case]
 fn malloc_align_random_order() {
     for align in [32, 4096, 8, 4, 16, 2, 1] {
@@ -259,7 +251,6 @@ fn malloc_align_random_order() {
         }
     }
 }
-*/
 
 #[test_case]
 fn allocated_objects_have_no_overlap() {
@@ -325,7 +316,7 @@ fn allocated_objects_have_no_overlap() {
         .enumerate()
         .step_by(2)
     {
-        let (i, (layout, pointer)) = e;
+        let (_, (layout, pointer)) = e;
         unsafe { ALLOCATOR.dealloc(*pointer, *layout) }
     }
     for e in allocations

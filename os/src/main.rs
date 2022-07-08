@@ -50,11 +50,12 @@ fn paint_wasabi_logo() {
     }
 }
 
-pub fn main() -> Result<()> {
+fn main() -> Result<()> {
     use core::fmt::Write;
     use os::*;
     init::init_graphical_terminal();
     os::println!("Booting Wasabi OS!!!");
+    println!("Initial rsp = {:#018X}", arch::x86_64::read_rsp());
     paint_wasabi_logo();
 
     unsafe { core::arch::asm!("cli") }
@@ -85,12 +86,7 @@ pub fn main() -> Result<()> {
 }
 
 #[no_mangle]
-fn efi_main(
-    image_handle: os::efi::EfiHandle,
-    efi_system_table: &'static mut os::efi::EfiSystemTable,
-) {
-    os::init::init_basic_runtime(image_handle, efi_system_table);
-
+fn stack_switched() -> ! {
     // For normal boot
     #[cfg(not(test))]
     main().unwrap();
@@ -99,7 +95,15 @@ fn efi_main(
     #[cfg(test)]
     test_main();
 
-    loop {
-        unsafe { core::arch::asm!("cli; hlt") }
-    }
+    os::arch::x86_64::rest_in_peace()
+}
+
+#[no_mangle]
+fn efi_main(
+    image_handle: os::efi::EfiHandle,
+    efi_system_table: &'static mut os::efi::EfiSystemTable,
+) {
+    os::init::init_basic_runtime(image_handle, efi_system_table);
+    let new_rsp = BootInfo::take().kernel_stack().as_ptr() as usize + os::init::KERNEL_STACK_SIZE;
+    unsafe { os::arch::x86_64::switch_rsp(new_rsp as u64, stack_switched) }
 }

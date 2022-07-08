@@ -10,7 +10,6 @@ use crate::*;
 use alloc::boxed::Box;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
-use arch::x86_64::apic::LocalApic;
 use arch::x86_64::gdt::GDT;
 use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
@@ -18,6 +17,8 @@ use core::mem::size_of;
 use core::slice;
 use error::*;
 use hpet::Hpet;
+
+pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
 
 pub struct EfiServices {
     image_handle: efi::EfiHandle,
@@ -143,6 +144,16 @@ pub fn init_with_boot_services(
 ) {
     serial::com_initialize(serial::IO_ADDR_COM2);
     println!("init_basic_runtime()");
+    let kernel_stack = unsafe {
+        slice::from_raw_parts_mut(
+            efi::alloc_pages(
+                efi_system_table,
+                size_in_pages_from_bytes(KERNEL_STACK_SIZE),
+            )
+            .expect("Not enough space for the kernel stack"),
+            KERNEL_STACK_SIZE,
+        )
+    };
     let efi_services = EfiServices::new(image_handle, efi_system_table);
     efi_services.clear_screen();
     const FILE_NONE: Option<File> = None;
@@ -156,7 +167,7 @@ pub fn init_with_boot_services(
         .expect("Failed to setup ACPI tables");
     // Exit from BootServices
     let memory_map = EfiServices::exit_from_boot_services(efi_services);
-    let boot_info = BootInfo::new(vram, memory_map, root_files, acpi);
+    let boot_info = BootInfo::new(vram, memory_map, root_files, acpi, kernel_stack);
     unsafe {
         BootInfo::set(boot_info);
     }
@@ -189,6 +200,7 @@ pub fn init_paging() -> Result<()> {
     use efi::EfiMemoryType::*;
     use util::PAGE_SIZE;
     println!("init_paging");
+    println!("Initial rsp = {:#018X}", x86_64::read_rsp());
     let mut table = PML4::new();
     let memory_map = BootInfo::take().memory_map();
     let mut end_of_mem = 0x1_0000_0000u64;
@@ -266,7 +278,6 @@ pub fn detect_core_clock_freq() -> u32 {
 
 pub fn init_timer() {
     println!("init_timer()");
-    /*
     let acpi = BootInfo::take().acpi();
     let hpet = unsafe {
         // This is safe since this is the only place to create HPET instance.
@@ -281,7 +292,6 @@ pub fn init_timer() {
     println!("{}", hpet.main_counter());
     println!("{}", hpet.main_counter());
     println!("{}", hpet.main_counter());
-    */
 
     unsafe { core::arch::asm!("int3") }
     println!("I'm back!");
