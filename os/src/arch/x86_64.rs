@@ -245,6 +245,10 @@ pub fn hlt() {
     unsafe { asm!("hlt") }
 }
 
+pub fn stihlt() {
+    unsafe { asm!("sti; hlt") }
+}
+
 pub fn rest_in_peace() -> ! {
     unsafe {
         loop {

@@ -279,28 +279,25 @@ pub fn detect_core_clock_freq() -> u32 {
 pub fn init_timer() {
     println!("init_timer()");
     let acpi = BootInfo::take().acpi();
-    let hpet = unsafe {
+    unsafe {
         // This is safe since this is the only place to create HPET instance.
-        Hpet::new(
+        Hpet::set(Hpet::new(
             acpi.hpet()
                 .base_address()
                 .expect("Failed to get HPET base address"),
-        )
-    };
-    println!("{}", hpet.main_counter());
-    println!("{}", hpet.main_counter());
-    println!("{}", hpet.main_counter());
-    println!("{}", hpet.main_counter());
-    println!("{}", hpet.main_counter());
-
-    unsafe { core::arch::asm!("int3") }
-    println!("I'm back!");
-    unsafe { core::arch::asm!("int3") }
-    println!("I'm back again!");
-
+        ));
+    }
+    let hpet = Hpet::take();
     unsafe { core::arch::asm!("sti") }
+    for _ in 0..2 {
+        println!("{:?}", hpet);
+    }
+
     loop {
-        arch::x86_64::hlt();
+        println!("waiting...");
+        arch::x86_64::stihlt();
+        //println!("{}", hpet.main_counter());
+        println!("morning!");
     }
 }
 

@@ -7,10 +7,12 @@
 
 extern crate alloc;
 
+use os::arch::x86_64::read_rsp;
 use os::boot_info::BootInfo;
 use os::error::*;
 use os::graphics;
 use os::graphics::BitmapImageBuffer;
+use os::println;
 
 fn paint_wasabi_logo() {
     const SIZE: i64 = 256;
@@ -87,10 +89,10 @@ fn main() -> Result<()> {
 
 #[no_mangle]
 fn stack_switched() -> ! {
+    println!("rsp switched to: {:#018X}", read_rsp());
     // For normal boot
     #[cfg(not(test))]
     main().unwrap();
-
     // For unit tests in main.rs
     #[cfg(test)]
     test_main();
@@ -104,6 +106,7 @@ fn efi_main(
     efi_system_table: &'static mut os::efi::EfiSystemTable,
 ) {
     os::init::init_basic_runtime(image_handle, efi_system_table);
+    println!("rsp on boot: {:#018X}", read_rsp());
     let new_rsp = BootInfo::take().kernel_stack().as_ptr() as usize + os::init::KERNEL_STACK_SIZE;
     unsafe { os::arch::x86_64::switch_rsp(new_rsp as u64, stack_switched) }
 }

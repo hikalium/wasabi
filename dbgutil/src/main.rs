@@ -8,6 +8,14 @@ use std::ops::Bound;
 use std::process::Command;
 
 fn main() -> io::Result<()> {
+    let find_pdb_path_output = Command::new("bash")
+        .arg("-c")
+        .arg("ls -1t ../target/x86_64-unknown-uefi/release/deps/os-*.pdb | head -1")
+        .output()
+        .expect("failed to execute objdump");
+    let find_pdb_path_output = String::from_utf8(find_pdb_path_output.stdout).unwrap();
+    println!("{}", find_pdb_path_output);
+
     println!("Paste console output here and press Ctrl-D:");
     let input = io::read_to_string(&mut io::stdin())?;
     let lines: Vec<&str> = input.split('\n').collect();

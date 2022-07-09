@@ -227,6 +227,7 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
         println!("Exception {index:#04X}: Timer!");
         let bsp_local_apic = BootInfo::take().bsp_local_apic();
         bsp_local_apic.notify_end_of_interrupt();
+        println!("Exception {index:#04X}: notified");
         return;
     }
     // Fatal

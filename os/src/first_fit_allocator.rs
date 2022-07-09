@@ -36,8 +36,8 @@ const _: () = assert!(HEADER_SIZE == 32);
 const _: () = assert!(HEADER_SIZE.count_ones() == 1);
 pub const LAYOUT_PAGE_4K: Layout = Layout::from_size_align(4096, 4096).ok().unwrap();
 impl Header {
-    fn can_provide(&self, size: usize, _align: usize) -> bool {
-        self.size >= size + HEADER_SIZE * 3
+    fn can_provide(&self, size: usize, align: usize) -> bool {
+        self.size >= size + HEADER_SIZE * 3 + align
     }
     fn is_allocated(&self) -> bool {
         self.is_allocated

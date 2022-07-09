@@ -28,7 +28,7 @@ impl LocalApic {
         println!("{:?}", status);
         Self {
             x2apic_id,
-            base_addr: apic_base & ((1u64 << 12) - 1),
+            base_addr: apic_base & !((1u64 << 12) - 1),
             status,
         }
     }
@@ -63,6 +63,7 @@ impl LocalApicStatus {
 
 const IOAPIC_INDEX_ADDR: *mut u8 = 0xfec00000 as *mut u8;
 const IOAPIC_DATA_ADDR: *mut u32 = 0xfec00010 as *mut u32;
+const IOAPIC_EOIR_ADDR: *mut u32 = 0xfec00040 as *mut u32;
 
 pub struct IoApic {}
 impl IoApic {
@@ -89,6 +90,9 @@ impl IoApic {
             Ok(())
         }
     }
+    pub fn notify_end_of_interrupt(vector: u8) {
+        unsafe { IOAPIC_EOIR_ADDR.write_volatile(vector as u32) }
+    }
     pub fn read_redirection_entry(irq: usize) -> Result<u64> {
         if irq < 24 {
             let v = (
@@ -108,13 +112,13 @@ impl IoApic {
     }
     fn set_redirection(from_irq: usize, to_vector: u8, to_apic: u32) -> Result<()> {
         let entry: u64 = ((to_apic as u64) << 56) | (to_vector as u64);
+        println!("set_redirection: {:010X}", entry);
         Self::write_redirection_entry(from_irq, entry)
     }
     pub fn init(bsp_lapic: &LocalApic) -> Result<()> {
         let to_apic_id = bsp_lapic.id();
-        Self::set_redirection(2, 0x20, to_apic_id)?; // HPET
-        Self::set_redirection(1, 0x21, to_apic_id)?; // KBC
-        Self::set_redirection(12, 0x22, to_apic_id)?; // Mouse
+        Self::set_redirection(2, 32, to_apic_id)?; // HPET
+        Self::set_redirection(0, 32, to_apic_id)?; // HPET
         Ok(())
     }
 }
