@@ -1,10 +1,8 @@
 use crate::error::*;
 use crate::hpet;
-use crate::init::EfiServices;
 use crate::*;
 use core::fmt;
 use core::mem::size_of;
-use core::mem::size_of_val;
 use core::slice;
 
 #[repr(C)]
@@ -75,11 +73,6 @@ trait AcpiTable {
             unsafe { &*(header as *const SystemDescriptionTableHeader as *const Self::Table) };
         mcfg
     }
-    unsafe fn clone_as_static(&self, efi: &EfiServices) -> &'static Self::Table {
-        let table = self.table();
-        efi.alloc_and_copy(table, size_of_val(table))
-            .expect("failed to clone as static")
-    }
 }
 
 #[repr(packed)]
@@ -140,8 +133,8 @@ impl fmt::Display for EcamEntry {
         let bus_end = self.end_pci_bus;
         write!(
             f,
-            "ECAM: Bus range [{},{}] is mapped at {:#X}",
-            bus_start, bus_end, base
+            "ECAM @ {:#p}: Bus range [{},{}] is mapped at {:#X}",
+            self, bus_start, bus_end, base
         )
     }
 }
@@ -164,7 +157,7 @@ impl Xsdt {
             println!("XSDT[{}]: {:?}", i, e);
         }
     }
-    fn find_table(&self, sig: &'static [u8; 4]) -> Option<&SystemDescriptionTableHeader> {
+    fn find_table(&self, sig: &'static [u8; 4]) -> Option<&'static SystemDescriptionTableHeader> {
         for e in self.iter() {
             if e.signature() == sig {
                 return Some(e);
@@ -197,7 +190,10 @@ impl<'a> XsdtIterator<'a> {
     }
 }
 impl<'a> Iterator for XsdtIterator<'a> {
-    type Item = &'a SystemDescriptionTableHeader;
+    // The item will have a static lifetime
+    // since it will be allocated on
+    // ACPI_RECLAIM_MEMORY region.
+    type Item = &'static SystemDescriptionTableHeader;
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.table.num_of_entries() {
             None
@@ -215,7 +211,7 @@ pub struct Acpi {
     hpet: &'static Hpet,
 }
 impl<'a> Acpi {
-    pub fn new(rsdp_struct: &RsdpStruct, efi: &EfiServices) -> Result<Acpi> {
+    pub fn new(rsdp_struct: &RsdpStruct) -> Result<Acpi> {
         if &rsdp_struct.signature != b"RSD PTR " {
             return Err("Invalid RSDP Struct Signature".into());
         }
@@ -226,12 +222,8 @@ impl<'a> Acpi {
         let xsdt = rsdp_struct.xsdt();
         xsdt.list_all_tables();
 
-        let mcfg = unsafe {
-            Mcfg::new(xsdt.find_table(b"MCFG").expect("MCFG not found")).clone_as_static(efi)
-        };
-        let hpet = unsafe {
-            Hpet::new(xsdt.find_table(b"HPET").expect("HPET not found")).clone_as_static(efi)
-        };
+        let mcfg = Mcfg::new(xsdt.find_table(b"MCFG").expect("MCFG not found"));
+        let hpet = Hpet::new(xsdt.find_table(b"HPET").expect("HPET not found"));
         Ok(Acpi { mcfg, hpet })
     }
     pub fn mcfg(&'a self) -> &'a Mcfg {

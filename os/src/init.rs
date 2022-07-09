@@ -13,7 +13,6 @@ use arch::x86_64::apic::IoApic;
 use arch::x86_64::gdt::GDT;
 use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
-use core::mem::size_of;
 use core::slice;
 use error::*;
 use hpet::Hpet;
@@ -115,7 +114,7 @@ impl EfiServices {
             .get_table_with_guid(&efi::EFI_ACPI_TABLE_GUID)
             .expect("ACPI table not found");
 
-        Acpi::new(rsdp_struct, self)
+        Acpi::new(rsdp_struct)
     }
     pub fn alloc_boot_data(&self, size: usize) -> Result<&'static mut [u8]> {
         // This is safe since it constructs a slice with the same size of allocated buf.
@@ -125,16 +124,6 @@ impl EfiServices {
                 size,
             )
         })
-    }
-    /// # Safety
-    /// this is safe as long as the `size` arg is valid and the data copied does not contain
-    /// pointers nor references.
-    pub unsafe fn alloc_and_copy<T: 'static>(&self, src: &T, size: usize) -> Result<&'static T> {
-        assert!(size_of::<T>() <= size);
-        let src = core::slice::from_raw_parts(src as *const T as *const u8, size);
-        let dst = self.alloc_boot_data(size)?;
-        dst.copy_from_slice(src);
-        Ok(&*(dst.as_ptr() as *const T))
     }
 }
 

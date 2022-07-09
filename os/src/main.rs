@@ -63,10 +63,6 @@ fn main() -> Result<()> {
     init::init_interrupts();
     init::init_paging()?;
     init::init_timer();
-    loop {
-        print!(".");
-        arch::x86_64::stihlt();
-    }
     init::init_pci();
 
     let boot_info = BootInfo::take();
@@ -78,6 +74,10 @@ fn main() -> Result<()> {
         os::println!("root_files[{}]: {}", i, f.name());
     }
     println!("Wasabi OS booted.");
+    loop {
+        print!(".");
+        arch::x86_64::stihlt();
+    }
 }
 
 #[no_mangle]

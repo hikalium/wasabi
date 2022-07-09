@@ -20,6 +20,7 @@ QEMU_ARGS=\
 		-serial chardev:char_com2 \
 		-rtc base=localtime \
 		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
+		--no-reboot \
 		${MORE_QEMU_FLAGS}
 
 HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
