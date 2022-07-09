@@ -10,8 +10,7 @@ extern crate alloc;
 use os::arch::x86_64::read_rsp;
 use os::boot_info::BootInfo;
 use os::error::*;
-use os::graphics;
-use os::graphics::draw_point;
+use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
 use os::println;
 
@@ -26,7 +25,7 @@ fn paint_wasabi_logo() {
 
     // Sabi (Ferris)
     for x in 0..SIZE {
-        graphics::draw_line(
+        draw_line(
             &mut vram,
             COL_SABI,
             dx + SIZE,
@@ -38,10 +37,10 @@ fn paint_wasabi_logo() {
     }
     // Wasabi
     for x in 0..SIZE {
-        graphics::draw_line(&mut vram, COL_WASABI, dx, dy, dx + SIZE / 2 + x, dy + SIZE).unwrap();
+        draw_line(&mut vram, COL_WASABI, dx, dy, dx + SIZE / 2 + x, dy + SIZE).unwrap();
     }
     for x in 0..SIZE {
-        graphics::draw_line(
+        draw_line(
             &mut vram,
             COL_WASABI + 0x3d3d3d,
             dx + SIZE * 2,
@@ -53,16 +52,22 @@ fn paint_wasabi_logo() {
     }
 }
 
+fn delay() {
+    for _ in 0..10000 {
+        os::arch::x86_64::busy_loop_hint();
+    }
+}
 fn pseudo_multitask() -> Result<()> {
     let mut vram = BootInfo::take().vram();
-    let colors = [0xFF0000, 0x00FF00, 0x0000FF]; // RGB
-    let y = vram.height() / 2;
+    let colors = [0xFF0000, 0x00FF00, 0x0000FF];
+    let h = 10;
+    let y1 = vram.height() / 3; // Task 1
+    let y2 = vram.height() / 3 * 2; // Task 2
     for color in colors.iter().cycle() {
         for x in 0..vram.width() {
-            for _ in 0..10000 {
-                os::arch::x86_64::busy_loop_hint();
-            }
-            draw_point(&mut vram, *color, x, y)?;
+            delay();
+            draw_line(&mut vram, *color, x, y1, x, y1 + h)?;
+            draw_line(&mut vram, *color, x, y2, x, y2 + h)?;
         }
     }
     Ok(())
