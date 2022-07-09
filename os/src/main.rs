@@ -11,6 +11,7 @@ use os::arch::x86_64::read_rsp;
 use os::boot_info::BootInfo;
 use os::error::*;
 use os::graphics;
+use os::graphics::draw_point;
 use os::graphics::BitmapImageBuffer;
 use os::println;
 
@@ -52,6 +53,21 @@ fn paint_wasabi_logo() {
     }
 }
 
+fn pseudo_multitask() -> Result<()> {
+    let mut vram = BootInfo::take().vram();
+    let colors = [0xFF0000, 0x00FF00, 0x0000FF]; // RGB
+    let y = vram.height() / 2;
+    for color in colors.iter().cycle() {
+        for x in 0..vram.width() {
+            for _ in 0..10000 {
+                os::arch::x86_64::busy_loop_hint();
+            }
+            draw_point(&mut vram, *color, x, y)?;
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     use os::*;
     init::init_graphical_terminal();
@@ -74,10 +90,8 @@ fn main() -> Result<()> {
         os::println!("root_files[{}]: {}", i, f.name());
     }
     println!("Wasabi OS booted.");
-    loop {
-        print!(".");
-        arch::x86_64::stihlt();
-    }
+    pseudo_multitask()?;
+    Ok(())
 }
 
 #[no_mangle]
