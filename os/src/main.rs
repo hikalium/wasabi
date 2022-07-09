@@ -61,14 +61,33 @@ fn pseudo_multitask() -> Result<()> {
     let mut vram = BootInfo::take().vram();
     let colors = [0xFF0000, 0x00FF00, 0x0000FF];
     let h = 10;
-    let y1 = vram.height() / 3; // Task 1
-    let y2 = vram.height() / 3 * 2; // Task 2
-    for color in colors.iter().cycle() {
-        for x in 0..vram.width() {
-            delay();
-            draw_line(&mut vram, *color, x, y1, x, y1 + h)?;
-            draw_line(&mut vram, *color, x, y2, x, y2 + h)?;
+    // Task 0
+    let y1 = vram.height() / 3;
+    let mut x1 = 0;
+    let mut c1 = 0;
+    // Task 1
+    let y2 = vram.height() / 3 * 2;
+    let mut x2 = 0;
+    let mut c2 = 0;
+    for t in 0.. {
+        if t % 2 == 0 {
+            // Do some work for task 0
+            draw_line(&mut vram, colors[c1 % 3], x1, y1, x1, y1 + h)?;
+            x1 += 1;
+            if x1 >= vram.width() {
+                x1 = 0;
+                c1 += 1;
+            }
+        } else {
+            // Do some work for task 1
+            draw_line(&mut vram, colors[c2 % 3], x2, y2, x2, y2 + h)?;
+            x2 += 1;
+            if x2 >= vram.width() {
+                x2 = 0;
+                c2 += 1;
+            }
         }
+        delay();
     }
     Ok(())
 }
