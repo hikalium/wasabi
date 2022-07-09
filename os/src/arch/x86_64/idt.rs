@@ -218,16 +218,16 @@ inthandler_common:
 
 #[no_mangle]
 extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
+    // Silent
+    if index == 32 {
+        let bsp_local_apic = BootInfo::take().bsp_local_apic();
+        bsp_local_apic.notify_end_of_interrupt();
+        return;
+    }
+    // Informational
     println!("Interrupt Info: {:?}", info);
     if index == 3 {
         println!("Exception {index:#04X}: Breakpoint");
-        return;
-    }
-    if index == 32 {
-        println!("Exception {index:#04X}: Timer!");
-        let bsp_local_apic = BootInfo::take().bsp_local_apic();
-        bsp_local_apic.notify_end_of_interrupt();
-        println!("Exception {index:#04X}: notified");
         return;
     }
     // Fatal

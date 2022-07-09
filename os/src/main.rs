@@ -53,7 +53,6 @@ fn paint_wasabi_logo() {
 }
 
 fn main() -> Result<()> {
-    use core::fmt::Write;
     use os::*;
     init::init_graphical_terminal();
     os::println!("Booting Wasabi OS!!!");
@@ -64,6 +63,10 @@ fn main() -> Result<()> {
     init::init_interrupts();
     init::init_paging()?;
     init::init_timer();
+    loop {
+        print!(".");
+        arch::x86_64::stihlt();
+    }
     init::init_pci();
 
     let boot_info = BootInfo::take();
@@ -74,17 +77,7 @@ fn main() -> Result<()> {
     for (i, f) in root_files.iter().enumerate() {
         os::println!("root_files[{}]: {}", i, f.name());
     }
-    for i in 1..=8 {
-        let base_addr = serial::IO_ADDR_COM[i - 1];
-        serial::com_initialize(base_addr);
-        let mut w = serial::SerialConsoleWriter::new(base_addr);
-        writeln!(w, "COM{}!", i).expect("Failed to write");
-        os::println!("Printed to COM{}", i);
-    }
-    unsafe {
-        core::arch::asm!("ud2");
-    }
-    Ok(())
+    println!("Wasabi OS booted.");
 }
 
 #[no_mangle]

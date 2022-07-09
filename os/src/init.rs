@@ -287,18 +287,6 @@ pub fn init_timer() {
                 .expect("Failed to get HPET base address"),
         ));
     }
-    let hpet = Hpet::take();
-    unsafe { core::arch::asm!("sti") }
-    for _ in 0..2 {
-        println!("{:?}", hpet);
-    }
-
-    loop {
-        println!("waiting...");
-        arch::x86_64::stihlt();
-        //println!("{}", hpet.main_counter());
-        println!("morning!");
-    }
 }
 
 pub fn init_pci() {
