@@ -16,6 +16,7 @@ pub mod arch;
 pub mod boot_info;
 pub mod debug_exit;
 pub mod efi;
+pub mod elf;
 pub mod error;
 pub mod graphics;
 pub mod hpet;

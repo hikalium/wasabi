@@ -33,6 +33,11 @@ impl File {
     pub fn name(&self) -> &EfiFileName {
         &self.name
     }
+    pub fn has_name(&self, name: &str) -> bool {
+        name.encode_utf16()
+            .zip(self.name.name().iter())
+            .all(|(l, &r)| l == r)
+    }
     pub fn data(&self) -> &[u8] {
         self.data
     }

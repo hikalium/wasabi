@@ -218,11 +218,16 @@ impl fmt::Display for EfiTime {
 #[repr(C)]
 #[derive(Default, Debug, Clone, Copy)]
 pub struct EfiFileName {
-    file_name: [u16; 32],
+    name: [u16; 32],
+}
+impl EfiFileName {
+    pub fn name(&self) -> &[u16; 32] {
+        &self.name
+    }
 }
 impl fmt::Display for EfiFileName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", CStrPtr16::from_ptr(self.file_name.as_ptr()),)
+        write!(f, "{}", CStrPtr16::from_ptr(self.name.as_ptr()),)
     }
 }
 

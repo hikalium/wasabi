@@ -9,6 +9,7 @@ extern crate alloc;
 
 use os::arch::x86_64::read_rsp;
 use os::boot_info::BootInfo;
+use os::elf::Elf;
 use os::error::*;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
@@ -105,15 +106,22 @@ fn main() -> Result<()> {
     init::init_timer();
     init::init_pci();
 
+    println!("Wasabi OS booted.");
+
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();
     let root_files: alloc::vec::Vec<&os::boot_info::File> =
         root_files.iter().filter_map(|e| e.as_ref()).collect();
-    os::println!("Number of root files: {}", root_files.len());
+    println!("Number of root files: {}", root_files.len());
     for (i, f) in root_files.iter().enumerate() {
-        os::println!("root_files[{}]: {}", i, f.name());
+        println!("root_files[{}]: {}", i, f.name());
     }
-    println!("Wasabi OS booted.");
+    let hello_elf = root_files.iter().find(|&e| e.has_name("hello"));
+    if let Some(hello_elf) = hello_elf {
+        let hello_elf = Elf::new(hello_elf);
+        println!("Executable found: {:?} ", hello_elf);
+    }
+
     pseudo_multitask()?;
     Ok(())
 }

@@ -28,6 +28,7 @@ HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
 default: bin
 
 .PHONY: \
+	app \
 	bin \
 	commit \
 	dump_config \
@@ -105,11 +106,16 @@ run_dbgutil :
 pxe :
 	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
 
-run_deps :
+app :
+	-rm -r generated/bin
+	make -C app/hello
+
+run_deps : app
 	-rm -rf mnt
 	mkdir -p mnt/
 	mkdir -p mnt/EFI/BOOT
 	cp README.md mnt/
+	cp generated/bin/* mnt/
 
 watch_serial:
 	while ! telnet localhost 1235 ; do sleep 1 ; done ;
