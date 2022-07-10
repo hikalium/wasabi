@@ -67,10 +67,13 @@ pub fn hexdump(bytes: &[u8]) {
             for c in ascii.iter() {
                 print!(
                     "{}",
-                    if (0x20..=0x7f).contains(c) {
-                        *c as char
-                    } else {
-                        '.'
+                    match c {
+                        0x20..=0x7e => {
+                            *c as char
+                        }
+                        _ => {
+                            '.'
+                        }
                     }
                 );
             }
