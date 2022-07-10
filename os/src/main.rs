@@ -70,8 +70,8 @@ fn pseudo_multitask() -> Result<()> {
     let mut x2 = 0;
     let mut c2 = 0;
     for t in 0.. {
-        if t % 2 == 0 {
-            // Do some work for task 0
+        if t % 4 == 0 {
+            // Do some work for task 0 (when t == 0 under mod 4)
             draw_line(&mut vram, colors[c1 % 3], x1, y1, x1, y1 + h)?;
             x1 += 1;
             if x1 >= vram.width() {
@@ -79,7 +79,7 @@ fn pseudo_multitask() -> Result<()> {
                 c1 += 1;
             }
         } else {
-            // Do some work for task 1
+            // Do some work for task 1 (when t == 1, 2, 3 under mod 4)
             draw_line(&mut vram, colors[c2 % 3], x2, y2, x2, y2 + h)?;
             x2 += 1;
             if x2 >= vram.width() {
