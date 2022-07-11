@@ -10,7 +10,6 @@ pub enum WasabiError {
     PciBusDeviceFunctionOutOfRange,
     ReadFileSizeMismatch { expected: usize, actual: usize },
     ApicRegIndexOutOfRange,
-    Infallible,
     CalcOutOfRange,
     PageNotFound,
 }
@@ -31,5 +30,4 @@ impl From<&'static str> for WasabiError {
         WasabiError::Failed(s)
     }
 }
-
 pub type Result<T> = core::result::Result<T, WasabiError>;

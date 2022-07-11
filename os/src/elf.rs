@@ -15,10 +15,28 @@ impl<'a> Elf<'a> {
     pub fn parse(&self) -> Result<()> {
         hexdump(self.file.data());
         let data = self.file.data();
+        // https://wiki.osdev.org/ELF#Header
         if &data[0..4] != b"\x7fELF".as_slice() {
             return Err(WasabiError::Failed("No ELF signature found"));
         }
-        println!("ELF signature found.");
+        if data[4] != 2 {
+            return Err(WasabiError::Failed("Not a 64-bit ELF"));
+        }
+        if data[5] != 1 {
+            return Err(WasabiError::Failed("Not a litte endian ELF"));
+        }
+        if data[7] != 0 {
+            return Err(WasabiError::Failed("ABI is not SystemV"));
+        }
+        if u16::from_le_bytes(
+            data[16..=17]
+                .try_into()
+                .map_err(|_| WasabiError::Failed("Failed to convert slice into array"))?,
+        ) != 2
+        {
+            return Err(WasabiError::Failed("Not an executable ELF"));
+        }
+        println!("This ELF seems to be executable!");
         Ok(())
     }
 }
