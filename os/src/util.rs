@@ -30,3 +30,25 @@ fn round_up_to_nearest_pow2_tests() {
     assert_eq!(round_up_to_nearest_pow2(9), Ok(16));
     assert_eq!(round_up_to_nearest_pow2(9), Ok(16));
 }
+
+pub fn read_le_u16(data: &[u8], ofs: usize) -> Result<u16> {
+    Ok(u16::from_le_bytes(
+        data[ofs..(ofs + 2)]
+            .try_into()
+            .map_err(|_| WasabiError::Failed("Failed to convert slice into array"))?,
+    ))
+}
+pub fn read_le_u32(data: &[u8], ofs: usize) -> Result<u32> {
+    Ok(u32::from_le_bytes(
+        data[ofs..(ofs + 4)]
+            .try_into()
+            .map_err(|_| WasabiError::Failed("Failed to convert slice into array"))?,
+    ))
+}
+pub fn read_le_u64(data: &[u8], ofs: usize) -> Result<u64> {
+    Ok(u64::from_le_bytes(
+        data[ofs..(ofs + 8)]
+            .try_into()
+            .map_err(|_| WasabiError::Failed("Failed to convert slice into array"))?,
+    ))
+}

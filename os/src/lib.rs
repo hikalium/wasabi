@@ -10,6 +10,7 @@
 #![feature(adt_const_params)]
 #![feature(const_option)]
 #![feature(const_result_drop)]
+#![feature(new_uninit)]
 
 pub mod acpi;
 pub mod arch;

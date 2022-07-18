@@ -13,5 +13,5 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[no_mangle]
 fn entry() -> isize {
-    loop {}
+    return -42;
 }

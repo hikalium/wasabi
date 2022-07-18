@@ -120,7 +120,7 @@ fn main() -> Result<()> {
     if let Some(hello_elf) = hello_elf {
         let hello_elf = Elf::new(hello_elf);
         println!("Executable found: {:?} ", hello_elf);
-        hello_elf.parse().expect("Failed to parse ELF");
+        hello_elf.exec().expect("Failed to parse ELF");
     }
 
     pseudo_multitask()?;
