@@ -116,11 +116,11 @@ fn main() -> Result<()> {
     for (i, f) in root_files.iter().enumerate() {
         println!("root_files[{}]: {}", i, f.name());
     }
-    let hello_elf = root_files.iter().find(|&e| e.has_name("hello"));
-    if let Some(hello_elf) = hello_elf {
-        let hello_elf = Elf::new(hello_elf);
-        println!("Executable found: {:?} ", hello_elf);
-        hello_elf.exec().expect("Failed to parse ELF");
+    let elf = root_files.iter().find(|&e| e.has_name("hello"));
+    if let Some(elf) = elf {
+        let elf = Elf::new(elf);
+        println!("Executable found: {:?} ", elf);
+        elf.exec().expect("Failed to parse ELF");
     }
 
     pseudo_multitask()?;
