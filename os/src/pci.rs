@@ -1,27 +1,18 @@
 extern crate alloc;
 
 use crate::acpi::Mcfg;
-use crate::allocator::ALLOCATOR;
-use crate::arch::x86_64::busy_loop_hint;
-use crate::arch::x86_64::read_io_port_u16;
-use crate::arch::x86_64::read_io_port_u8;
-use crate::arch::x86_64::write_io_port_u16;
-use crate::arch::x86_64::write_io_port_u32;
-use crate::arch::x86_64::write_io_port_u8;
 use crate::error::Result;
 use crate::error::WasabiError;
-use crate::print::hexdump;
 use crate::println;
+use crate::rtl8139::Rtl8139Driver;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::alloc::Layout;
 use core::cell::RefCell;
 use core::fmt;
 use core::ops::Range;
-use core::slice;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct VendorDeviceId {
@@ -118,155 +109,6 @@ impl Iterator for BusDeviceFunctionIterator {
     }
 }
 
-pub struct EthernetAddress {
-    mac: [u8; 6],
-}
-impl EthernetAddress {
-    fn new(mac: &[u8; 6]) -> Self {
-        EthernetAddress { mac: *mac }
-    }
-}
-impl fmt::Display for EthernetAddress {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:",
-            self.mac[0], self.mac[1], self.mac[2], self.mac[3], self.mac[4], self.mac[5],
-        )
-    }
-}
-
-pub struct Rtl8139Driver {}
-impl Rtl8139Driver {
-    fn new() -> Self {
-        Rtl8139Driver {}
-    }
-}
-impl PciDeviceDriver for Rtl8139Driver {
-    fn supports(&self, vp: VendorDeviceId) -> bool {
-        const RTL8139_ID: VendorDeviceId = VendorDeviceId {
-            vendor: 0x10ec,
-            device: 0x8139,
-        };
-        // akemi
-        // 8086:02ed Comet Lake PCH-LP USB 3.1 xHCI Host Controller
-        // 8086:02f0 Comet Lake PCH-LP CNVi WiFi
-        // 8086:02e8 Serial IO I2C Host Controller
-        // 8086:02e9 Comet Lake Serial IO I2C Host Controller
-        // 8086:02c5 Comet Lake Serial IO I2C Host Controller
-        // 8086:02c8 Comet Lake PCH-LP cAVS
-        // 8086:02a3 Comet Lake PCH-LP SMBus Host Controller
-        // 8086:02a4 Comet Lake SPI (flash) Controller
-
-        vp == RTL8139_ID
-    }
-    fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>> {
-        Ok(Box::new(Rtl8139DriverInstance::new(bdf)) as Box<dyn PciDeviceDriverInstance>)
-    }
-    fn name(&self) -> &str {
-        "Rtl8139Driver"
-    }
-}
-const RTL8139_RXBUF_SIZE: usize = 8208;
-const ARP_REQ_SAMPLE_DATA: [u8; 42] = [
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // dst eth addr
-    0x52, 0x54, 0x00, 0x12, 0x34, 0x57, // src eth addr
-    0x08, 0x06, // eth_type = ARP
-    0x00, 0x01, // hw_type = Ethernet
-    0x08, 0x00, // proto_type = IPv4
-    0x06, // hw_addr_size = 6 bytes
-    0x04, // proto_addr_type = 4 bytes
-    0x00, 0x01, // operation = ARP request
-    0x52, 0x54, 0x00, 0x12, 0x34, 0x57, // sender_mac = 52:54:00:12:34:57
-    0x0A, 0x00, 0x02, 0x0F, // sender_ip = 10.0.2.15
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // target_mac = Unknown
-    0x0A, 0x00, 0x02, 0x02, // target_ip = 10.0.2.2
-];
-pub struct Rtl8139DriverInstance<'a> {
-    #[allow(dead_code)]
-    bdf: BusDeviceFunction,
-    #[allow(dead_code)]
-    rx_buffer: &'a mut [u8; RTL8139_RXBUF_SIZE],
-}
-impl<'a> Rtl8139DriverInstance<'a> {
-    // https://wiki.osdev.org/RTL8139
-    fn new(bdf: BusDeviceFunction) -> Self {
-        let pci = Pci::take();
-        println!("Instantiating RTL8139 NIC @ {}...", bdf);
-        let cmd_and_status = pci.read_register_u32(bdf, 0x04);
-        pci.write_register_u32(
-            bdf,
-            0x04, /* Command and status */
-            (1 << 2)/* Bus Master Enable */ | (1 << 10) /* Interrupt Disable */ | cmd_and_status,
-        );
-        // Assume that BAR0 has IO Port address
-        let bar0 = pci.read_register_u32(bdf, 0x10);
-        assert_eq!(bar0 & 1, 1 /* I/O space */);
-        let io_base = (bar0 ^ 1) as u16;
-        let mut eth_addr = [0u8; 6];
-        for (i, e) in eth_addr.iter_mut().enumerate() {
-            *e = read_io_port_u8(io_base + i as u16);
-        }
-        let eth_addr = EthernetAddress::new(&eth_addr);
-        println!("eth_addr: {}", eth_addr);
-        // Turn on
-        write_io_port_u8(io_base + 0x52, 0);
-        // Software Reset
-        write_io_port_u8(io_base + 0x37, 0x10);
-        while (read_io_port_u8(io_base + 0x37) & 0x10) != 0 {
-            busy_loop_hint();
-        }
-        println!("Software Reset Done!");
-        let rx_buffer = unsafe {
-            &mut *(ALLOCATOR.alloc_with_options(
-                Layout::from_size_align(RTL8139_RXBUF_SIZE, 1).expect("Invalid Layout"),
-            ) as *mut [u8; RTL8139_RXBUF_SIZE])
-        };
-        assert!(
-            (rx_buffer.as_ptr() as usize)
-                < ((core::primitive::u32::MAX) as usize - RTL8139_RXBUF_SIZE)
-        );
-        println!("rx_buffer is at {:#p}", rx_buffer);
-
-        write_io_port_u32(io_base + 0x30, rx_buffer.as_ptr() as usize as u32);
-
-        write_io_port_u32(io_base + 0x3C, 0x0005); // Interrupts: Transmit OK, Receive OK
-
-        write_io_port_u16(io_base + 0x44, 0xf); // AB+AM+APM+AAP
-
-        write_io_port_u8(io_base + 0x37, 0x0C); // RE+TE
-
-        write_io_port_u32(
-            io_base + 0x20, /* TSAD[0] */
-            ARP_REQ_SAMPLE_DATA.as_ptr() as usize as u32,
-        );
-        write_io_port_u32(
-            io_base + 0x10, /* TSD[0] */
-            ARP_REQ_SAMPLE_DATA.len() as u32,
-        );
-        let write_count = loop {
-            let write_count = read_io_port_u16(io_base + 0x3A);
-            if write_count != 0 {
-                break write_count;
-            }
-            busy_loop_hint();
-        };
-        println!("write_count: {}", write_count);
-        let rx_status = unsafe { *(rx_buffer.as_ptr() as *const u16) };
-        println!("rx_status: {}", rx_status);
-        let packet_len = unsafe { *(rx_buffer.as_ptr().offset(2) as *const u16) };
-        println!("packet_len: {}", packet_len);
-        hexdump(unsafe { slice::from_raw_parts(rx_buffer.as_ptr().offset(4), packet_len.into()) });
-
-        Rtl8139DriverInstance { bdf, rx_buffer }
-    }
-}
-impl<'a> PciDeviceDriverInstance for Rtl8139DriverInstance<'a> {
-    fn name(&self) -> &str {
-        "Rtl8139DriverInstance"
-    }
-}
-
 pub trait PciDeviceDriver {
     fn supports(&self, vp: VendorDeviceId) -> bool;
     fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>>;
@@ -304,7 +146,7 @@ impl Pci {
         );
 
         let drivers = vec![Rc::new(
-            Box::new(Rtl8139Driver::new()) as Box<dyn PciDeviceDriver>
+            Box::new(Rtl8139Driver::default()) as Box<dyn PciDeviceDriver>
         )];
 
         Pci {

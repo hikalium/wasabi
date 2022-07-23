@@ -13,7 +13,6 @@ use os::elf::Elf;
 use os::error::*;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
-use os::print;
 use os::println;
 
 fn paint_wasabi_logo() {
@@ -90,7 +89,6 @@ fn pseudo_multitask() -> Result<()> {
             }
         }
         delay();
-        print!(".");
     }
     Ok(())
 }

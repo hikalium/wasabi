@@ -3,7 +3,6 @@ extern crate alloc;
 use crate::boot_info::File;
 use crate::error::Result;
 use crate::error::WasabiError;
-use crate::print::hexdump;
 use crate::println;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
@@ -62,7 +61,6 @@ impl<'a> Elf<'a> {
         Self { file }
     }
     pub fn parse(&self) -> Result<SegmentToLoad> {
-        hexdump(self.file.data());
         let data = self.file.data();
         // https://wiki.osdev.org/ELF#Header
         if &data[0..4] != b"\x7fELF".as_slice() {
