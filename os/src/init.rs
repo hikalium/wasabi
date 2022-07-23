@@ -179,7 +179,8 @@ pub fn init_global_allocator() {
 pub fn init_graphical_terminal() {
     println!("init_graphical_terminal()");
     let vram = BootInfo::take().vram();
-    let textarea = TextArea::new(vram, 8, 16, vram.width() - 16, vram.height() - 32);
+    let mut textarea = TextArea::new(vram, 8, 16, vram.width() - 16, vram.height() - 32);
+    textarea.set_mode(text_area::TextAreaMode::Ring);
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
 }
 

@@ -1,6 +1,11 @@
 use crate::graphics::*;
 use core::fmt;
 
+pub enum TextAreaMode {
+    Scroll,
+    Ring,
+}
+
 pub struct TextArea<T: BitmapImageBuffer> {
     buf: T,
     x: i64,
@@ -9,6 +14,7 @@ pub struct TextArea<T: BitmapImageBuffer> {
     h: i64,
     cx: i64,
     cy: i64,
+    mode: TextAreaMode,
 }
 
 impl<T: BitmapImageBuffer> TextArea<T> {
@@ -21,6 +27,7 @@ impl<T: BitmapImageBuffer> TextArea<T> {
             h,
             cx: 0,
             cy: 0,
+            mode: TextAreaMode::Scroll,
         };
         text_area.clear_screen().unwrap();
         text_area
@@ -28,31 +35,50 @@ impl<T: BitmapImageBuffer> TextArea<T> {
     fn clear_screen(&mut self) -> GraphicsResult {
         draw_rect(&mut self.buf, 0x000000, self.x, self.y, self.w, self.h)
     }
+    pub fn set_mode(&mut self, mode: TextAreaMode) {
+        self.mode = mode;
+    }
     fn new_line(&mut self) -> GraphicsResult {
         self.cx = 0;
         self.cy += 1;
-        if (self.cy + 1) * 16 <= self.h {
-            return Ok(());
+        match self.mode {
+            TextAreaMode::Scroll => {
+                if (self.cy + 1) * 16 <= self.h {
+                    return Ok(());
+                }
+                self.cy -= 1;
+                transfer_rect(
+                    &mut self.buf,
+                    self.x,
+                    self.y,
+                    self.x,
+                    self.y + 16,
+                    self.w,
+                    self.cy * 16,
+                )?;
+                draw_rect(
+                    &mut self.buf,
+                    0x000000,
+                    self.x,
+                    self.y + self.cy * 16,
+                    self.w,
+                    16,
+                )?;
+            }
+            TextAreaMode::Ring => {
+                if (self.cy + 1) * 16 > self.h {
+                    self.cy = 0;
+                }
+                draw_rect(
+                    &mut self.buf,
+                    0x000000,
+                    self.x,
+                    self.y + self.cy * 16,
+                    self.w,
+                    16,
+                )?;
+            }
         }
-        // Scroll!
-        self.cy -= 1;
-        transfer_rect(
-            &mut self.buf,
-            self.x,
-            self.y,
-            self.x,
-            self.y + 16,
-            self.w,
-            self.cy * 16,
-        )?;
-        draw_rect(
-            &mut self.buf,
-            0x000000,
-            self.x,
-            self.y + self.cy * 16,
-            self.w,
-            16,
-        )?;
         Ok(())
     }
     fn advance_cursor(&mut self) -> GraphicsResult {
