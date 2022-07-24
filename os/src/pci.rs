@@ -109,6 +109,34 @@ impl Iterator for BusDeviceFunctionIterator {
     }
 }
 
+pub struct CapabilityHeader {
+    pub id: u8,
+    pub next: u8,
+}
+
+pub struct CapabilityIterator<'a> {
+    pci: &'a Pci,
+    bdf: BusDeviceFunction,
+    ptr: u8,
+}
+impl<'a> CapabilityIterator<'a> {
+    pub fn new(pci: &'a Pci, bdf: BusDeviceFunction, ptr: u8) -> Self {
+        Self { pci, bdf, ptr }
+    }
+}
+impl<'a> Iterator for CapabilityIterator<'a> {
+    type Item = &'a CapabilityHeader;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr == 0 {
+            None
+        } else {
+            let item = unsafe { &*self.pci.ecm_base::<CapabilityHeader>(self.bdf) };
+            self.ptr = item.next;
+            Some(item)
+        }
+    }
+}
+
 pub trait PciDeviceDriver {
     fn supports(&self, vp: VendorDeviceId) -> bool;
     fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>>;
@@ -155,7 +183,7 @@ impl Pci {
             devices: RefCell::new(BTreeMap::new()),
         }
     }
-    fn ecm_base<T>(&self, id: BusDeviceFunction) -> *mut T {
+    pub fn ecm_base<T>(&self, id: BusDeviceFunction) -> *mut T {
         (self.ecm_range.start + ((id.id as usize) << 12)) as *mut T
     }
     pub fn read_register_u8(&self, id: BusDeviceFunction, byte_offset: usize) -> u8 {
@@ -177,6 +205,19 @@ impl Pci {
         assert!(byte_offset & 3 == 0);
         unsafe {
             *self.ecm_base::<u32>(id).add(byte_offset >> 2) = data;
+        }
+    }
+    pub fn capabilities(&self, id: BusDeviceFunction) -> Option<CapabilityIterator> {
+        let status = self.read_register_u16(id, 0x06);
+
+        if status & (1 << 4) != 0 {
+            Some(CapabilityIterator::new(
+                self,
+                id,
+                self.read_register_u8(id, 0x34),
+            ))
+        } else {
+            None
         }
     }
     pub fn read_vendor_id_and_device_id(&self, id: BusDeviceFunction) -> Option<VendorDeviceId> {

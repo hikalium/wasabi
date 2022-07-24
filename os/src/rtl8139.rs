@@ -83,6 +83,11 @@ impl<'a> Rtl8139DriverInstance<'a> {
             0x04, /* Command and status */
             (1 << 2)/* Bus Master Enable */ | (1 << 10) /* Interrupt Disable */ | cmd_and_status,
         );
+        if let Some(caps) = pci.capabilities(bdf) {
+            for cap in caps {
+                println!("CAP {:#04X}", cap.id);
+            }
+        }
         // Assume that BAR0 has IO Port address
         let bar0 = pci.read_register_u32(bdf, 0x10);
         assert_eq!(bar0 & 1, 1 /* I/O space */);
