@@ -206,34 +206,6 @@ impl<'a> Iterator for XsdtIterator<'a> {
     }
 }
 
-pub struct Acpi {
-    mcfg: &'static Mcfg,
-    hpet: &'static Hpet,
-}
-impl<'a> Acpi {
-    pub fn new(rsdp_struct: &RsdpStruct) -> Result<Acpi> {
-        if &rsdp_struct.signature != b"RSD PTR " {
-            return Err("Invalid RSDP Struct Signature".into());
-        }
-        println!("{:?}", rsdp_struct);
-        if rsdp_struct.revision < 2 {
-            return Err("Expected RSDP rev.2 or above".into());
-        }
-        let xsdt = rsdp_struct.xsdt();
-        xsdt.list_all_tables();
-
-        let mcfg = Mcfg::new(xsdt.find_table(b"MCFG").expect("MCFG not found"));
-        let hpet = Hpet::new(xsdt.find_table(b"HPET").expect("HPET not found"));
-        Ok(Acpi { mcfg, hpet })
-    }
-    pub fn mcfg(&'a self) -> &'a Mcfg {
-        self.mcfg
-    }
-    pub fn hpet(&'a self) -> &'a Hpet {
-        self.hpet
-    }
-}
-
 #[repr(packed)]
 pub struct GenericAddress {
     address_space_id: u8,
@@ -277,3 +249,89 @@ impl Hpet {
     }
 }
 const _: () = assert!(core::mem::size_of::<Hpet>() == 56);
+
+#[repr(packed)]
+pub struct Dsdt {
+    header: SystemDescriptionTableHeader,
+}
+impl Dsdt {
+    pub fn term_list_slice(&self) -> &[u8] {
+        let header_size = core::mem::size_of::<Self>();
+        let term_list_size = self.header.length as usize - header_size;
+        unsafe {
+            slice::from_raw_parts(
+                (self as *const Dsdt as *const u8).add(header_size),
+                term_list_size,
+            )
+        }
+    }
+}
+impl AcpiTable for Dsdt {
+    const SIGNATURE: &'static [u8; 4] = b"DSDT";
+    type Table = Self;
+    fn table(&self) -> &Self::Table {
+        self
+    }
+}
+impl fmt::Debug for Dsdt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Dsdt {{ {:?} }}", self.header)
+    }
+}
+
+#[repr(packed)]
+pub struct Fadt {
+    _header: SystemDescriptionTableHeader,
+    _reserved0: u32,
+    dsdt: u32,
+}
+impl AcpiTable for Fadt {
+    const SIGNATURE: &'static [u8; 4] = b"FACP";
+    type Table = Self;
+    fn table(&self) -> &Self::Table {
+        self
+    }
+}
+impl Fadt {
+    pub fn dsdt(&self) -> &Dsdt {
+        let header = self.dsdt as usize as *const SystemDescriptionTableHeader;
+        Dsdt::new(unsafe { &*header })
+    }
+}
+
+pub struct Acpi {
+    mcfg: &'static Mcfg,
+    hpet: &'static Hpet,
+    dsdt: &'static Dsdt,
+}
+impl<'a> Acpi {
+    pub fn new(rsdp_struct: &RsdpStruct) -> Result<Acpi> {
+        if &rsdp_struct.signature != b"RSD PTR " {
+            return Err("Invalid RSDP Struct Signature".into());
+        }
+        println!("{:?}", rsdp_struct);
+        if rsdp_struct.revision < 2 {
+            return Err("Expected RSDP rev.2 or above".into());
+        }
+        let xsdt = rsdp_struct.xsdt();
+        xsdt.list_all_tables();
+
+        let mcfg = Mcfg::new(xsdt.find_table(b"MCFG").expect("MCFG not found"));
+        let hpet = Hpet::new(xsdt.find_table(b"HPET").expect("HPET not found"));
+        let fadt = Fadt::new(xsdt.find_table(b"FACP").expect("FACP not found"));
+        println!("fadt: {:p}", fadt);
+        let dsdt = fadt.dsdt();
+        println!("dsdt: {:p}", dsdt);
+        println!("dsdt: {:?}", dsdt);
+        Ok(Acpi { mcfg, hpet, dsdt })
+    }
+    pub fn dsdt(&'a self) -> &'a Dsdt {
+        self.dsdt
+    }
+    pub fn hpet(&'a self) -> &'a Hpet {
+        self.hpet
+    }
+    pub fn mcfg(&'a self) -> &'a Mcfg {
+        self.mcfg
+    }
+}
