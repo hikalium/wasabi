@@ -33,6 +33,7 @@ pub mod test_runner;
 pub mod text_area;
 pub mod util;
 pub mod vram;
+pub mod xhci;
 
 // #[path = "simple_allocator.rs"]
 #[path = "first_fit_allocator.rs"]

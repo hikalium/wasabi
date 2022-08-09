@@ -122,8 +122,6 @@ fn main() -> Result<()> {
         println!("Executable found: {:?} ", elf);
         elf.exec().expect("Failed to parse ELF");
     }
-    let dsdt = boot_info.acpi().dsdt();
-    print::hexdump(dsdt.term_list_slice());
 
     pseudo_multitask()?;
     Ok(())

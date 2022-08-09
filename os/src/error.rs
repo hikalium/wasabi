@@ -12,6 +12,8 @@ pub enum WasabiError {
     ApicRegIndexOutOfRange,
     CalcOutOfRange,
     PageNotFound,
+    PciBarInvalid,
+    PciEcmOutOfRange,
 }
 
 impl From<GraphicsError> for WasabiError {

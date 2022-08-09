@@ -286,7 +286,9 @@ pub fn init_pci() {
     let pci = Pci::new(mcfg);
     // This is safe since it is only called once
     unsafe { Pci::set(pci) };
-    Pci::take().probe_devices();
+    Pci::take()
+        .probe_devices()
+        .expect("Failed to probe devices");
     Pci::take().list_devices();
     Pci::take().list_drivers();
 }

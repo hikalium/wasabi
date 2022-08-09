@@ -45,7 +45,7 @@ impl PciDeviceDriver for Rtl8139Driver {
         vp == RTL8139_ID
     }
     fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>> {
-        Ok(Box::new(Rtl8139DriverInstance::new(bdf)) as Box<dyn PciDeviceDriverInstance>)
+        Ok(Box::new(Rtl8139DriverInstance::new(bdf)?) as Box<dyn PciDeviceDriverInstance>)
     }
     fn name(&self) -> &str {
         "Rtl8139Driver"
@@ -74,24 +74,17 @@ pub struct Rtl8139DriverInstance<'a> {
 }
 impl<'a> Rtl8139DriverInstance<'a> {
     // https://wiki.osdev.org/RTL8139
-    fn new(bdf: BusDeviceFunction) -> Self {
+    fn new(bdf: BusDeviceFunction) -> Result<Self> {
         let pci = Pci::take();
-        println!("Instantiating RTL8139 NIC @ {}...", bdf);
-        let cmd_and_status = pci.read_register_u32(bdf, 0x04);
-        pci.write_register_u32(
-            bdf,
-            0x04, /* Command and status */
-            (1 << 2)/* Bus Master Enable */ | (1 << 10) /* Interrupt Disable */ | cmd_and_status,
-        );
+        pci.disable_interrupt(bdf)?;
+        pci.enable_bus_master(bdf)?;
         if let Some(caps) = pci.capabilities(bdf) {
             for cap in caps {
                 println!("CAP {:#04X}", cap.id);
             }
         }
         // Assume that BAR0 has IO Port address
-        let bar0 = pci.read_register_u32(bdf, 0x10);
-        assert_eq!(bar0 & 1, 1 /* I/O space */);
-        let io_base = (bar0 ^ 1) as u16;
+        let io_base = pci.try_bar0_io(bdf)?;
         let mut eth_addr = [0u8; 6];
         for (i, e) in eth_addr.iter_mut().enumerate() {
             *e = read_io_port_u8(io_base + i as u16);
@@ -147,7 +140,7 @@ impl<'a> Rtl8139DriverInstance<'a> {
         println!("packet_len: {}", packet_len);
         hexdump(unsafe { slice::from_raw_parts(rx_buffer.as_ptr().offset(4), packet_len.into()) });
 
-        Rtl8139DriverInstance { bdf, rx_buffer }
+        Ok(Rtl8139DriverInstance { bdf, rx_buffer })
     }
 }
 impl<'a> PciDeviceDriverInstance for Rtl8139DriverInstance<'a> {

@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::error::WasabiError;
 use crate::println;
 use crate::rtl8139::Rtl8139Driver;
+use crate::xhci::XhciDriver;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
@@ -12,7 +13,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt;
+use core::marker::PhantomData;
+use core::mem::size_of;
 use core::ops::Range;
+use core::ptr::read_volatile;
+use core::ptr::write_volatile;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct VendorDeviceId {
@@ -142,20 +147,59 @@ pub trait PciDeviceDriver {
     fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>>;
     fn name(&self) -> &str;
 }
-pub trait PciDeviceDriverInstance {
-    fn name(&self) -> &str;
-}
-
 impl fmt::Debug for dyn PciDeviceDriver {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "PciDeviceDriver{{ name: {} }}", self.name())
     }
 }
 
+pub trait PciDeviceDriverInstance {
+    fn name(&self) -> &str;
+}
+impl fmt::Debug for dyn PciDeviceDriverInstance {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "PciDeviceDriverInstance{{ name: {} }}", self.name())
+    }
+}
+
+struct ConfigRegisters<T> {
+    access_type: PhantomData<T>,
+}
+impl<T> ConfigRegisters<T> {
+    fn read(ecm_base: *mut T, byte_offset: usize) -> Result<T> {
+        if !(0..256).contains(&byte_offset) || byte_offset % size_of::<T>() != 0 {
+            Err(WasabiError::PciEcmOutOfRange)
+        } else {
+            unsafe { Ok(read_volatile(ecm_base.add(byte_offset / size_of::<T>()))) }
+        }
+    }
+    fn write(ecm_base: *mut T, byte_offset: usize, data: T) -> Result<()> {
+        if !(0..256).contains(&byte_offset) || byte_offset % size_of::<T>() != 0 {
+            Err(WasabiError::PciEcmOutOfRange)
+        } else {
+            unsafe { write_volatile(ecm_base.add(byte_offset / size_of::<T>()), data) }
+            Ok(())
+        }
+    }
+}
+
+pub struct BarMem64 {
+    addr: *mut u8,
+    size: u64,
+}
+impl BarMem64 {
+    pub fn addr(&self) -> *mut u8 {
+        self.addr
+    }
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+}
+
 pub struct Pci {
     ecm_range: Range<usize>,
     drivers: Vec<Rc<Box<dyn PciDeviceDriver>>>,
-    devices: RefCell<BTreeMap<BusDeviceFunction, Rc<Box<dyn PciDeviceDriver>>>>,
+    devices: RefCell<BTreeMap<BusDeviceFunction, Rc<Box<dyn PciDeviceDriverInstance>>>>,
 }
 impl Pci {
     pub fn new(mcfg: &Mcfg) -> Self {
@@ -173,9 +217,10 @@ impl Pci {
             pci_config_space_base, pci_config_space_end
         );
 
-        let drivers = vec![Rc::new(
-            Box::new(Rtl8139Driver::default()) as Box<dyn PciDeviceDriver>
-        )];
+        let drivers = vec![
+            Rc::new(Box::new(Rtl8139Driver::default()) as Box<dyn PciDeviceDriver>),
+            Rc::new(Box::new(XhciDriver::default()) as Box<dyn PciDeviceDriver>),
+        ];
 
         Pci {
             ecm_range: pci_config_space_base..pci_config_space_end,
@@ -183,46 +228,91 @@ impl Pci {
             devices: RefCell::new(BTreeMap::new()),
         }
     }
+    pub fn try_bar0_io(&self, bdf: BusDeviceFunction) -> Result<u16> {
+        let bar0 = self.read_register_u32(bdf, 0x10)?;
+        if bar0 & 0b11 == 0b01
+        /* I/O space */
+        {
+            Ok((bar0 ^ 1) as u16)
+        } else {
+            Err(WasabiError::PciBarInvalid)
+        }
+    }
+    pub fn try_bar0_mem64(&self, bdf: BusDeviceFunction) -> Result<BarMem64> {
+        let bar0 = self.read_register_u64(bdf, 0x10)?;
+        println!("bar0: {:018X}", bar0);
+        if bar0 & 0b0111 == 0b0100
+        /* Memory, 64bit, Non-prefetchable */
+        {
+            self.write_register_u64(bdf, 0x10, bar0)?;
+            let size = self.read_register_u64(bdf, 0x10)? & !0b1111;
+            let addr = (bar0 & !0b1111) as *mut u8;
+            Ok(BarMem64 { addr, size })
+        } else {
+            Err(WasabiError::PciBarInvalid)
+        }
+    }
     pub fn ecm_base<T>(&self, id: BusDeviceFunction) -> *mut T {
         (self.ecm_range.start + ((id.id as usize) << 12)) as *mut T
     }
-    pub fn read_register_u8(&self, id: BusDeviceFunction, byte_offset: usize) -> u8 {
-        assert!((0..256).contains(&byte_offset));
-        unsafe { *self.ecm_base::<u8>(id).add(byte_offset) }
+    pub fn read_register_u8(&self, bdf: BusDeviceFunction, byte_offset: usize) -> Result<u8> {
+        ConfigRegisters::read(self.ecm_base(bdf), byte_offset)
     }
-    pub fn read_register_u16(&self, id: BusDeviceFunction, byte_offset: usize) -> u16 {
-        assert!((0..256).contains(&byte_offset));
-        assert!(byte_offset & 1 == 0);
-        unsafe { *self.ecm_base::<u16>(id).add(byte_offset >> 1) }
+    pub fn read_register_u16(&self, bdf: BusDeviceFunction, byte_offset: usize) -> Result<u16> {
+        ConfigRegisters::read(self.ecm_base(bdf), byte_offset)
     }
-    pub fn read_register_u32(&self, id: BusDeviceFunction, byte_offset: usize) -> u32 {
-        assert!((0..256).contains(&byte_offset));
-        assert!(byte_offset & 3 == 0);
-        unsafe { *self.ecm_base::<u32>(id).add(byte_offset >> 2) }
+    pub fn read_register_u32(&self, bdf: BusDeviceFunction, byte_offset: usize) -> Result<u32> {
+        ConfigRegisters::read(self.ecm_base(bdf), byte_offset)
     }
-    pub fn write_register_u32(&self, id: BusDeviceFunction, byte_offset: usize, data: u32) {
-        assert!((0..256).contains(&byte_offset));
-        assert!(byte_offset & 3 == 0);
-        unsafe {
-            *self.ecm_base::<u32>(id).add(byte_offset >> 2) = data;
-        }
+    pub fn read_register_u64(&self, bdf: BusDeviceFunction, byte_offset: usize) -> Result<u64> {
+        ConfigRegisters::read(self.ecm_base(bdf), byte_offset)
+    }
+    pub fn set_command_and_status_flags(&self, bdf: BusDeviceFunction, flags: u32) -> Result<()> {
+        let cmd_and_status = self.read_register_u32(bdf, 0x04 /* Command and status */)?;
+        self.write_register_u32(
+            bdf,
+            0x04, /* Command and status */
+            flags | cmd_and_status,
+        )
+    }
+    pub fn enable_bus_master(&self, bdf: BusDeviceFunction) -> Result<()> {
+        self.set_command_and_status_flags(bdf, 1 << 2 /* Bus Master Enable */)
+    }
+    pub fn disable_interrupt(&self, bdf: BusDeviceFunction) -> Result<()> {
+        self.set_command_and_status_flags(bdf, 1 << 10 /* Interrupt Disable */)
+    }
+    pub fn write_register_u32(
+        &self,
+        bdf: BusDeviceFunction,
+        byte_offset: usize,
+        data: u32,
+    ) -> Result<()> {
+        ConfigRegisters::write(self.ecm_base(bdf), byte_offset, data)
+    }
+    pub fn write_register_u64(
+        &self,
+        bdf: BusDeviceFunction,
+        byte_offset: usize,
+        data: u64,
+    ) -> Result<()> {
+        ConfigRegisters::write(self.ecm_base(bdf), byte_offset, data)
     }
     pub fn capabilities(&self, id: BusDeviceFunction) -> Option<CapabilityIterator> {
-        let status = self.read_register_u16(id, 0x06);
+        let status = self.read_register_u16(id, 0x06).ok()?;
 
         if status & (1 << 4) != 0 {
             Some(CapabilityIterator::new(
                 self,
                 id,
-                self.read_register_u8(id, 0x34),
+                self.read_register_u8(id, 0x34).ok()?,
             ))
         } else {
             None
         }
     }
     pub fn read_vendor_id_and_device_id(&self, id: BusDeviceFunction) -> Option<VendorDeviceId> {
-        let vendor = self.read_register_u16(id, 0);
-        let device = self.read_register_u16(id, 2);
+        let vendor = self.read_register_u16(id, 0).ok()?;
+        let device = self.read_register_u16(id, 2).ok()?;
         if vendor == 0xFFFF || device == 0xFFFF {
             // Not connected
             None
@@ -230,19 +320,19 @@ impl Pci {
             Some(VendorDeviceId { vendor, device })
         }
     }
-    pub fn probe_devices(&self) {
+    pub fn probe_devices(&self) -> Result<()> {
         println!("Probing PCI devices...");
         for bdf in BusDeviceFunction::iter() {
             if let Some(vd) = self.read_vendor_id_and_device_id(bdf) {
                 println!("{:?}: {:?}", bdf, vd);
-                let header_type = self.read_register_u8(bdf, 0x0e);
+                let header_type = self.read_register_u8(bdf, 0x0e)?;
                 println!("  header_type: {:#02X}", header_type);
                 if header_type != 0 {
                     // Support only header_type == 0 for now
                     continue;
                 }
                 for i in 0..6 {
-                    let bar = self.read_register_u32(bdf, 0x10 + i * 4);
+                    let bar = self.read_register_u32(bdf, 0x10 + i * 4)?;
                     if bar == 0 {
                         continue;
                     }
@@ -252,12 +342,21 @@ impl Pci {
                     continue;
                 }
                 for d in &self.drivers {
-                    if d.supports(vd) && d.attach(bdf).is_ok() {
-                        self.devices.borrow_mut().insert(bdf, d.clone());
+                    if d.supports(vd) {
+                        match d.attach(bdf) {
+                            Ok(di) => {
+                                println!("{:?} driver is loaded for {:?}", di, bdf);
+                                self.devices.borrow_mut().insert(bdf, Rc::new(di));
+                            }
+                            Err(e) => {
+                                println!("Failed to attach {:?} for {:?}: {:?}", d, bdf, e);
+                            }
+                        }
                     }
                 }
             }
         }
+        Ok(())
     }
     pub fn list_drivers(&self) {
         println!("{:?}", self.drivers)
