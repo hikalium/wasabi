@@ -244,9 +244,12 @@ impl Pci {
         if bar0 & 0b0111 == 0b0100
         /* Memory, 64bit, Non-prefetchable */
         {
-            self.write_register_u64(bdf, 0x10, bar0)?;
-            let size = self.read_register_u64(bdf, 0x10)? & !0b1111;
             let addr = (bar0 & !0b1111) as *mut u8;
+            // Write all-1s to get the size of the region
+            self.write_register_u64(bdf, 0x10, !0u64)?;
+            let size = 1 + !(self.read_register_u64(bdf, 0x10)? & !0b1111);
+            // Restore the original value
+            self.write_register_u64(bdf, 0x10, bar0)?;
             Ok(BarMem64 { addr, size })
         } else {
             Err(WasabiError::PciBarInvalid)

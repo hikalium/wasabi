@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
 use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
 
 pub fn read_cr3() -> *mut PML4 {
@@ -24,6 +25,31 @@ pub fn read_cr3() -> *mut PML4 {
 pub unsafe fn write_cr3(table: *const PML4) {
     asm!("mov cr3, rax",
             in("rax") table)
+}
+
+/// # Safety
+/// This will create a mutable reference to the page table structure
+/// So is is programmer's responsibility to ensure that at most one
+/// instance of the reference exist at every moment.
+pub unsafe fn take_current_page_table() -> ManuallyDrop<Box<PML4>> {
+    ManuallyDrop::new(Box::from_raw(read_cr3()))
+}
+/// # Safety
+/// This function sets the CR3 value so that anything bad can happen.
+pub unsafe fn put_current_page_table(mut table: ManuallyDrop<Box<PML4>>) {
+    // Set CR3 to reflect the updates and drop TLB caches.
+    write_cr3(Box::into_raw(ManuallyDrop::take(&mut table)))
+}
+/// # Safety
+/// This function modifies the page table as callback does, so
+/// anything bad can happen if there are some mistakes.
+pub unsafe fn with_current_page_table<F>(callback: F)
+where
+    F: FnOnce(&mut PML4),
+{
+    let mut table = take_current_page_table();
+    callback(&mut table);
+    put_current_page_table(table)
 }
 
 const ATTR_MASK: u64 = 0x0000_0000_0000_0FFF;

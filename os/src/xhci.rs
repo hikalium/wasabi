@@ -1,5 +1,7 @@
 extern crate alloc;
 
+use crate::arch::x86_64::paging::with_current_page_table;
+use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Result;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
@@ -63,6 +65,17 @@ impl XhciDriverInstance {
         pci.enable_bus_master(bdf)?;
         let bar0 = pci.try_bar0_mem64(bdf)?;
         println!("{:p}", bar0.addr());
+        println!("{:X}", bar0.size());
+
+        let vstart = bar0.addr() as u64;
+        let vend = bar0.addr() as u64 + bar0.size();
+        unsafe {
+            with_current_page_table(|pt| {
+                pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
+                    .expect("Failed to create mapping")
+            })
+        }
+
         let cap_regs = unsafe { &*(bar0.addr() as *const CapabilityRegisters) };
         println!("{:p}", cap_regs);
         println!("{:?}", cap_regs.params[0]);
