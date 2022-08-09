@@ -9,7 +9,9 @@ use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::println;
+use crate::util::extract_bits;
 use alloc::boxed::Box;
+use core::ptr::read_volatile;
 
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
@@ -34,7 +36,7 @@ impl XhciDriver {
 }
 impl PciDeviceDriver for XhciDriver {
     fn supports(&self, vp: VendorDeviceId) -> bool {
-        const VDI_LIST: [VendorDeviceId; 2] = [
+        const VDI_LIST: [VendorDeviceId; 3] = [
             VendorDeviceId {
                 vendor: 0x1b36,
                 device: 0x000d,
@@ -42,6 +44,10 @@ impl PciDeviceDriver for XhciDriver {
             VendorDeviceId {
                 vendor: 0x8086,
                 device: 0x31a8,
+            },
+            VendorDeviceId {
+                vendor: 0x8086,
+                device: 0x02ed,
             },
         ];
         VDI_LIST.contains(&vp)
@@ -53,9 +59,13 @@ impl PciDeviceDriver for XhciDriver {
         "XhciDriver"
     }
 }
+#[allow(unused)]
+#[derive(Debug)]
 pub struct XhciDriverInstance {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
+    max_slots: usize,
+    max_ports: usize,
 }
 impl XhciDriverInstance {
     // https://wiki.osdev.org/RTL8139
@@ -64,8 +74,6 @@ impl XhciDriverInstance {
         pci.disable_interrupt(bdf)?;
         pci.enable_bus_master(bdf)?;
         let bar0 = pci.try_bar0_mem64(bdf)?;
-        println!("{:p}", bar0.addr());
-        println!("{:X}", bar0.size());
 
         let vstart = bar0.addr() as u64;
         let vend = bar0.addr() as u64 + bar0.size();
@@ -75,10 +83,23 @@ impl XhciDriverInstance {
                     .expect("Failed to create mapping")
             })
         }
+        println!("page_table updated!");
 
         let cap_regs = unsafe { &*(bar0.addr() as *const CapabilityRegisters) };
-        println!("{:p}", cap_regs);
-        println!("{:?}", cap_regs.params[0]);
+        println!("cap_regs @ {:p}", cap_regs);
+        println!("params[0] @ {:p}", &cap_regs.params[0]);
+
+        let hcs_params1 = unsafe { read_volatile(&cap_regs.params[0] as *const u32) };
+        println!("hcs_params1 = {:X}", hcs_params1);
+        let max_slots = extract_bits(hcs_params1, 24, 8) as usize;
+        let max_ports = extract_bits(hcs_params1, 0, 8) as usize;
+
+        let di = XhciDriverInstance {
+            bdf,
+            max_slots,
+            max_ports,
+        };
+        println!("{:?}", di);
 
         unimplemented!()
     }

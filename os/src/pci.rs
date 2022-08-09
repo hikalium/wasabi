@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::acpi::Mcfg;
 use crate::error::Result;
 use crate::error::WasabiError;
+use crate::print::hexdump;
 use crate::println;
 use crate::rtl8139::Rtl8139Driver;
 use crate::xhci::XhciDriver;
@@ -239,6 +240,7 @@ impl Pci {
         }
     }
     pub fn try_bar0_mem64(&self, bdf: BusDeviceFunction) -> Result<BarMem64> {
+        hexdump(unsafe { core::slice::from_raw_parts(self.ecm_base(bdf), 0x100) });
         let bar0 = self.read_register_u64(bdf, 0x10)?;
         println!("bar0: {:018X}", bar0);
         if bar0 & 0b0111 == 0b0100
@@ -268,21 +270,9 @@ impl Pci {
         ConfigRegisters::read(self.ecm_base(bdf), byte_offset)
     }
     pub fn read_register_u64(&self, bdf: BusDeviceFunction, byte_offset: usize) -> Result<u64> {
-        ConfigRegisters::read(self.ecm_base(bdf), byte_offset)
-    }
-    pub fn set_command_and_status_flags(&self, bdf: BusDeviceFunction, flags: u32) -> Result<()> {
-        let cmd_and_status = self.read_register_u32(bdf, 0x04 /* Command and status */)?;
-        self.write_register_u32(
-            bdf,
-            0x04, /* Command and status */
-            flags | cmd_and_status,
-        )
-    }
-    pub fn enable_bus_master(&self, bdf: BusDeviceFunction) -> Result<()> {
-        self.set_command_and_status_flags(bdf, 1 << 2 /* Bus Master Enable */)
-    }
-    pub fn disable_interrupt(&self, bdf: BusDeviceFunction) -> Result<()> {
-        self.set_command_and_status_flags(bdf, 1 << 10 /* Interrupt Disable */)
+        let lo = self.read_register_u32(bdf, byte_offset)?;
+        let hi = self.read_register_u32(bdf, byte_offset + 4)?;
+        Ok(((hi as u64) << 32) | (lo as u64))
     }
     pub fn write_register_u32(
         &self,
@@ -298,7 +288,25 @@ impl Pci {
         byte_offset: usize,
         data: u64,
     ) -> Result<()> {
-        ConfigRegisters::write(self.ecm_base(bdf), byte_offset, data)
+        let lo: u32 = data as u32;
+        let hi: u32 = (data >> 32) as u32;
+        self.write_register_u32(bdf, byte_offset, lo)?;
+        self.write_register_u32(bdf, byte_offset + 4, hi)?;
+        Ok(())
+    }
+    pub fn set_command_and_status_flags(&self, bdf: BusDeviceFunction, flags: u32) -> Result<()> {
+        let cmd_and_status = self.read_register_u32(bdf, 0x04 /* Command and status */)?;
+        self.write_register_u32(
+            bdf,
+            0x04, /* Command and status */
+            flags | cmd_and_status,
+        )
+    }
+    pub fn enable_bus_master(&self, bdf: BusDeviceFunction) -> Result<()> {
+        self.set_command_and_status_flags(bdf, 1 << 2 /* Bus Master Enable */)
+    }
+    pub fn disable_interrupt(&self, bdf: BusDeviceFunction) -> Result<()> {
+        self.set_command_and_status_flags(bdf, 1 << 10 /* Interrupt Disable */)
     }
     pub fn capabilities(&self, id: BusDeviceFunction) -> Option<CapabilityIterator> {
         let status = self.read_register_u16(id, 0x06).ok()?;
@@ -328,19 +336,6 @@ impl Pci {
         for bdf in BusDeviceFunction::iter() {
             if let Some(vd) = self.read_vendor_id_and_device_id(bdf) {
                 println!("{:?}: {:?}", bdf, vd);
-                let header_type = self.read_register_u8(bdf, 0x0e)?;
-                println!("  header_type: {:#02X}", header_type);
-                if header_type != 0 {
-                    // Support only header_type == 0 for now
-                    continue;
-                }
-                for i in 0..6 {
-                    let bar = self.read_register_u32(bdf, 0x10 + i * 4)?;
-                    if bar == 0 {
-                        continue;
-                    }
-                    println!("  BAR{}: {:#010X}", i, bar);
-                }
                 if self.devices.borrow_mut().contains_key(&bdf) {
                     continue;
                 }

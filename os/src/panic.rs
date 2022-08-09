@@ -1,3 +1,4 @@
+use crate::println;
 use crate::serial;
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -9,6 +10,7 @@ use crate::debug_exit;
 fn panic(info: &PanicInfo) -> ! {
     let mut serial_writer = serial::SerialConsoleWriter::default();
     writeln!(serial_writer, "panic! {:?}", info).unwrap();
+    println!("panic! {:?}", info);
     #[cfg(not(test))]
     loop {
         use core::arch::asm;

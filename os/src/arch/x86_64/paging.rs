@@ -145,9 +145,7 @@ impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NE
         }
     }
     fn set_page(&mut self, phys: u64, attr: PageAttr) -> Result<()> {
-        if self.is_present() {
-            Err(WasabiError::Failed("Page is already populated"))
-        } else if phys & ATTR_MASK != 0 {
+        if phys & ATTR_MASK != 0 {
             Err(WasabiError::Failed("phys is not aligned"))
         } else {
             self.value = phys | attr as u64;

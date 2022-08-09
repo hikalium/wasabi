@@ -15,6 +15,7 @@ pub struct TextArea<T: BitmapImageBuffer> {
     cx: i64,
     cy: i64,
     mode: TextAreaMode,
+    ring_count: usize,
 }
 
 impl<T: BitmapImageBuffer> TextArea<T> {
@@ -28,6 +29,7 @@ impl<T: BitmapImageBuffer> TextArea<T> {
             cx: 0,
             cy: 0,
             mode: TextAreaMode::Scroll,
+            ring_count: 0,
         };
         text_area.clear_screen().unwrap();
         text_area
@@ -40,9 +42,9 @@ impl<T: BitmapImageBuffer> TextArea<T> {
     }
     fn new_line(&mut self) -> GraphicsResult {
         self.cx = 0;
-        self.cy += 1;
         match self.mode {
             TextAreaMode::Scroll => {
+                self.cy += 1;
                 if (self.cy + 1) * 16 <= self.h {
                     return Ok(());
                 }
@@ -66,8 +68,18 @@ impl<T: BitmapImageBuffer> TextArea<T> {
                 )?;
             }
             TextAreaMode::Ring => {
+                draw_line(
+                    &mut self.buf,
+                    0xff << ((self.ring_count % 3) * 8),
+                    self.x,
+                    self.y + self.cy * 16,
+                    self.x,
+                    self.y + (self.cy + 1) * 16 - 1,
+                )?;
+                self.cy += 1;
                 if (self.cy + 1) * 16 > self.h {
                     self.cy = 0;
+                    self.ring_count += 1;
                 }
                 draw_rect(
                     &mut self.buf,
