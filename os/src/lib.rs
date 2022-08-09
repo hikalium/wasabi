@@ -11,6 +11,7 @@
 #![feature(const_option)]
 #![feature(const_result_drop)]
 #![feature(new_uninit)]
+#![feature(saturating_int_impl)]
 
 pub mod acpi;
 pub mod arch;
