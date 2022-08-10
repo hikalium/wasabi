@@ -14,6 +14,7 @@
 #![feature(saturating_int_impl)]
 
 pub mod acpi;
+pub mod allocator;
 pub mod arch;
 pub mod boot_info;
 pub mod debug_exit;
@@ -35,10 +36,6 @@ pub mod text_area;
 pub mod util;
 pub mod vram;
 pub mod xhci;
-
-// #[path = "simple_allocator.rs"]
-#[path = "first_fit_allocator.rs"]
-pub mod allocator;
 
 #[cfg(test)]
 #[no_mangle]
