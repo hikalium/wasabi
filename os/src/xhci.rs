@@ -13,8 +13,73 @@ use crate::println;
 use crate::util::extract_bits;
 use alloc::boxed::Box;
 use core::mem::ManuallyDrop;
+use core::mem::MaybeUninit;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
+
+#[derive(Debug)]
+#[repr(C, align(16))]
+struct GenericTrbEntry {
+    data: u64,
+    option: u32,
+    control: u32,
+}
+const _: () = assert!(core::mem::size_of::<GenericTrbEntry>() == 16);
+
+#[derive(Debug)]
+#[repr(C, align(4096))]
+struct TrbRing {
+    trb: [GenericTrbEntry; 256],
+}
+const _: () = assert!(core::mem::size_of::<TrbRing>() == 4096);
+impl TrbRing {
+    fn alloc() -> Box<Self> {
+        Box::new(unsafe { MaybeUninit::zeroed().assume_init() })
+    }
+}
+
+#[derive(Debug)]
+struct EventRingSegmentTableEntry {
+    ring_segment_base_address: u64,
+    ring_segment_size: u16,
+    rsvdz: [u16; 3],
+}
+const _: () = assert!(core::mem::size_of::<EventRingSegmentTableEntry>() == 16);
+impl EventRingSegmentTableEntry {
+    fn alloc() -> Box<Self> {
+        Box::new(unsafe { MaybeUninit::zeroed().assume_init() })
+    }
+}
+
+#[derive(Debug)]
+struct EventRing {
+    ring: Box<TrbRing>,
+    erst: Box<EventRingSegmentTableEntry>,
+    cycle_state: u32,
+    index: usize,
+}
+impl EventRing {
+    fn new() -> Self {
+        Self {
+            ring: TrbRing::alloc(),
+            erst: EventRingSegmentTableEntry::alloc(),
+            cycle_state: 0,
+            index: 0,
+        }
+    }
+    fn ring_phys_addr(&self) -> usize {
+        self.ring.as_ref() as *const TrbRing as usize
+    }
+    fn erst_phys_addr(&self) -> usize {
+        self.erst.as_ref() as *const EventRingSegmentTableEntry as usize
+    }
+}
+
+#[repr(u32)]
+#[non_exhaustive]
+enum TrbType {
+    NoOp = 8,
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
@@ -23,13 +88,29 @@ struct CapabilityRegisters {
     length: u8,
     reserved: u8,
     version: u16,
-    params: [u32; 3],
-    cap_params1: u32,
+    sparams1: u32,
+    sparams2: u32,
+    sparams3: u32,
+    cparams1: u32,
     dboff: u32,
     rtsoff: u32,
-    cap_params2: u32,
+    cparams2: u32,
 }
 const _: () = assert!(core::mem::size_of::<CapabilityRegisters>() == 0x20);
+impl CapabilityRegisters {
+    fn num_of_device_slots(&self) -> usize {
+        extract_bits(self.sparams1, 0, 8) as usize
+    }
+    fn num_of_interrupters(&self) -> usize {
+        extract_bits(self.sparams1, 8, 11) as usize
+    }
+    fn num_of_ports(&self) -> usize {
+        extract_bits(self.sparams1, 24, 8) as usize
+    }
+    fn num_scratch_pad_bufs(&self) -> usize {
+        (extract_bits(self.sparams2, 21, 5) << 5 | extract_bits(self.sparams2, 27, 5)) as usize
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
@@ -45,6 +126,7 @@ struct OperationalRegisters {
     device_ctx_base_addr_array_ptr: u64,
     config: u64,
 }
+const _: () = assert!(core::mem::size_of::<OperationalRegisters>() == 0x40);
 impl OperationalRegisters {
     fn clear_command_bits(&mut self, bits: u32) {
         unsafe {
@@ -63,7 +145,6 @@ impl OperationalRegisters {
         unsafe { read_volatile(&self.status) }
     }
 }
-const _: () = assert!(core::mem::size_of::<OperationalRegisters>() == 0x40);
 
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
@@ -124,11 +205,10 @@ impl PciDeviceDriver for XhciDriver {
 pub struct XhciDriverInstance {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
-    max_slots: usize,
-    max_ports: usize,
-    max_num_scratch_pad_bufs: usize,
     cap_regs: ManuallyDrop<Box<CapabilityRegisters>>,
     op_regs: ManuallyDrop<Box<OperationalRegisters>>,
+    rt_regs: ManuallyDrop<Box<RuntimeRegisters>>,
+    primary_event_ring: EventRing,
 }
 impl XhciDriverInstance {
     // https://wiki.osdev.org/RTL8139
@@ -146,7 +226,6 @@ impl XhciDriverInstance {
                     .expect("Failed to create mapping")
             })
         }
-        println!("page_table updated!");
 
         let cap_regs =
             unsafe { ManuallyDrop::new(Box::from_raw(bar0.addr() as *mut CapabilityRegisters)) };
@@ -155,26 +234,22 @@ impl XhciDriverInstance {
                 bar0.addr().add(cap_regs.length as usize) as *mut OperationalRegisters
             ))
         };
-        let hcs_params1 = unsafe { read_volatile(&cap_regs.params[0] as *const u32) };
-        let max_slots = extract_bits(hcs_params1, 24, 8) as usize;
-        let max_ports = extract_bits(hcs_params1, 0, 8) as usize;
-
-        let hcs_params2 = unsafe { read_volatile(&cap_regs.params[0] as *const u32) };
-        let max_num_scratch_pad_bufs =
-            (extract_bits(hcs_params2, 21, 5) << 5 | extract_bits(hcs_params2, 27, 5)) as usize;
-
+        let rt_regs = unsafe {
+            ManuallyDrop::new(Box::from_raw(
+                bar0.addr().add(cap_regs.rtsoff as usize) as *mut RuntimeRegisters
+            ))
+        };
         let mut xhc = XhciDriverInstance {
             bdf,
-            max_slots,
-            max_ports,
-            max_num_scratch_pad_bufs,
             cap_regs,
             op_regs,
+            rt_regs,
+            primary_event_ring: EventRing::new(),
         };
-        println!("{:?}", xhc);
         xhc.reset();
-
-        unimplemented!()
+        xhc.init_primary_interrupter()?;
+        xhc.init_slots_and_contexts()?;
+        Ok(xhc)
     }
     fn reset(&mut self) {
         const CMD_RUN_STOP: u32 = 0b0001;
@@ -190,6 +265,19 @@ impl XhciDriverInstance {
             busy_loop_hint();
         }
         println!("[xHC] Reset done!");
+    }
+    fn init_primary_interrupter(&mut self) -> Result<()> {
+        let eq = &self.primary_event_ring;
+        let dst = &mut self.rt_regs.irs[0];
+        dst.erst_size = 1;
+        dst.erdp = eq.ring_phys_addr().try_into()?;
+        dst.erst_base = eq.erst_phys_addr().try_into()?;
+        Ok(())
+    }
+    fn init_slots_and_contexts(&mut self) -> Result<()> {
+        let num_slots = self.cap_regs.num_of_device_slots();
+        println!("num_slots = {}", num_slots);
+        Ok(())
     }
 }
 impl PciDeviceDriverInstance for XhciDriverInstance {

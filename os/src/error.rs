@@ -1,5 +1,6 @@
 use crate::efi::*;
 use crate::graphics::*;
+use core::num::TryFromIntError;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum WasabiError {
@@ -14,14 +15,13 @@ pub enum WasabiError {
     PageNotFound,
     PciBarInvalid,
     PciEcmOutOfRange,
+    TryFromIntError,
 }
-
 impl From<GraphicsError> for WasabiError {
     fn from(e: GraphicsError) -> Self {
         WasabiError::GraphicsError(e)
     }
 }
-
 impl From<EfiStatus> for WasabiError {
     fn from(e: EfiStatus) -> Self {
         WasabiError::EfiError(e)
@@ -30,6 +30,11 @@ impl From<EfiStatus> for WasabiError {
 impl From<&'static str> for WasabiError {
     fn from(s: &'static str) -> Self {
         WasabiError::Failed(s)
+    }
+}
+impl From<TryFromIntError> for WasabiError {
+    fn from(s: TryFromIntError) -> Self {
+        WasabiError::TryFromIntError
     }
 }
 pub type Result<T> = core::result::Result<T, WasabiError>;
