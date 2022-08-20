@@ -44,6 +44,9 @@ impl GenericTrbEntry {
     fn set_control(&mut self, trb_type: TrbType, trb_control: TrbControl) {
         self.control = (trb_type as u32) << 10 | trb_control as u32;
     }
+    fn cycle_bit(&self) -> u32 {
+        self.control & (TrbControl::CycleBit as u32)
+    }
 }
 
 #[derive(Debug)]
@@ -75,15 +78,15 @@ struct EventRing {
     ring: Box<TrbRing>,
     erst: Box<EventRingSegmentTableEntry>,
     cycle_state: u32,
-    index: usize,
+    next_dequeue_index: usize,
 }
 impl EventRing {
     fn new() -> Self {
         Self {
             ring: TrbRing::new(),
             erst: EventRingSegmentTableEntry::alloc(),
-            cycle_state: 0,
-            index: 0,
+            cycle_state: 1,
+            next_dequeue_index: 0,
         }
     }
     fn erst_phys_addr(&self) -> usize {
@@ -91,6 +94,9 @@ impl EventRing {
     }
     fn ring(&self) -> &TrbRing {
         &self.ring
+    }
+    fn has_next_event(&self) -> bool {
+        self.ring().trb[self.next_dequeue_index].cycle_bit() == self.cycle_state
     }
 }
 #[derive(Debug)]
@@ -356,6 +362,12 @@ impl XhciDriverInstance {
         xhc.init_slots_and_contexts()?;
         xhc.init_command_ring()?;
         xhc.op_regs.start_xhc();
+
+        print!("Waiting for an event...");
+        while !xhc.primary_event_ring.has_next_event() {
+            busy_loop_hint();
+        }
+
         Ok(xhc)
     }
     fn init_primary_interrupter(&mut self) -> Result<()> {
