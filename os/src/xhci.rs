@@ -17,6 +17,20 @@ use core::mem::MaybeUninit;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 
+#[repr(u32)]
+#[non_exhaustive]
+enum TrbType {
+    Link = 6,
+    NoOp = 8,
+}
+
+#[repr(u32)]
+#[non_exhaustive]
+enum TrbControl {
+    CycleBit = 1,
+    ToggleCycle = 2,
+}
+
 #[derive(Debug)]
 #[repr(C, align(16))]
 struct GenericTrbEntry {
@@ -25,6 +39,11 @@ struct GenericTrbEntry {
     control: u32,
 }
 const _: () = assert!(core::mem::size_of::<GenericTrbEntry>() == 16);
+impl GenericTrbEntry {
+    fn set_control(&mut self, trb_type: TrbType, trb_control: TrbControl) {
+        self.control = (trb_type as u32) << 10 | trb_control as u32;
+    }
+}
 
 #[derive(Debug)]
 #[repr(C, align(4096))]
@@ -33,8 +52,28 @@ struct TrbRing {
 }
 const _: () = assert!(core::mem::size_of::<TrbRing>() == 4096);
 impl TrbRing {
-    fn alloc() -> Box<Self> {
-        Box::new(unsafe { MaybeUninit::zeroed().assume_init() })
+    fn new() -> Box<Self> {
+        let mut ring: Box<Self> = Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
+        ring.init();
+        ring
+    }
+    fn init(&mut self) {
+        let trb_head_paddr = &self.trb[0] as *const GenericTrbEntry as u64;
+        let link = &mut self.trb[self.trb.len() - 1];
+        link.data = trb_head_paddr;
+        link.option = 0;
+        link.set_control(TrbType::Link, TrbControl::ToggleCycle);
+    }
+}
+
+#[repr(C, align(64))]
+struct DeviceContextBaseAddressArray {
+    context: [u64; 256],
+}
+const _: () = assert!(core::mem::size_of::<DeviceContextBaseAddressArray>() == 2048);
+impl DeviceContextBaseAddressArray {
+    fn new() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 }
 
@@ -61,7 +100,7 @@ struct EventRing {
 impl EventRing {
     fn new() -> Self {
         Self {
-            ring: TrbRing::alloc(),
+            ring: TrbRing::new(),
             erst: EventRingSegmentTableEntry::alloc(),
             cycle_state: 0,
             index: 0,
@@ -73,12 +112,6 @@ impl EventRing {
     fn erst_phys_addr(&self) -> usize {
         self.erst.as_ref() as *const EventRingSegmentTableEntry as usize
     }
-}
-
-#[repr(u32)]
-#[non_exhaustive]
-enum TrbType {
-    NoOp = 8,
 }
 
 #[allow(dead_code)]
@@ -144,6 +177,27 @@ impl OperationalRegisters {
     fn status(&mut self) -> u32 {
         unsafe { read_volatile(&self.status) }
     }
+    fn set_num_device_slots(&mut self, num: usize) -> Result<()> {
+        unsafe {
+            let c = read_volatile(&self.config);
+            let c = c & !0xFF;
+            let c = c | u64::try_from(num)?;
+            write_volatile(&mut self.config, c);
+        }
+        Ok(())
+    }
+    fn set_dcbaa_ptr(&mut self, dcbaa: &DeviceContextBaseAddressArray) -> Result<()> {
+        unsafe {
+            write_volatile(
+                &mut self.device_ctx_base_addr_array_ptr,
+                u64::try_from(
+                    dcbaa as &DeviceContextBaseAddressArray as *const DeviceContextBaseAddressArray
+                        as usize,
+                )?,
+            );
+        }
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
@@ -201,7 +255,6 @@ impl PciDeviceDriver for XhciDriver {
     }
 }
 #[allow(unused)]
-#[derive(Debug)]
 pub struct XhciDriverInstance {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
@@ -209,6 +262,7 @@ pub struct XhciDriverInstance {
     op_regs: ManuallyDrop<Box<OperationalRegisters>>,
     rt_regs: ManuallyDrop<Box<RuntimeRegisters>>,
     primary_event_ring: EventRing,
+    device_contexts: DeviceContextBaseAddressArray,
 }
 impl XhciDriverInstance {
     // https://wiki.osdev.org/RTL8139
@@ -245,6 +299,7 @@ impl XhciDriverInstance {
             op_regs,
             rt_regs,
             primary_event_ring: EventRing::new(),
+            device_contexts: DeviceContextBaseAddressArray::new(),
         };
         xhc.reset();
         xhc.init_primary_interrupter()?;
@@ -277,6 +332,8 @@ impl XhciDriverInstance {
     fn init_slots_and_contexts(&mut self) -> Result<()> {
         let num_slots = self.cap_regs.num_of_device_slots();
         println!("num_slots = {}", num_slots);
+        self.op_regs.set_num_device_slots(num_slots);
+        self.op_regs.set_dcbaa_ptr(&self.device_contexts);
         Ok(())
     }
 }

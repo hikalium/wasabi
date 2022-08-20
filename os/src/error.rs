@@ -33,7 +33,7 @@ impl From<&'static str> for WasabiError {
     }
 }
 impl From<TryFromIntError> for WasabiError {
-    fn from(s: TryFromIntError) -> Self {
+    fn from(_: TryFromIntError) -> Self {
         WasabiError::TryFromIntError
     }
 }
