@@ -9,6 +9,7 @@ use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
+use crate::print;
 use crate::println;
 use crate::util::extract_bits;
 use alloc::boxed::Box;
@@ -182,6 +183,9 @@ struct OperationalRegisters {
 }
 const _: () = assert!(core::mem::size_of::<OperationalRegisters>() == 0x40);
 impl OperationalRegisters {
+    const CMD_RUN_STOP: u32 = 0b0001;
+    const CMD_HC_RESET: u32 = 0b0010;
+    const STATUS_HC_HALTED: u32 = 0b0001;
     fn clear_command_bits(&mut self, bits: u32) {
         unsafe {
             write_volatile(&mut self.command, self.command() & !bits);
@@ -218,6 +222,29 @@ impl OperationalRegisters {
             );
         }
         Ok(())
+    }
+    fn reset_xhc(&mut self) {
+        print!("[xHC] Resetting the controller...");
+        self.clear_command_bits(Self::CMD_RUN_STOP);
+        while self.status() & Self::STATUS_HC_HALTED == 0 {
+            print!(".");
+            busy_loop_hint();
+        }
+        self.set_command_bits(Self::CMD_HC_RESET);
+        while self.command() & Self::CMD_HC_RESET != 0 {
+            print!(".");
+            busy_loop_hint();
+        }
+        println!("Done!");
+    }
+    fn start_xhc(&mut self) {
+        print!("[xHC] Starting the controller...");
+        self.set_command_bits(Self::CMD_RUN_STOP);
+        while self.status() & Self::STATUS_HC_HALTED != 0 {
+            print!(".");
+            busy_loop_hint();
+        }
+        println!("Done!");
     }
 }
 
@@ -324,26 +351,12 @@ impl XhciDriverInstance {
             primary_event_ring: EventRing::new(),
             device_contexts: DeviceContextBaseAddressArray::new(),
         };
-        xhc.reset();
+        xhc.op_regs.reset_xhc();
         xhc.init_primary_interrupter()?;
         xhc.init_slots_and_contexts()?;
         xhc.init_command_ring()?;
+        xhc.op_regs.start_xhc();
         Ok(xhc)
-    }
-    fn reset(&mut self) {
-        const CMD_RUN_STOP: u32 = 0b0001;
-        const CMD_HC_RESET: u32 = 0b0010;
-        const STATUS_HC_HALTED: u32 = 0b0001;
-        println!("[xHC] Resetting the controller...");
-        self.op_regs.clear_command_bits(CMD_RUN_STOP);
-        while self.op_regs.status() & STATUS_HC_HALTED == 0 {
-            busy_loop_hint();
-        }
-        self.op_regs.set_command_bits(CMD_HC_RESET);
-        while self.op_regs.command() & CMD_HC_RESET != 0 {
-            busy_loop_hint();
-        }
-        println!("[xHC] Reset done!");
     }
     fn init_primary_interrupter(&mut self) -> Result<()> {
         let eq = &self.primary_event_ring;
