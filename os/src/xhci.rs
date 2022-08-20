@@ -58,11 +58,56 @@ impl TrbRing {
         ring
     }
     fn init(&mut self) {
-        let trb_head_paddr = &self.trb[0] as *const GenericTrbEntry as u64;
+        let trb_head_paddr = self.phys_addr() as u64;
         let link = &mut self.trb[self.trb.len() - 1];
         link.data = trb_head_paddr;
         link.option = 0;
         link.set_control(TrbType::Link, TrbControl::ToggleCycle);
+    }
+    fn phys_addr(&self) -> u64 {
+        &self.trb[0] as *const GenericTrbEntry as u64
+    }
+}
+
+#[derive(Debug)]
+struct EventRing {
+    ring: Box<TrbRing>,
+    erst: Box<EventRingSegmentTableEntry>,
+    cycle_state: u32,
+    index: usize,
+}
+impl EventRing {
+    fn new() -> Self {
+        Self {
+            ring: TrbRing::new(),
+            erst: EventRingSegmentTableEntry::alloc(),
+            cycle_state: 0,
+            index: 0,
+        }
+    }
+    fn erst_phys_addr(&self) -> usize {
+        self.erst.as_ref() as *const EventRingSegmentTableEntry as usize
+    }
+    fn ring(&self) -> &TrbRing {
+        &self.ring
+    }
+}
+#[derive(Debug)]
+struct CommandRing {
+    ring: Box<TrbRing>,
+    cycle_state: u32,
+    index: usize,
+}
+impl CommandRing {
+    fn new() -> Self {
+        Self {
+            ring: TrbRing::new(),
+            cycle_state: 0,
+            index: 0,
+        }
+    }
+    fn ring(&self) -> &TrbRing {
+        &self.ring
     }
 }
 
@@ -87,30 +132,6 @@ const _: () = assert!(core::mem::size_of::<EventRingSegmentTableEntry>() == 16);
 impl EventRingSegmentTableEntry {
     fn alloc() -> Box<Self> {
         Box::new(unsafe { MaybeUninit::zeroed().assume_init() })
-    }
-}
-
-#[derive(Debug)]
-struct EventRing {
-    ring: Box<TrbRing>,
-    erst: Box<EventRingSegmentTableEntry>,
-    cycle_state: u32,
-    index: usize,
-}
-impl EventRing {
-    fn new() -> Self {
-        Self {
-            ring: TrbRing::new(),
-            erst: EventRingSegmentTableEntry::alloc(),
-            cycle_state: 0,
-            index: 0,
-        }
-    }
-    fn ring_phys_addr(&self) -> usize {
-        self.ring.as_ref() as *const TrbRing as usize
-    }
-    fn erst_phys_addr(&self) -> usize {
-        self.erst.as_ref() as *const EventRingSegmentTableEntry as usize
     }
 }
 
@@ -261,6 +282,7 @@ pub struct XhciDriverInstance {
     cap_regs: ManuallyDrop<Box<CapabilityRegisters>>,
     op_regs: ManuallyDrop<Box<OperationalRegisters>>,
     rt_regs: ManuallyDrop<Box<RuntimeRegisters>>,
+    command_ring: CommandRing,
     primary_event_ring: EventRing,
     device_contexts: DeviceContextBaseAddressArray,
 }
@@ -298,12 +320,14 @@ impl XhciDriverInstance {
             cap_regs,
             op_regs,
             rt_regs,
+            command_ring: CommandRing::new(),
             primary_event_ring: EventRing::new(),
             device_contexts: DeviceContextBaseAddressArray::new(),
         };
         xhc.reset();
         xhc.init_primary_interrupter()?;
         xhc.init_slots_and_contexts()?;
+        xhc.init_command_ring()?;
         Ok(xhc)
     }
     fn reset(&mut self) {
@@ -325,8 +349,8 @@ impl XhciDriverInstance {
         let eq = &self.primary_event_ring;
         let dst = &mut self.rt_regs.irs[0];
         dst.erst_size = 1;
-        dst.erdp = eq.ring_phys_addr().try_into()?;
-        dst.erst_base = eq.erst_phys_addr().try_into()?;
+        dst.erdp = eq.ring().phys_addr() as u64;
+        dst.erst_base = eq.ring().phys_addr() as u64;
         Ok(())
     }
     fn init_slots_and_contexts(&mut self) -> Result<()> {
@@ -334,6 +358,10 @@ impl XhciDriverInstance {
         println!("num_slots = {}", num_slots);
         self.op_regs.set_num_device_slots(num_slots);
         self.op_regs.set_dcbaa_ptr(&self.device_contexts);
+        Ok(())
+    }
+    fn init_command_ring(&mut self) -> Result<()> {
+        self.op_regs.cmd_ring_ctrl = self.command_ring.ring().phys_addr() | 1 /* Ring Cycle State */;
         Ok(())
     }
 }
