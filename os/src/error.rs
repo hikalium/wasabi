@@ -1,11 +1,15 @@
+extern crate alloc;
+
 use crate::efi::*;
 use crate::graphics::*;
+use alloc::string::String;
 use core::num::TryFromIntError;
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum WasabiError {
     EfiError(EfiStatus),
     Failed(&'static str),
+    FailedString(String),
     FileNameTooLong,
     GraphicsError(GraphicsError),
     PciBusDeviceFunctionOutOfRange,
@@ -30,6 +34,11 @@ impl From<EfiStatus> for WasabiError {
 impl From<&'static str> for WasabiError {
     fn from(s: &'static str) -> Self {
         WasabiError::Failed(s)
+    }
+}
+impl From<String> for WasabiError {
+    fn from(s: String) -> Self {
+        WasabiError::FailedString(s)
     }
 }
 impl From<TryFromIntError> for WasabiError {

@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::busy_loop_hint;
 use crate::arch::x86_64::paging::with_current_page_table;
 use crate::arch::x86_64::paging::PageAttr;
@@ -13,11 +14,16 @@ use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
 use crate::util::extract_bits;
+use alloc::alloc::Layout;
 use alloc::boxed::Box;
+use alloc::fmt::Debug;
+use alloc::format;
+use alloc::string::String;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
+use core::slice;
 
 #[repr(u32)]
 #[non_exhaustive]
@@ -61,6 +67,9 @@ impl GenericTrbEntry {
         trb.set_control(TrbType::NoOpCommand, TrbControl::None);
         trb
     }
+}
+fn error_stringify<T: Debug>(x: T) -> String {
+    format!("[xHC] Error: {x:?}")
 }
 
 #[derive(Debug)]
@@ -113,9 +122,6 @@ impl EventRing {
     fn ring(&self) -> &TrbRing {
         &self.ring
     }
-    fn ring_mut(&mut self) -> &mut TrbRing {
-        &mut self.ring
-    }
     fn has_next_event(&self) -> bool {
         self.ring().trb[self.next_dequeue_index].cycle_state() == self.cycle_state_ours
     }
@@ -160,7 +166,7 @@ impl CommandRing {
             }
         }
         trb[index_to_send].flip_cycle_state();
-        if let Some(link_trb_index) = link_trb_index {
+        if link_trb_index.is_some() {
             self.cycle_state_ours ^= 1;
         }
         Ok(())
@@ -177,13 +183,31 @@ impl CommandRing {
 }
 
 #[repr(C, align(64))]
-struct DeviceContextBaseAddressArray {
+struct RawDeviceContextBaseAddressArray {
     context: [u64; 256],
 }
-const _: () = assert!(core::mem::size_of::<DeviceContextBaseAddressArray>() == 2048);
-impl DeviceContextBaseAddressArray {
+const _: () = assert!(core::mem::size_of::<RawDeviceContextBaseAddressArray>() == 2048);
+impl RawDeviceContextBaseAddressArray {
     fn new() -> Self {
         unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+}
+
+struct DeviceContextBaseAddressArray {
+    inner: RawDeviceContextBaseAddressArray,
+    _scratchpad_buffers: Box<[*mut u8]>,
+}
+impl DeviceContextBaseAddressArray {
+    fn new(scratchpad_buffers: Box<[*mut u8]>) -> Self {
+        let mut inner = RawDeviceContextBaseAddressArray::new();
+        inner.context[0] = scratchpad_buffers.as_ptr() as u64;
+        Self {
+            inner,
+            _scratchpad_buffers: scratchpad_buffers,
+        }
+    }
+    fn inner_mut_ptr(&mut self) -> *mut RawDeviceContextBaseAddressArray {
+        &mut self.inner as *mut RawDeviceContextBaseAddressArray
     }
 }
 
@@ -244,7 +268,7 @@ struct OperationalRegisters {
     notification_ctrl: u32,
     cmd_ring_ctrl: u64,
     rsvdz2: [u64; 2],
-    device_ctx_base_addr_array_ptr: u64,
+    device_ctx_base_addr_array_ptr: *mut RawDeviceContextBaseAddressArray,
     config: u64,
 }
 const _: () = assert!(core::mem::size_of::<OperationalRegisters>() == 0x40);
@@ -268,6 +292,15 @@ impl OperationalRegisters {
     fn status(&mut self) -> u32 {
         unsafe { read_volatile(&self.status) }
     }
+    fn page_size(&self) -> Result<usize> {
+        let page_size_bits = unsafe { read_volatile(&self.page_size) } & 0xFFFF;
+        // bit[n] of page_size_bits is set => PAGE_SIZE will be 2^(n+12).
+        if page_size_bits.count_ones() != 1 {
+            return Err(WasabiError::Failed("PAGE_SIZE has multiple bits set"));
+        }
+        let page_size_shift = page_size_bits.trailing_zeros();
+        Ok(1 << (page_size_shift + 12))
+    }
     fn set_num_device_slots(&mut self, num: usize) -> Result<()> {
         unsafe {
             let c = read_volatile(&self.config);
@@ -277,14 +310,11 @@ impl OperationalRegisters {
         }
         Ok(())
     }
-    fn set_dcbaa_ptr(&mut self, dcbaa: &DeviceContextBaseAddressArray) -> Result<()> {
+    fn set_dcbaa_ptr(&mut self, dcbaa: &mut DeviceContextBaseAddressArray) -> Result<()> {
         unsafe {
             write_volatile(
                 &mut self.device_ctx_base_addr_array_ptr,
-                u64::try_from(
-                    dcbaa as &DeviceContextBaseAddressArray as *const DeviceContextBaseAddressArray
-                        as usize,
-                )?,
+                dcbaa.inner_mut_ptr(),
             );
         }
         Ok(())
@@ -413,6 +443,9 @@ impl XhciDriverInstance {
                 bar0.addr().add(cap_regs.dboff as usize) as *mut [u32; 256]
             ))
         };
+        let scratchpad_buffers =
+            Self::alloc_scratch_pad_buffers(op_regs.page_size()?, cap_regs.num_scratch_pad_bufs())?;
+        let device_contexts = DeviceContextBaseAddressArray::new(scratchpad_buffers);
         let mut xhc = XhciDriverInstance {
             bdf,
             cap_regs,
@@ -421,7 +454,7 @@ impl XhciDriverInstance {
             doorbell_regs,
             command_ring: CommandRing::new(),
             primary_event_ring: EventRing::new()?,
-            device_contexts: DeviceContextBaseAddressArray::new(),
+            device_contexts,
         };
         xhc.op_regs.reset_xhc();
         xhc.init_primary_event_ring()?;
@@ -446,12 +479,41 @@ impl XhciDriverInstance {
         let num_slots = self.cap_regs.num_of_device_slots();
         println!("num_slots = {}", num_slots);
         self.op_regs.set_num_device_slots(num_slots)?;
-        self.op_regs.set_dcbaa_ptr(&self.device_contexts)?;
+        self.op_regs.set_dcbaa_ptr(&mut self.device_contexts)?;
         Ok(())
     }
     fn init_command_ring(&mut self) -> Result<()> {
         self.op_regs.cmd_ring_ctrl = self.command_ring.ring().phys_addr() | 1 /* Ring Cycle State */;
         Ok(())
+    }
+    fn alloc_scratch_pad_buffers(
+        page_size: usize,
+        num_scratch_pad_bufs: usize,
+    ) -> Result<Box<[*mut u8]>> {
+        // 4.20 Scratchpad Buffers
+        // This should be done before xHC starts.
+        // device_contexts.context[0] points Scratchpad Buffer Arrary.
+        // The array contains pointers to a memory region which is sized PAGESIZE and aligned on
+        // PAGESIZE. (PAGESIZE can be retrieved from op_regs.PAGESIZE)
+        println!("PAGE_SIZE = {}", page_size);
+        println!("num_scratch_pad_bufs = {}", num_scratch_pad_bufs);
+        let scratchpad_buffers = ALLOCATOR.alloc_with_options(
+            Layout::from_size_align(
+                core::mem::size_of::<usize>() * num_scratch_pad_bufs,
+                page_size,
+            )
+            .map_err(error_stringify)?,
+        );
+        let scratchpad_buffers = unsafe {
+            slice::from_raw_parts(scratchpad_buffers as *mut *mut u8, num_scratch_pad_bufs)
+        };
+        let mut scratchpad_buffers = Box::<[*mut u8]>::from(scratchpad_buffers);
+        for sb in scratchpad_buffers.iter_mut() {
+            *sb = ALLOCATOR.alloc_with_options(
+                Layout::from_size_align(page_size, page_size).map_err(error_stringify)?,
+            );
+        }
+        Ok(scratchpad_buffers)
     }
     fn notify_xhc(&mut self) {
         unsafe {
