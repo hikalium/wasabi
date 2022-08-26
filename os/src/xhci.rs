@@ -6,6 +6,7 @@ use crate::arch::x86_64::paging::with_current_page_table;
 use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Result;
 use crate::error::WasabiError;
+use crate::pci::BarMem64;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
@@ -229,7 +230,7 @@ impl EventRingSegmentTableEntry {
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
-struct CapabilityRegisters {
+pub struct CapabilityRegisters {
     length: u8,
     reserved: u8,
     version: u16,
@@ -243,16 +244,16 @@ struct CapabilityRegisters {
 }
 const _: () = assert!(core::mem::size_of::<CapabilityRegisters>() == 0x20);
 impl CapabilityRegisters {
-    fn num_of_device_slots(&self) -> usize {
+    pub fn num_of_device_slots(&self) -> usize {
         extract_bits(self.sparams1, 0, 8) as usize
     }
-    fn num_of_interrupters(&self) -> usize {
+    pub fn num_of_interrupters(&self) -> usize {
         extract_bits(self.sparams1, 8, 11) as usize
     }
-    fn num_of_ports(&self) -> usize {
+    pub fn num_of_ports(&self) -> usize {
         extract_bits(self.sparams1, 24, 8) as usize
     }
-    fn num_scratch_pad_bufs(&self) -> usize {
+    pub fn num_scratch_pad_bufs(&self) -> usize {
         (extract_bits(self.sparams2, 21, 5) << 5 | extract_bits(self.sparams2, 27, 5)) as usize
     }
 }
@@ -397,6 +398,74 @@ impl PciDeviceDriver for XhciDriver {
         "XhciDriver"
     }
 }
+
+mod regs {
+    use super::*;
+    // PORTSC
+    // OperationalBase + (0x400 + 0x10 * (n - 1))
+    // where n = Port Number (1, 2, ..., MaxPorts)
+    #[repr(C)]
+    pub struct RawPortSc {
+        value: u32,
+        reserved: [u32; 3],
+    }
+    impl RawPortSc {
+        pub fn value(&self) -> u32 {
+            unsafe { read_volatile(&self.value) }
+        }
+    }
+    const _: () = assert!(core::mem::size_of::<RawPortSc>() == 0x10);
+    // Iterator over PortSc
+    pub struct PortScIteratorItem<'a> {
+        pub port: usize,
+        pub portsc: &'a RawPortSc,
+    }
+    pub struct PortScIterator<'a> {
+        list: &'a PortSc,
+        next_index: usize,
+    }
+    impl<'a> Iterator for PortScIterator<'a> {
+        type Item = PortScIteratorItem<'a>;
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.next_index >= self.list.inner.len() {
+                None
+            } else {
+                let item = Self::Item {
+                    port: self.next_index + 1,
+                    portsc: &self.list.inner[self.next_index],
+                };
+                self.next_index += 1;
+                Some(item)
+            }
+        }
+    }
+    // Interface to access PORTSC registers
+    pub struct PortSc {
+        inner: &'static mut [RawPortSc],
+    }
+    impl PortSc {
+        pub fn new(bar: &BarMem64, cap_regs: &CapabilityRegisters) -> Self {
+            let inner: &'static mut [RawPortSc] = unsafe {
+                let base_addr =
+                    bar.addr().add(cap_regs.length as usize).add(0x400) as *mut RawPortSc;
+                println!(
+                    "PORTSC @ {:p}, max_port_num = {}",
+                    base_addr,
+                    cap_regs.num_of_ports()
+                );
+                slice::from_raw_parts_mut::<'static>(base_addr, cap_regs.num_of_ports())
+            };
+            Self { inner }
+        }
+        pub fn iter(&self) -> PortScIterator {
+            PortScIterator {
+                list: self,
+                next_index: 0,
+            }
+        }
+    }
+}
+
 #[allow(unused)]
 pub struct XhciDriverInstance {
     #[allow(dead_code)]
@@ -404,6 +473,7 @@ pub struct XhciDriverInstance {
     cap_regs: ManuallyDrop<Box<CapabilityRegisters>>,
     op_regs: ManuallyDrop<Box<OperationalRegisters>>,
     rt_regs: ManuallyDrop<Box<RuntimeRegisters>>,
+    portsc: regs::PortSc,
     doorbell_regs: ManuallyDrop<Box<[u32; 256]>>,
     command_ring: CommandRing,
     primary_event_ring: EventRing,
@@ -443,6 +513,7 @@ impl XhciDriverInstance {
                 bar0.addr().add(cap_regs.dboff as usize) as *mut [u32; 256]
             ))
         };
+        let portsc = regs::PortSc::new(&bar0, &cap_regs);
         let scratchpad_buffers =
             Self::alloc_scratch_pad_buffers(op_regs.page_size()?, cap_regs.num_scratch_pad_bufs())?;
         let device_contexts = DeviceContextBaseAddressArray::new(scratchpad_buffers);
@@ -451,6 +522,7 @@ impl XhciDriverInstance {
             cap_regs,
             op_regs,
             rt_regs,
+            portsc,
             doorbell_regs,
             command_ring: CommandRing::new(),
             primary_event_ring: EventRing::new()?,
@@ -463,6 +535,7 @@ impl XhciDriverInstance {
         xhc.op_regs.start_xhc();
 
         xhc.ensure_ring_is_working()?;
+        xhc.poll_ports()?;
 
         Ok(xhc)
     }
@@ -528,6 +601,12 @@ impl XhciDriverInstance {
             busy_loop_hint();
         }
         println!("Done!");
+        Ok(())
+    }
+    fn poll_ports(&mut self) -> Result<()> {
+        for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
+            println!("portsc[port = {}] = {:#10X}", port, portsc.value());
+        }
         Ok(())
     }
 }
