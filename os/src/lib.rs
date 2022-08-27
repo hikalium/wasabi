@@ -34,6 +34,7 @@ pub mod serial;
 pub mod test_runner;
 pub mod text_area;
 pub mod util;
+pub mod volatile;
 pub mod vram;
 pub mod xhci;
 

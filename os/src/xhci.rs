@@ -15,6 +15,7 @@ use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
 use crate::util::extract_bits;
+use crate::volatile::Volatile;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::fmt;
@@ -230,40 +231,34 @@ impl EventRingSegmentTableEntry {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct CapabilityRegisters {
-    length: u8,
-    reserved: u8,
-    version: u16,
-    hcsparams1: u32,
-    hcsparams2: u32,
-    hcsparams3: u32,
-    cparams1: u32,
-    dboff: u32,
-    rtsoff: u32,
-    cparams2: u32,
+    length: Volatile<u8>,
+    reserved: Volatile<u8>,
+    version: Volatile<u16>,
+    hcsparams1: Volatile<u32>,
+    hcsparams2: Volatile<u32>,
+    hcsparams3: Volatile<u32>,
+    cparams1: Volatile<u32>,
+    dboff: Volatile<u32>,
+    rtsoff: Volatile<u32>,
+    cparams2: Volatile<u32>,
 }
 const _: () = assert!(core::mem::size_of::<CapabilityRegisters>() == 0x20);
 impl CapabilityRegisters {
-    pub fn hcsparams1(&self) -> u32 {
-        unsafe { read_volatile(&self.hcsparams1) }
-    }
-    pub fn hcsparams2(&self) -> u32 {
-        unsafe { read_volatile(&self.hcsparams2) }
-    }
     pub fn num_of_device_slots(&self) -> usize {
-        extract_bits(self.hcsparams1(), 0, 8) as usize
+        extract_bits(self.hcsparams1.read(), 0, 8) as usize
     }
     pub fn num_of_interrupters(&self) -> usize {
-        extract_bits(self.hcsparams1(), 8, 11) as usize
+        extract_bits(self.hcsparams1.read(), 8, 11) as usize
     }
     pub fn num_of_ports(&self) -> usize {
-        extract_bits(self.hcsparams1(), 24, 8) as usize
+        extract_bits(self.hcsparams1.read(), 24, 8) as usize
     }
     pub fn num_scratch_pad_bufs(&self) -> usize {
-        (extract_bits(self.hcsparams2(), 21, 5) << 5 | extract_bits(self.hcsparams2(), 27, 5))
-            as usize
+        (extract_bits(self.hcsparams2.read(), 21, 5) << 5
+            | extract_bits(self.hcsparams2.read(), 27, 5)) as usize
     }
 }
 
@@ -501,18 +496,10 @@ mod regs {
     impl<'a> Iterator for PortScIterator<'a> {
         type Item = PortScIteratorItem;
         fn next(&mut self) -> Option<Self::Item> {
-            if self.next_index >= self.list.num_ports {
-                None
-            } else {
-                let item = Self::Item {
-                    port: self.next_index + 1,
-                    portsc: PortScWrapper {
-                        ptr: unsafe { self.list.base.add(self.next_index * 4) },
-                    },
-                };
-                self.next_index += 1;
-                Some(item)
-            }
+            let port = self.next_index + 1;
+            let portsc = self.list.get(port).ok()?;
+            self.next_index += 1;
+            Some(PortScIteratorItem { port, portsc })
         }
     }
     // Interface to access PORTSC registers
@@ -522,10 +509,20 @@ mod regs {
     }
     impl PortSc {
         pub fn new(bar: &BarMem64, cap_regs: &CapabilityRegisters) -> Self {
-            let base = unsafe { bar.addr().add(cap_regs.length as usize).add(0x400) } as *mut u32;
+            let base =
+                unsafe { bar.addr().add(cap_regs.length.read() as usize).add(0x400) } as *mut u32;
             let num_ports = cap_regs.num_of_ports();
             println!("PORTSC @ {:p}, max_port_num = {}", base, num_ports);
             Self { base, num_ports }
+        }
+        pub fn get(&self, port: usize) -> Result<PortScWrapper> {
+            if (1..=self.num_ports).contains(&port) {
+                Ok(PortScWrapper {
+                    ptr: unsafe { self.base.add(port * 4) },
+                })
+            } else {
+                Err("xHC: Port Number Out of Range".into())
+            }
         }
         pub fn iter(&self) -> PortScIterator {
             PortScIterator {
@@ -534,6 +531,11 @@ mod regs {
             }
         }
     }
+}
+
+enum PollStatus {
+    WaitingSomething,
+    EnablingPort { port: usize },
 }
 
 #[allow(unused)]
@@ -548,6 +550,7 @@ pub struct XhciDriverInstance {
     command_ring: CommandRing,
     primary_event_ring: EventRing,
     device_contexts: DeviceContextBaseAddressArray,
+    poll_status: PollStatus,
 }
 impl XhciDriverInstance {
     // https://wiki.osdev.org/RTL8139
@@ -570,18 +573,18 @@ impl XhciDriverInstance {
             unsafe { ManuallyDrop::new(Box::from_raw(bar0.addr() as *mut CapabilityRegisters)) };
         let mut op_regs = unsafe {
             ManuallyDrop::new(Box::from_raw(
-                bar0.addr().add(cap_regs.length as usize) as *mut OperationalRegisters
+                bar0.addr().add(cap_regs.length.read() as usize) as *mut OperationalRegisters,
             ))
         };
         op_regs.reset_xhc();
         let rt_regs = unsafe {
             ManuallyDrop::new(Box::from_raw(
-                bar0.addr().add(cap_regs.rtsoff as usize) as *mut RuntimeRegisters
+                bar0.addr().add(cap_regs.rtsoff.read() as usize) as *mut RuntimeRegisters,
             ))
         };
         let doorbell_regs = unsafe {
             ManuallyDrop::new(Box::from_raw(
-                bar0.addr().add(cap_regs.dboff as usize) as *mut [u32; 256]
+                bar0.addr().add(cap_regs.dboff.read() as usize) as *mut [u32; 256],
             ))
         };
         let portsc = regs::PortSc::new(&bar0, &cap_regs);
@@ -598,6 +601,7 @@ impl XhciDriverInstance {
             command_ring: CommandRing::new(),
             primary_event_ring: EventRing::new()?,
             device_contexts,
+            poll_status: PollStatus::WaitingSomething,
         };
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
@@ -605,9 +609,13 @@ impl XhciDriverInstance {
         xhc.op_regs.start_xhc();
 
         xhc.ensure_ring_is_working()?;
-        xhc.poll_ports()?;
-
-        Ok(xhc)
+        loop {
+            if let Err(e) = xhc.poll() {
+                break Err(e);
+            } else {
+                busy_loop_hint();
+            }
+        }
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
         let eq = &self.primary_event_ring;
@@ -673,20 +681,32 @@ impl XhciDriverInstance {
         println!("Done!");
         Ok(())
     }
-    fn poll_ports(&mut self) -> Result<()> {
-        for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
-            let state = portsc.state();
-            println!(
-                "portsc[port = {}] = {:#10X} {:?}",
-                port,
-                portsc.value(),
-                portsc.state()
-            );
-            if let regs::PortScState::Disconnected = state {
-                // Reset port to Enable the port (via Reset state)
-                println!("Resetting port {}...", portsc.value());
-                portsc.reset();
-                println!("Done!")
+    fn poll(&mut self) -> Result<()> {
+        match self.poll_status {
+            PollStatus::WaitingSomething => {
+                for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
+                    let state = portsc.state();
+                    println!(
+                        "portsc[port = {}] = {:#10X} {:?}",
+                        port,
+                        portsc.value(),
+                        portsc.state()
+                    );
+                    if let regs::PortScState::Disabled = state {
+                        // Reset port to Enable the port (via Reset state)
+                        println!("Resetting port {}...", portsc.value());
+                        portsc.reset();
+                        println!("Done!");
+                        self.poll_status = PollStatus::EnablingPort { port };
+                        break;
+                    }
+                }
+            }
+            PollStatus::EnablingPort { port } => {
+                println!("Enabling Port {}...", port);
+                let portsc = self.portsc.get(port)?;
+                println!("{}", portsc);
+                return Err(WasabiError::Failed("unimplemented!"));
             }
         }
         Ok(())
