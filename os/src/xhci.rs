@@ -17,7 +17,9 @@ use crate::println;
 use crate::util::extract_bits;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
+use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::fmt::Display;
 use alloc::format;
 use alloc::string::String;
 use core::mem::ManuallyDrop;
@@ -401,7 +403,7 @@ impl PciDeviceDriver for XhciDriver {
 
 mod regs {
     use super::*;
-    // PORTSC
+    // [xhci] 5.4.8: PORTSC
     // OperationalBase + (0x400 + 0x10 * (n - 1))
     // where n = Port Number (1, 2, ..., MaxPorts)
     #[repr(C)]
@@ -409,12 +411,81 @@ mod regs {
         value: u32,
         reserved: [u32; 3],
     }
+    const _: () = assert!(core::mem::size_of::<RawPortSc>() == 0x10);
+    #[derive(Debug)]
+    pub enum PortScState {
+        // Figure 4-25: USB2 Root Hub Port State Machine
+        PoweredOff,
+        Disconnected,
+        Reset,
+        Disabled,
+        Enabled,
+        Other {
+            pp: bool,
+            ccs: bool,
+            ped: bool,
+            pr: bool,
+        },
+    }
     impl RawPortSc {
+        const MASK_KEEP: u32 = 0b00001110000000011100001111100000;
+        const BIT_CURRENT_CONNECT_STATUS: u32 = 1 << 0;
+        const BIT_PORT_ENABLED_DISABLED: u32 = 1 << 1;
+        const BIT_PORT_RESET: u32 = 1 << 4;
+        const BIT_PORT_POWER: u32 = 1 << 9;
         pub fn value(&self) -> u32 {
             unsafe { read_volatile(&self.value) }
         }
+        pub fn set_bits(&mut self, bits: u32) {
+            let old = self.value();
+            unsafe { write_volatile(&mut self.value, old | bits) }
+        }
+        pub fn reset(&mut self) {
+            self.set_bits(Self::BIT_PORT_POWER);
+            while !self.pp() {
+                busy_loop_hint();
+            }
+            self.set_bits(Self::BIT_PORT_RESET);
+            while self.pr() {
+                busy_loop_hint();
+            }
+        }
+        pub fn ccs(&self) -> bool {
+            // CCS - Current Connect Status - ROS
+            self.value() & Self::BIT_CURRENT_CONNECT_STATUS != 0
+        }
+        pub fn ped(&self) -> bool {
+            // PED - Port Enabled/Disabled - RW1CS
+            self.value() & Self::BIT_PORT_ENABLED_DISABLED != 0
+        }
+        pub fn pr(&self) -> bool {
+            // PR - Port Reset - RW1S
+            self.value() & Self::BIT_PORT_RESET != 0
+        }
+        pub fn pp(&self) -> bool {
+            // PP - Port Power - RWS
+            self.value() & Self::BIT_PORT_POWER != 0
+        }
+        pub fn state(&self) -> PortScState {
+            // 4.19.1.1 USB2 Root Hub Port
+            match (self.pp(), self.ccs(), self.ped(), self.pr()) {
+                (false, false, false, false) => PortScState::PoweredOff,
+                (true, false, false, false) => PortScState::Disconnected,
+                (true, true, false, false) => PortScState::Disabled,
+                (true, true, false, true) => PortScState::Reset,
+                (true, true, true, false) => PortScState::Enabled,
+                tuple => {
+                    let (pp, ccs, ped, pr) = tuple;
+                    PortScState::Other { pp, ccs, ped, pr }
+                }
+            }
+        }
     }
-    const _: () = assert!(core::mem::size_of::<RawPortSc>() == 0x10);
+    impl Display for RawPortSc {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "PORTSC: ")
+        }
+    }
     // Iterator over PortSc
     pub struct PortScIteratorItem<'a> {
         pub port: usize,
@@ -605,7 +676,12 @@ impl XhciDriverInstance {
     }
     fn poll_ports(&mut self) -> Result<()> {
         for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
-            println!("portsc[port = {}] = {:#10X}", port, portsc.value());
+            println!(
+                "portsc[port = {}] = {:#10X} {:?}",
+                port,
+                portsc.value(),
+                portsc.state()
+            );
         }
         Ok(())
     }
