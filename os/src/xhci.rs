@@ -23,6 +23,7 @@ use alloc::fmt::Debug;
 use alloc::fmt::Display;
 use alloc::format;
 use alloc::string::String;
+use core::mem::transmute;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
 use core::ptr::read_volatile;
@@ -407,12 +408,31 @@ mod regs {
     // [xhci] 5.4.8: PORTSC
     // OperationalBase + (0x400 + 0x10 * (n - 1))
     // where n = Port Number (1, 2, ..., MaxPorts)
+    #[repr(u32)]
+    #[non_exhaustive]
+    #[derive(Debug)]
+    #[allow(unused)]
+    pub enum PortLinkState {
+        U0 = 0,
+        U1,
+        U2,
+        U3,
+        Disabled,
+        RxDetect,
+        Inactive,
+        Polling,
+        Recovery,
+        HotReset,
+        ComplianceMode,
+        TestMode,
+        Resume = 15,
+    }
     #[repr(C)]
     pub struct PortScWrapper {
         ptr: *mut u32,
     }
     #[derive(Debug)]
-    pub enum PortScState {
+    pub enum PortState {
         // Figure 4-25: USB2 Root Hub Port State Machine
         PoweredOff,
         Disconnected,
@@ -460,28 +480,38 @@ mod regs {
             // PR - Port Reset - RW1S
             self.value() & Self::BIT_PORT_RESET != 0
         }
+        pub fn pls(&self) -> PortLinkState {
+            // PLS - Port Link Status - RWS
+            unsafe { transmute(extract_bits(self.value(), 5, 4)) }
+        }
         pub fn pp(&self) -> bool {
             // PP - Port Power - RWS
             self.value() & Self::BIT_PORT_POWER != 0
         }
-        pub fn state(&self) -> PortScState {
+        pub fn state(&self) -> PortState {
             // 4.19.1.1 USB2 Root Hub Port
             match (self.pp(), self.ccs(), self.ped(), self.pr()) {
-                (false, false, false, false) => PortScState::PoweredOff,
-                (true, false, false, false) => PortScState::Disconnected,
-                (true, true, false, false) => PortScState::Disabled,
-                (true, true, false, true) => PortScState::Reset,
-                (true, true, true, false) => PortScState::Enabled,
+                (false, false, false, false) => PortState::PoweredOff,
+                (true, false, false, false) => PortState::Disconnected,
+                (true, true, false, false) => PortState::Disabled,
+                (true, true, false, true) => PortState::Reset,
+                (true, true, true, false) => PortState::Enabled,
                 tuple => {
                     let (pp, ccs, ped, pr) = tuple;
-                    PortScState::Other { pp, ccs, ped, pr }
+                    PortState::Other { pp, ccs, ped, pr }
                 }
             }
         }
     }
     impl Display for PortScWrapper {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            write!(f, "PORTSC: {:#010X} {:?}", self.value(), self.state())
+            write!(
+                f,
+                "PORTSC: value={:#010X}, state={:?}, link_state={:?}",
+                self.value(),
+                self.state(),
+                self.pls()
+            )
         }
     }
     // Iterator over PortSc
@@ -532,10 +562,12 @@ mod regs {
         }
     }
 }
+use regs::*;
 
 enum PollStatus {
     WaitingSomething,
     EnablingPort { port: usize },
+    USB3Attached { port: usize },
 }
 
 #[allow(unused)]
@@ -686,13 +718,13 @@ impl XhciDriverInstance {
             PollStatus::WaitingSomething => {
                 for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
                     let state = portsc.state();
-                    println!(
-                        "portsc[port = {}] = {:#10X} {:?}",
-                        port,
-                        portsc.value(),
-                        portsc.state()
-                    );
-                    if let regs::PortScState::Disabled = state {
+                    if let regs::PortState::Disabled = state {
+                        println!(
+                            "portsc[port = {}] = {:#10X} {:?}",
+                            port,
+                            portsc.value(),
+                            portsc.state()
+                        );
                         // Reset port to Enable the port (via Reset state)
                         println!("Resetting port {}...", portsc.value());
                         portsc.reset();
@@ -706,7 +738,15 @@ impl XhciDriverInstance {
                 println!("Enabling Port {}...", port);
                 let portsc = self.portsc.get(port)?;
                 println!("{}", portsc);
-                return Err(WasabiError::Failed("unimplemented!"));
+                if let PortState::Enabled = portsc.state() {
+                    if let PortLinkState::U0 = portsc.pls() {
+                        self.poll_status = PollStatus::USB3Attached { port };
+                    }
+                }
+            }
+            PollStatus::USB3Attached { port } => {
+                println!("USB3 Device attached to port {}", port);
+                self.poll_status = PollStatus::WaitingSomething;
             }
         }
         Ok(())
