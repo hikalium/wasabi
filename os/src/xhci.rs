@@ -236,9 +236,9 @@ pub struct CapabilityRegisters {
     length: u8,
     reserved: u8,
     version: u16,
-    sparams1: u32,
-    sparams2: u32,
-    sparams3: u32,
+    hcsparams1: u32,
+    hcsparams2: u32,
+    hcsparams3: u32,
     cparams1: u32,
     dboff: u32,
     rtsoff: u32,
@@ -246,17 +246,24 @@ pub struct CapabilityRegisters {
 }
 const _: () = assert!(core::mem::size_of::<CapabilityRegisters>() == 0x20);
 impl CapabilityRegisters {
+    pub fn hcsparams1(&self) -> u32 {
+        unsafe { read_volatile(&self.hcsparams1) }
+    }
+    pub fn hcsparams2(&self) -> u32 {
+        unsafe { read_volatile(&self.hcsparams2) }
+    }
     pub fn num_of_device_slots(&self) -> usize {
-        extract_bits(self.sparams1, 0, 8) as usize
+        extract_bits(self.hcsparams1(), 0, 8) as usize
     }
     pub fn num_of_interrupters(&self) -> usize {
-        extract_bits(self.sparams1, 8, 11) as usize
+        extract_bits(self.hcsparams1(), 8, 11) as usize
     }
     pub fn num_of_ports(&self) -> usize {
-        extract_bits(self.sparams1, 24, 8) as usize
+        extract_bits(self.hcsparams1(), 24, 8) as usize
     }
     pub fn num_scratch_pad_bufs(&self) -> usize {
-        (extract_bits(self.sparams2, 21, 5) << 5 | extract_bits(self.sparams2, 27, 5)) as usize
+        (extract_bits(self.hcsparams2(), 21, 5) << 5 | extract_bits(self.hcsparams2(), 27, 5))
+            as usize
     }
 }
 
@@ -367,7 +374,6 @@ struct RuntimeRegisters {
     irs: [InterrupterRegisterSet; 1024],
 }
 const _: () = assert!(core::mem::size_of::<RuntimeRegisters>() == 0x8020);
-//  static_assert(offsetof(RuntimeRegisters, irs) == 0x20);
 
 pub struct XhciDriver {}
 impl XhciDriver {
@@ -407,11 +413,9 @@ mod regs {
     // OperationalBase + (0x400 + 0x10 * (n - 1))
     // where n = Port Number (1, 2, ..., MaxPorts)
     #[repr(C)]
-    pub struct RawPortSc {
-        value: u32,
-        reserved: [u32; 3],
+    pub struct PortScWrapper {
+        ptr: *mut u32,
     }
-    const _: () = assert!(core::mem::size_of::<RawPortSc>() == 0x10);
     #[derive(Debug)]
     pub enum PortScState {
         // Figure 4-25: USB2 Root Hub Port State Machine
@@ -427,20 +431,19 @@ mod regs {
             pr: bool,
         },
     }
-    impl RawPortSc {
-        const MASK_KEEP: u32 = 0b00001110000000011100001111100000;
+    impl PortScWrapper {
         const BIT_CURRENT_CONNECT_STATUS: u32 = 1 << 0;
         const BIT_PORT_ENABLED_DISABLED: u32 = 1 << 1;
         const BIT_PORT_RESET: u32 = 1 << 4;
         const BIT_PORT_POWER: u32 = 1 << 9;
         pub fn value(&self) -> u32 {
-            unsafe { read_volatile(&self.value) }
+            unsafe { read_volatile(self.ptr) }
         }
-        pub fn set_bits(&mut self, bits: u32) {
+        pub fn set_bits(&self, bits: u32) {
             let old = self.value();
-            unsafe { write_volatile(&mut self.value, old | bits) }
+            unsafe { write_volatile(self.ptr, old | bits) }
         }
-        pub fn reset(&mut self) {
+        pub fn reset(&self) {
             self.set_bits(Self::BIT_PORT_POWER);
             while !self.pp() {
                 busy_loop_hint();
@@ -481,29 +484,31 @@ mod regs {
             }
         }
     }
-    impl Display for RawPortSc {
+    impl Display for PortScWrapper {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(f, "PORTSC: ")
         }
     }
     // Iterator over PortSc
-    pub struct PortScIteratorItem<'a> {
+    pub struct PortScIteratorItem {
         pub port: usize,
-        pub portsc: &'a RawPortSc,
+        pub portsc: PortScWrapper,
     }
     pub struct PortScIterator<'a> {
         list: &'a PortSc,
         next_index: usize,
     }
     impl<'a> Iterator for PortScIterator<'a> {
-        type Item = PortScIteratorItem<'a>;
+        type Item = PortScIteratorItem;
         fn next(&mut self) -> Option<Self::Item> {
-            if self.next_index >= self.list.inner.len() {
+            if self.next_index >= self.list.num_ports {
                 None
             } else {
                 let item = Self::Item {
                     port: self.next_index + 1,
-                    portsc: &self.list.inner[self.next_index],
+                    portsc: PortScWrapper {
+                        ptr: unsafe { self.list.base.add(self.next_index * 4) },
+                    },
                 };
                 self.next_index += 1;
                 Some(item)
@@ -512,21 +517,15 @@ mod regs {
     }
     // Interface to access PORTSC registers
     pub struct PortSc {
-        inner: &'static mut [RawPortSc],
+        base: *mut u32,
+        num_ports: usize,
     }
     impl PortSc {
         pub fn new(bar: &BarMem64, cap_regs: &CapabilityRegisters) -> Self {
-            let inner: &'static mut [RawPortSc] = unsafe {
-                let base_addr =
-                    bar.addr().add(cap_regs.length as usize).add(0x400) as *mut RawPortSc;
-                println!(
-                    "PORTSC @ {:p}, max_port_num = {}",
-                    base_addr,
-                    cap_regs.num_of_ports()
-                );
-                slice::from_raw_parts_mut::<'static>(base_addr, cap_regs.num_of_ports())
-            };
-            Self { inner }
+            let base = unsafe { bar.addr().add(cap_regs.length as usize).add(0x400) } as *mut u32;
+            let num_ports = cap_regs.num_of_ports();
+            println!("PORTSC @ {:p}, max_port_num = {}", base, num_ports);
+            Self { base, num_ports }
         }
         pub fn iter(&self) -> PortScIterator {
             PortScIterator {
@@ -569,11 +568,12 @@ impl XhciDriverInstance {
 
         let cap_regs =
             unsafe { ManuallyDrop::new(Box::from_raw(bar0.addr() as *mut CapabilityRegisters)) };
-        let op_regs = unsafe {
+        let mut op_regs = unsafe {
             ManuallyDrop::new(Box::from_raw(
                 bar0.addr().add(cap_regs.length as usize) as *mut OperationalRegisters
             ))
         };
+        op_regs.reset_xhc();
         let rt_regs = unsafe {
             ManuallyDrop::new(Box::from_raw(
                 bar0.addr().add(cap_regs.rtsoff as usize) as *mut RuntimeRegisters
@@ -599,7 +599,6 @@ impl XhciDriverInstance {
             primary_event_ring: EventRing::new()?,
             device_contexts,
         };
-        xhc.op_regs.reset_xhc();
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
         xhc.init_command_ring()?;
@@ -676,12 +675,19 @@ impl XhciDriverInstance {
     }
     fn poll_ports(&mut self) -> Result<()> {
         for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
+            let state = portsc.state();
             println!(
                 "portsc[port = {}] = {:#10X} {:?}",
                 port,
                 portsc.value(),
                 portsc.state()
             );
+            if let regs::PortScState::Disconnected = state {
+                // Reset port to Enable the port (via Reset state)
+                println!("Resetting port {}...", portsc.value());
+                portsc.reset();
+                println!("Done!")
+            }
         }
         Ok(())
     }
