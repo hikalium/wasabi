@@ -481,7 +481,7 @@ mod regs {
     }
     impl Display for PortScWrapper {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            write!(f, "PORTSC: ")
+            write!(f, "PORTSC: {:#010X} {:?}", self.value(), self.state())
         }
     }
     // Iterator over PortSc
