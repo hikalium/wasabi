@@ -23,6 +23,7 @@ use alloc::fmt::Debug;
 use alloc::fmt::Display;
 use alloc::format;
 use alloc::string::String;
+use core::mem::size_of;
 use core::mem::transmute;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
@@ -30,11 +31,18 @@ use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::slice;
 
+#[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 #[non_exhaustive]
+#[allow(unused)]
 enum TrbType {
     Link = 6,
     NoOpCommand = 23,
+    TransferEvent = 32,
+    CommandCompletionEvent = 33,
+    PortStatusChangeEvent = 34,
+    HostControllerEvent = 35,
+    DeviceNotificationEvent = 36,
 }
 
 #[repr(u32)]
@@ -45,17 +53,20 @@ enum TrbControl {
     ToggleCycle = 2,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone)]
 #[repr(C, align(16))]
 struct GenericTrbEntry {
     data: u64,
     option: u32,
     control: u32,
 }
-const _: () = assert!(core::mem::size_of::<GenericTrbEntry>() == 16);
+const _: () = assert!(size_of::<GenericTrbEntry>() == 16);
 impl GenericTrbEntry {
     fn set_control(&mut self, trb_type: TrbType, trb_control: TrbControl) {
         self.control = (trb_type as u32) << 10 | trb_control as u32;
+    }
+    fn trb_type(&self) -> Result<TrbType> {
+        Ok(unsafe { transmute(extract_bits(self.control, 10, 6)) })
     }
     fn cycle_state(&self) -> u32 {
         self.control & (TrbControl::CycleBit as u32)
@@ -73,6 +84,11 @@ impl GenericTrbEntry {
         trb
     }
 }
+impl Debug for GenericTrbEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "TRB@{:#p} type={:?}", self, self.trb_type())
+    }
+}
 fn error_stringify<T: Debug>(x: T) -> String {
     format!("[xHC] Error: {x:?}")
 }
@@ -80,9 +96,12 @@ fn error_stringify<T: Debug>(x: T) -> String {
 #[derive(Debug)]
 #[repr(C, align(4096))]
 struct TrbRing {
-    trb: [GenericTrbEntry; 256],
+    trb: [GenericTrbEntry; 128],
+    current_index: usize,
 }
-const _: () = assert!(core::mem::size_of::<TrbRing>() == 4096);
+// Limiting the size of TrbRing to be equal or less than 4096
+// to avoid crossing 64KiB boundaries. See Table 6-1 of xhci spec.
+const _: () = assert!(size_of::<TrbRing>() <= 4096);
 impl TrbRing {
     fn new() -> Box<Self> {
         let mut ring: Box<Self> = Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
@@ -102,13 +121,32 @@ impl TrbRing {
     fn num_trbs(&self) -> usize {
         self.trb.len()
     }
+    fn advance_index(&mut self) {
+        let current_index = self.current_index;
+        let next_index = (current_index + 1) % self.trb.len();
+        let (next_index, link_trb_index) = if next_index == self.trb.len() - 2 {
+            (0, Some(next_index))
+        } else {
+            (next_index, None)
+        };
+        self.trb[current_index].flip_cycle_state();
+        if let Some(link_trb_index) = link_trb_index {
+            self.trb[link_trb_index].flip_cycle_state();
+        }
+        self.current_index = next_index;
+    }
+    fn current(&self) -> &GenericTrbEntry {
+        &self.trb[self.current_index]
+    }
+    fn current_mut(&mut self) -> &mut GenericTrbEntry {
+        &mut self.trb[self.current_index]
+    }
 }
 
 struct EventRing {
     ring: Box<TrbRing>,
     erst: Box<EventRingSegmentTableEntry>,
     cycle_state_ours: u32,
-    next_dequeue_index: usize,
 }
 impl EventRing {
     fn new() -> Result<Self> {
@@ -118,71 +156,51 @@ impl EventRing {
             ring,
             erst,
             cycle_state_ours: 1,
-            next_dequeue_index: 0,
         })
-    }
-    fn erst_phys_addr(&self) -> usize {
-        self.erst.as_ref() as *const EventRingSegmentTableEntry as usize
     }
     fn ring(&self) -> &TrbRing {
         &self.ring
     }
+    fn erst_phys_addr(&self) -> usize {
+        self.erst.as_ref() as *const EventRingSegmentTableEntry as usize
+    }
     fn has_next_event(&self) -> bool {
-        self.ring().trb[self.next_dequeue_index].cycle_state() == self.cycle_state_ours
+        self.ring.current().cycle_state() == self.cycle_state_ours
+    }
+    fn pop(&mut self) -> Result<GenericTrbEntry> {
+        let e = *self.ring.current();
+        if e.cycle_state() != self.cycle_state_ours {
+            return Err(WasabiError::Failed("EventRingIsEmpty"));
+        }
+        self.ring.advance_index();
+        Ok(e)
     }
 }
 #[derive(Debug)]
 struct CommandRing {
     ring: Box<TrbRing>,
     cycle_state_ours: u32,
-    next_enqueue_index: usize,
 }
 impl CommandRing {
     fn new() -> Self {
         Self {
             ring: TrbRing::new(),
             cycle_state_ours: 0,
-            next_enqueue_index: 0,
         }
     }
     fn ring(&self) -> &TrbRing {
         &self.ring
     }
-    fn ring_mut(&mut self) -> &mut TrbRing {
-        &mut self.ring
-    }
-    fn advance_enque_index(&mut self) -> Result<()> {
-        let index_to_send = self.next_enqueue_index;
-        let next_index = (self.next_enqueue_index + 1) % self.ring().trb.len();
-        let (next_index, link_trb_index) = if next_index == self.ring().trb.len() - 2 {
-            (0, Some(next_index))
-        } else {
-            (next_index, None)
-        };
-        // Ensure that we own next TRBs
-        let cycle_state_ours = self.cycle_state_ours;
-        let trb = &mut self.ring_mut().trb;
-        if trb[next_index].cycle_state() != cycle_state_ours {
+    fn push(&mut self, mut src: GenericTrbEntry) -> Result<()> {
+        let dst = self.ring.current_mut();
+        if dst.cycle_state() != self.cycle_state_ours {
             return Err(WasabiError::Failed("Command Ring is Full"));
         }
-        if let Some(link_trb_index) = link_trb_index {
-            if trb[link_trb_index].cycle_state() != cycle_state_ours {
-                return Err(WasabiError::Failed("Command Ring is Full"));
-            }
+        if src.cycle_state() != self.cycle_state_ours {
+            src.flip_cycle_state();
         }
-        trb[index_to_send].flip_cycle_state();
-        if link_trb_index.is_some() {
-            self.cycle_state_ours ^= 1;
-        }
-        Ok(())
-    }
-    fn push(&mut self, mut e: GenericTrbEntry) -> Result<()> {
-        if e.cycle_state() != self.cycle_state_ours {
-            e.flip_cycle_state();
-        }
-        let index = self.next_enqueue_index;
-        self.ring_mut().trb[index] = e;
-        self.advance_enque_index()?;
+        *dst = src;
+        self.ring.advance_index();
         Ok(())
     }
 }
@@ -191,7 +209,7 @@ impl CommandRing {
 struct RawDeviceContextBaseAddressArray {
     context: [u64; 256],
 }
-const _: () = assert!(core::mem::size_of::<RawDeviceContextBaseAddressArray>() == 2048);
+const _: () = assert!(size_of::<RawDeviceContextBaseAddressArray>() == 2048);
 impl RawDeviceContextBaseAddressArray {
     fn new() -> Self {
         unsafe { MaybeUninit::zeroed().assume_init() }
@@ -221,7 +239,7 @@ struct EventRingSegmentTableEntry {
     ring_segment_size: u16,
     _rsvdz: [u16; 3],
 }
-const _: () = assert!(core::mem::size_of::<EventRingSegmentTableEntry>() == 16);
+const _: () = assert!(size_of::<EventRingSegmentTableEntry>() == 16);
 impl EventRingSegmentTableEntry {
     fn new(ring: &TrbRing) -> Result<Box<Self>> {
         let mut erst: Box<Self> = Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
@@ -246,7 +264,7 @@ pub struct CapabilityRegisters {
     rtsoff: Volatile<u32>,
     cparams2: Volatile<u32>,
 }
-const _: () = assert!(core::mem::size_of::<CapabilityRegisters>() == 0x20);
+const _: () = assert!(size_of::<CapabilityRegisters>() == 0x20);
 impl CapabilityRegisters {
     pub fn num_of_device_slots(&self) -> usize {
         extract_bits(self.hcsparams1.read(), 0, 8) as usize
@@ -277,7 +295,7 @@ struct OperationalRegisters {
     device_ctx_base_addr_array_ptr: *mut RawDeviceContextBaseAddressArray,
     config: u64,
 }
-const _: () = assert!(core::mem::size_of::<OperationalRegisters>() == 0x40);
+const _: () = assert!(size_of::<OperationalRegisters>() == 0x40);
 impl OperationalRegisters {
     const CMD_RUN_STOP: u32 = 0b0001;
     const CMD_HC_RESET: u32 = 0b0010;
@@ -361,7 +379,7 @@ struct InterrupterRegisterSet {
     erst_base: u64,
     erdp: u64,
 }
-const _: () = assert!(core::mem::size_of::<InterrupterRegisterSet>() == 0x20);
+const _: () = assert!(size_of::<InterrupterRegisterSet>() == 0x20);
 #[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
@@ -369,7 +387,7 @@ struct RuntimeRegisters {
     rsvdz: [u32; 8],
     irs: [InterrupterRegisterSet; 1024],
 }
-const _: () = assert!(core::mem::size_of::<RuntimeRegisters>() == 0x8020);
+const _: () = assert!(size_of::<RuntimeRegisters>() == 0x8020);
 
 pub struct XhciDriver {}
 impl XhciDriver {
@@ -681,11 +699,8 @@ impl XhciDriverInstance {
         println!("PAGE_SIZE = {}", page_size);
         println!("num_scratch_pad_bufs = {}", num_scratch_pad_bufs);
         let scratchpad_buffers = ALLOCATOR.alloc_with_options(
-            Layout::from_size_align(
-                core::mem::size_of::<usize>() * num_scratch_pad_bufs,
-                page_size,
-            )
-            .map_err(error_stringify)?,
+            Layout::from_size_align(size_of::<usize>() * num_scratch_pad_bufs, page_size)
+                .map_err(error_stringify)?,
         );
         let scratchpad_buffers = unsafe {
             slice::from_raw_parts(scratchpad_buffers as *mut *mut u8, num_scratch_pad_bufs)
@@ -706,10 +721,22 @@ impl XhciDriverInstance {
     fn ensure_ring_is_working(&mut self) -> Result<()> {
         self.command_ring.push(GenericTrbEntry::cmd_no_op())?;
         self.notify_xhc();
-        print!("No Op Command is sent. Waiting for an event...");
+        print!("First No Op Command is sent. Waiting for an event...");
         while !self.primary_event_ring.has_next_event() {
             busy_loop_hint();
         }
+        let e = self.primary_event_ring.pop()?;
+        println!("event: {:?}", e);
+
+        self.command_ring.push(GenericTrbEntry::cmd_no_op())?;
+        self.notify_xhc();
+        print!("Second No Op Command is sent. Waiting for an event...");
+        while !self.primary_event_ring.has_next_event() {
+            busy_loop_hint();
+        }
+        let e = self.primary_event_ring.pop()?;
+        println!("event: {:?}", e);
+
         println!("Done!");
         Ok(())
     }
