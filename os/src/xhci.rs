@@ -41,6 +41,7 @@ use core::{future::Future, pin::Pin};
 #[repr(u32)]
 #[non_exhaustive]
 #[allow(unused)]
+#[derive(PartialEq, Eq)]
 enum TrbType {
     Link = 6,
     NoOpCommand = 23,
@@ -192,9 +193,12 @@ impl<'a> Future for CommandCompletionEventFuture<'a> {
         match self.event_ring.pop() {
             Err(_) => Poll::Pending,
             Ok(trb) => {
-                if trb.data == self.target_command_trb_addr {
+                if trb.trb_type() == Ok(TrbType::CommandCompletionEvent)
+                    && trb.data == self.target_command_trb_addr
+                {
                     Poll::Ready(trb)
                 } else {
+                    println!("Ignoring event: {:?}", trb);
                     Poll::Pending
                 }
             }
