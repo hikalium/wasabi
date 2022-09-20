@@ -6,6 +6,9 @@ use crate::arch::x86_64::paging::with_current_page_table;
 use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Result;
 use crate::error::WasabiError;
+use crate::executor::yield_execution;
+use crate::executor::Executor;
+use crate::executor::Task;
 use crate::pci::BarMem64;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
@@ -413,8 +416,12 @@ impl PciDeviceDriver for XhciDriver {
         ];
         VDI_LIST.contains(&vp)
     }
-    fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>> {
-        Ok(Box::new(XhciDriverInstance::new(bdf)?) as Box<dyn PciDeviceDriverInstance>)
+    fn attach(
+        &self,
+        bdf: BusDeviceFunction,
+        executor: &mut Executor,
+    ) -> Result<Box<dyn PciDeviceDriverInstance>> {
+        Ok(Box::new(XhciDriverInstance::new(bdf, executor)?) as Box<dyn PciDeviceDriverInstance>)
     }
     fn name(&self) -> &str {
         "XhciDriver"
@@ -588,8 +595,7 @@ enum PollStatus {
     USB3Attached { port: usize },
 }
 
-#[allow(unused)]
-pub struct XhciDriverInstance {
+pub struct Xhci {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
     cap_regs: ManuallyDrop<Box<CapabilityRegisters>>,
@@ -602,8 +608,7 @@ pub struct XhciDriverInstance {
     device_contexts: DeviceContextBaseAddressArray,
     poll_status: PollStatus,
 }
-impl XhciDriverInstance {
-    // https://wiki.osdev.org/RTL8139
+impl Xhci {
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
         let pci = Pci::take();
         pci.disable_interrupt(bdf)?;
@@ -641,7 +646,7 @@ impl XhciDriverInstance {
         let scratchpad_buffers =
             Self::alloc_scratch_pad_buffers(op_regs.page_size()?, cap_regs.num_scratch_pad_bufs())?;
         let device_contexts = DeviceContextBaseAddressArray::new(scratchpad_buffers);
-        let mut xhc = XhciDriverInstance {
+        let mut xhc = Xhci {
             bdf,
             cap_regs,
             op_regs,
@@ -659,13 +664,7 @@ impl XhciDriverInstance {
         xhc.op_regs.start_xhc();
 
         xhc.ensure_ring_is_working()?;
-        loop {
-            if let Err(e) = xhc.poll() {
-                break Err(e);
-            } else {
-                busy_loop_hint();
-            }
-        }
+        Ok(xhc)
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
         let eq = &self.primary_event_ring;
@@ -777,6 +776,22 @@ impl XhciDriverInstance {
             }
         }
         Ok(())
+    }
+}
+struct XhciDriverInstance {}
+impl XhciDriverInstance {
+    fn new(bdf: BusDeviceFunction, executor: &mut Executor) -> Result<Self> {
+        executor.spawn(Task::new(async move {
+            let mut xhc = Xhci::new(bdf)?;
+            loop {
+                if let Err(e) = xhc.poll() {
+                    break Err(e);
+                } else {
+                    yield_execution().await;
+                }
+            }
+        }));
+        Ok(Self {})
     }
 }
 impl PciDeviceDriverInstance for XhciDriverInstance {

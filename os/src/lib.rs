@@ -21,6 +21,7 @@ pub mod debug_exit;
 pub mod efi;
 pub mod elf;
 pub mod error;
+pub mod executor;
 pub mod graphics;
 pub mod hpet;
 pub mod init;

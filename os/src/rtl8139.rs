@@ -8,6 +8,7 @@ use crate::arch::x86_64::write_io_port_u16;
 use crate::arch::x86_64::write_io_port_u32;
 use crate::arch::x86_64::write_io_port_u8;
 use crate::error::Result;
+use crate::executor::Executor;
 use crate::network::EthernetAddress;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
@@ -44,7 +45,11 @@ impl PciDeviceDriver for Rtl8139Driver {
 
         vp == RTL8139_ID
     }
-    fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>> {
+    fn attach(
+        &self,
+        bdf: BusDeviceFunction,
+        _: &mut Executor,
+    ) -> Result<Box<dyn PciDeviceDriverInstance>> {
         Ok(Box::new(Rtl8139DriverInstance::new(bdf)?) as Box<dyn PciDeviceDriverInstance>)
     }
     fn name(&self) -> &str {

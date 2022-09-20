@@ -10,9 +10,14 @@ extern crate alloc;
 use os::arch::x86_64::read_rsp;
 use os::boot_info::BootInfo;
 use os::elf::Elf;
-use os::error::*;
+use os::error::Result;
+use os::executor::delay;
+use os::executor::yield_execution;
+use os::executor::Executor;
+use os::executor::Task;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
+use os::init::init_pci;
 use os::println;
 
 fn paint_wasabi_logo() {
@@ -53,43 +58,48 @@ fn paint_wasabi_logo() {
     }
 }
 
-fn delay() {
-    for _ in 0..10000 {
-        os::arch::x86_64::busy_loop_hint();
-    }
-}
-fn pseudo_multitask() -> Result<()> {
-    let mut vram = BootInfo::take().vram();
-    let colors = [0xFF0000, 0x00FF00, 0x0000FF];
-    let h = 10;
-    // Task 0
-    let y1 = vram.height() / 3;
-    let mut x1 = 0;
-    let mut c1 = 0;
-    // Task 1
-    let y2 = vram.height() / 3 * 2;
-    let mut x2 = 0;
-    let mut c2 = 0;
-    for t in 0.. {
-        if t % 4 == 0 {
-            // Do some work for task 0 (when t == 0 under mod 4)
-            draw_line(&mut vram, colors[c1 % 3], x1, y1, x1, y1 + h)?;
-            x1 += 1;
-            if x1 >= vram.width() {
-                x1 = 0;
-                c1 += 1;
+fn run_tasks() -> Result<()> {
+    let task0 = async {
+        let mut vram = BootInfo::take().vram();
+        let h = 10;
+        let colors = [0xFF0000, 0x00FF00, 0x0000FF];
+        let y = vram.height() / 3;
+        let mut x = 0;
+        let mut c = 0;
+        loop {
+            draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
+            x += 1;
+            if x >= vram.width() {
+                x = 0;
+                c += 1;
             }
-        } else {
-            // Do some work for task 1 (when t == 1, 2, 3 under mod 4)
-            draw_line(&mut vram, colors[c2 % 3], x2, y2, x2, y2 + h)?;
-            x2 += 1;
-            if x2 >= vram.width() {
-                x2 = 0;
-                c2 += 1;
-            }
+            delay().await;
+            yield_execution().await;
         }
-        delay();
-    }
+    };
+    let task1 = async {
+        let mut vram = BootInfo::take().vram();
+        let h = 10;
+        let colors = [0xFF0000, 0x00FF00, 0x0000FF];
+        let y = vram.height() / 3 * 2;
+        let mut x = 0;
+        let mut c = 0;
+        loop {
+            draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
+            x += 1;
+            if x >= vram.width() {
+                x = 0;
+                c += 1;
+            }
+            delay().await;
+            yield_execution().await;
+        }
+    };
+    let mut executor = Executor::default();
+    executor.spawn(Task::new(task0));
+    executor.spawn(Task::new(task1));
+    init_pci(&mut executor);
+    executor.run();
     Ok(())
 }
 
@@ -104,7 +114,6 @@ fn main() -> Result<()> {
     init::init_interrupts();
     init::init_paging()?;
     init::init_timer();
-    init::init_pci();
 
     println!("Wasabi OS booted.");
 
@@ -123,7 +132,7 @@ fn main() -> Result<()> {
         elf.exec().expect("Failed to parse ELF");
     }
 
-    pseudo_multitask()?;
+    run_tasks()?;
     Ok(())
 }
 

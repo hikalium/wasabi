@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::acpi::Acpi;
 use crate::boot_info::File;
 use crate::efi;
+use crate::executor::Executor;
 use crate::pci::Pci;
 use crate::println;
 use crate::util::size_in_pages_from_bytes;
@@ -279,7 +280,7 @@ pub fn init_timer() {
     }
 }
 
-pub fn init_pci() {
+pub fn init_pci(executor: &mut Executor) {
     println!("init_pci()");
     let acpi = BootInfo::take().acpi();
     let mcfg = acpi.mcfg();
@@ -287,7 +288,7 @@ pub fn init_pci() {
     // This is safe since it is only called once
     unsafe { Pci::set(pci) };
     Pci::take()
-        .probe_devices()
+        .probe_devices(executor)
         .expect("Failed to probe devices");
     Pci::take().list_devices();
     Pci::take().list_drivers();
