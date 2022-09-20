@@ -44,6 +44,7 @@ use core::{future::Future, pin::Pin};
 #[derive(PartialEq, Eq)]
 enum TrbType {
     Link = 6,
+    EnableSlotCommand = 9,
     NoOpCommand = 23,
     TransferEvent = 32,
     CommandCompletionEvent = 33,
@@ -89,6 +90,20 @@ impl GenericTrbEntry {
         };
         trb.set_control(TrbType::NoOpCommand, TrbControl::None);
         trb
+    }
+    fn cmd_enable_slot() -> Self {
+        let mut trb = Self {
+            data: 0,
+            option: 0,
+            control: 0,
+        };
+        trb.set_control(TrbType::EnableSlotCommand, TrbControl::None);
+        trb
+    }
+    fn slot_id(&self) -> u8 {
+        extract_bits(self.control, 24, 8)
+            .try_into()
+            .expect("Invalid slot id")
     }
 }
 impl Debug for GenericTrbEntry {
@@ -764,7 +779,7 @@ impl Xhci {
         println!("Done!");
         Ok(())
     }
-    fn poll(&mut self) -> Result<()> {
+    async fn poll(&mut self) -> Result<()> {
         match self.poll_status {
             PollStatus::WaitingSomething => {
                 for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
@@ -799,6 +814,12 @@ impl Xhci {
             }
             PollStatus::USB3Attached { port } => {
                 println!("USB3 Device attached to port {}", port);
+                let e = self
+                    .send_command(GenericTrbEntry::cmd_enable_slot())
+                    .await?;
+                println!("event: {:?}", e);
+
+                println!("Done! Slot {} is assigned for Port {}", e.slot_id(), port);
                 self.poll_status = PollStatus::WaitingSomething;
             }
         }
@@ -812,7 +833,7 @@ impl XhciDriverInstance {
             let mut xhc = Xhci::new(bdf)?;
             xhc.ensure_ring_is_working().await?;
             loop {
-                if let Err(e) = xhc.poll() {
+                if let Err(e) = xhc.poll().await {
                     break Err(e);
                 } else {
                     yield_execution().await;
