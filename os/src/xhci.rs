@@ -33,6 +33,9 @@ use core::mem::MaybeUninit;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::slice;
+use core::task::Context;
+use core::task::Poll;
+use core::{future::Future, pin::Pin};
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
@@ -172,13 +175,33 @@ impl EventRing {
     }
     fn pop(&mut self) -> Result<GenericTrbEntry> {
         let e = *self.ring.current();
-        if e.cycle_state() != self.cycle_state_ours {
+        if !self.has_next_event() {
             return Err(WasabiError::Failed("EventRingIsEmpty"));
         }
         self.ring.advance_index();
         Ok(e)
     }
 }
+struct CommandCompletionEventFuture<'a> {
+    event_ring: &'a mut EventRing,
+    target_command_trb_addr: u64,
+}
+impl<'a> Future for CommandCompletionEventFuture<'a> {
+    type Output = GenericTrbEntry;
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context) -> Poll<GenericTrbEntry> {
+        match self.event_ring.pop() {
+            Err(_) => Poll::Pending,
+            Ok(trb) => {
+                if trb.data == self.target_command_trb_addr {
+                    Poll::Ready(trb)
+                } else {
+                    Poll::Pending
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 struct CommandRing {
     ring: Box<TrbRing>,
@@ -194,7 +217,7 @@ impl CommandRing {
     fn ring(&self) -> &TrbRing {
         &self.ring
     }
-    fn push(&mut self, mut src: GenericTrbEntry) -> Result<()> {
+    fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
         let dst = self.ring.current_mut();
         if dst.cycle_state() != self.cycle_state_ours {
             return Err(WasabiError::Failed("Command Ring is Full"));
@@ -203,8 +226,10 @@ impl CommandRing {
             src.flip_cycle_state();
         }
         *dst = src;
+        let dst_ptr = dst as *mut GenericTrbEntry as u64;
         self.ring.advance_index();
-        Ok(())
+        // The returned ptr will be used for waiting on command completion events.
+        Ok(dst_ptr)
     }
 }
 
@@ -663,7 +688,6 @@ impl Xhci {
         xhc.init_command_ring()?;
         xhc.op_regs.start_xhc();
 
-        xhc.ensure_ring_is_working()?;
         Ok(xhc)
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
@@ -717,23 +741,20 @@ impl Xhci {
             write_volatile(&mut self.doorbell_regs[0], 0);
         }
     }
-    fn ensure_ring_is_working(&mut self) -> Result<()> {
-        self.command_ring.push(GenericTrbEntry::cmd_no_op())?;
+    async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
+        let cmd_ptr = self.command_ring.push(cmd)?;
         self.notify_xhc();
-        print!("First No Op Command is sent. Waiting for an event...");
-        while !self.primary_event_ring.has_next_event() {
-            busy_loop_hint();
+        Ok(CommandCompletionEventFuture {
+            event_ring: &mut self.primary_event_ring,
+            target_command_trb_addr: cmd_ptr,
         }
-        let e = self.primary_event_ring.pop()?;
+        .await)
+    }
+    async fn ensure_ring_is_working(&mut self) -> Result<()> {
+        let e = self.send_command(GenericTrbEntry::cmd_no_op()).await;
         println!("event: {:?}", e);
 
-        self.command_ring.push(GenericTrbEntry::cmd_no_op())?;
-        self.notify_xhc();
-        print!("Second No Op Command is sent. Waiting for an event...");
-        while !self.primary_event_ring.has_next_event() {
-            busy_loop_hint();
-        }
-        let e = self.primary_event_ring.pop()?;
+        let e = self.send_command(GenericTrbEntry::cmd_no_op()).await;
         println!("event: {:?}", e);
 
         println!("Done!");
@@ -766,6 +787,8 @@ impl Xhci {
                 println!("{}", portsc);
                 if let PortState::Enabled = portsc.state() {
                     if let PortLinkState::U0 = portsc.pls() {
+                        // Attached USB3 device
+                        println!("USB3 Device attached to port {}", port);
                         self.poll_status = PollStatus::USB3Attached { port };
                     }
                 }
@@ -783,6 +806,7 @@ impl XhciDriverInstance {
     fn new(bdf: BusDeviceFunction, executor: &mut Executor) -> Result<Self> {
         executor.spawn(Task::new(async move {
             let mut xhc = Xhci::new(bdf)?;
+            xhc.ensure_ring_is_working().await?;
             loop {
                 if let Err(e) = xhc.poll() {
                     break Err(e);
