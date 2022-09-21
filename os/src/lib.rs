@@ -12,6 +12,8 @@
 #![feature(const_result_drop)]
 #![feature(new_uninit)]
 #![feature(saturating_int_impl)]
+#![deny(clippy::wildcard_imports)]
+#![deny(clippy::enum_glob_use)]
 
 pub mod acpi;
 pub mod allocator;
