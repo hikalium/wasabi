@@ -1,26 +1,40 @@
 extern crate alloc;
 
 use crate::acpi::Acpi;
+use crate::arch;
 use crate::boot_info::File;
 use crate::efi;
+use crate::error;
 use crate::executor::Executor;
+use crate::hpet;
+use crate::memory_map_holder;
 use crate::pci::Pci;
 use crate::println;
+use crate::serial;
+use crate::text_area;
+use crate::util;
 use crate::util::size_in_pages_from_bytes;
-use crate::{
-    arch, error, hpet, memory_map_holder, serial, text_area, util, vram, BitmapImageBuffer,
-    BootInfo, TextArea, VRAMBufferInfo,
-};
+use crate::vram;
+use crate::BitmapImageBuffer;
+use crate::BootInfo;
+use crate::TextArea;
+use crate::VRAMBufferInfo;
 use alloc::boxed::Box;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
 use arch::x86_64::gdt::GDT;
 use arch::x86_64::paging::write_cr3;
+use arch::x86_64::paging::PageAttr;
 use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
+use core::cmp::max;
 use core::slice;
+use efi::EfiMemoryType::CONVENTIONAL_MEMORY;
+use efi::EfiMemoryType::LOADER_CODE;
+use efi::EfiMemoryType::LOADER_DATA;
 use error::Result;
 use hpet::Hpet;
+use util::PAGE_SIZE;
 
 pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
 
@@ -190,10 +204,6 @@ pub fn init_graphical_terminal() {
 }
 
 pub fn init_paging() -> Result<()> {
-    use arch::x86_64::paging::PageAttr;
-    use core::cmp::max;
-    use efi::EfiMemoryType::{CONVENTIONAL_MEMORY, LOADER_CODE, LOADER_DATA};
-    use util::PAGE_SIZE;
     println!("init_paging");
     println!("Initial rsp = {:#018X}", x86_64::read_rsp());
     let mut table = PML4::new();

@@ -1,4 +1,5 @@
-use crate::efi::{locate_graphic_protocol, EfiSystemTable};
+use crate::efi::locate_graphic_protocol;
+use crate::efi::EfiSystemTable;
 use crate::error::Result;
 use crate::graphics::BitmapImageBuffer;
 

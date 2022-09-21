@@ -1,3 +1,9 @@
+use attr_bits::BIT_CS_LONG_MODE;
+use attr_bits::BIT_CS_READABLE;
+use attr_bits::BIT_DS_WRITABLE;
+use attr_bits::BIT_PRESENT;
+use attr_bits::BIT_TYPE_CODE;
+use attr_bits::BIT_TYPE_DATA;
 use core::arch::asm;
 use core::fmt;
 use core::mem::size_of;
@@ -53,10 +59,6 @@ mod attr_bits {
     pub const BIT_CS_READABLE: u64 = 1u64 << 53;
     pub const BIT_DS_WRITABLE: u64 = 1u64 << 41;
 }
-
-use attr_bits::{
-    BIT_CS_LONG_MODE, BIT_CS_READABLE, BIT_DS_WRITABLE, BIT_PRESENT, BIT_TYPE_CODE, BIT_TYPE_DATA,
-};
 
 #[repr(u64)]
 enum GdtAttr {

@@ -5,12 +5,16 @@ use crate::error::Result;
 use crate::println;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use core::future::Future;
+use core::pin::Pin;
 use core::ptr::null;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 use core::task::Context;
 use core::task::Poll;
-use core::{future::Future, pin::Pin};
+use core::task::RawWaker;
+use core::task::RawWakerVTable;
+use core::task::Waker;
 
 #[derive(Default)]
 pub struct Yield {
@@ -44,10 +48,6 @@ impl Task {
         self.future.as_mut().poll(context)
     }
 }
-use core::task::{RawWaker, Waker};
-
-use core::task::RawWakerVTable;
-
 // Do nothing, just no_ops.
 fn dummy_raw_waker() -> RawWaker {
     fn no_op(_: *const ()) {}

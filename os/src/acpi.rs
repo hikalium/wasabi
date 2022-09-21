@@ -1,4 +1,5 @@
-use crate::error::{Result, WasabiError};
+use crate::error::Result;
+use crate::error::WasabiError;
 use crate::hpet;
 use crate::println;
 use core::fmt;

@@ -26,18 +26,20 @@ use alloc::fmt::Debug;
 use alloc::fmt::Display;
 use alloc::format;
 use alloc::string::String;
+use core::future::Future;
 use core::mem::size_of;
 use core::mem::transmute;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
+use core::pin::Pin;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::slice;
 use core::task::Context;
 use core::task::Poll;
-use core::{future::Future, pin::Pin};
 
-use regs::{PortLinkState, PortState};
+use regs::PortLinkState;
+use regs::PortState;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
@@ -475,10 +477,18 @@ impl PciDeviceDriver for XhciDriver {
 }
 
 mod regs {
-    use super::{
-        busy_loop_hint, extract_bits, fmt, println, read_volatile, transmute, write_volatile,
-        BarMem64, CapabilityRegisters, Debug, Display, Result,
-    };
+    use super::busy_loop_hint;
+    use super::extract_bits;
+    use super::fmt;
+    use super::println;
+    use super::read_volatile;
+    use super::transmute;
+    use super::write_volatile;
+    use super::BarMem64;
+    use super::CapabilityRegisters;
+    use super::Debug;
+    use super::Display;
+    use super::Result;
     // [xhci] 5.4.8: PORTSC
     // OperationalBase + (0x400 + 0x10 * (n - 1))
     // where n = Port Number (1, 2, ..., MaxPorts)

@@ -1,6 +1,9 @@
-use crate::graphics::{
-    draw_char, draw_line, draw_rect, transfer_rect, BitmapImageBuffer, GraphicsResult,
-};
+use crate::graphics::draw_char;
+use crate::graphics::draw_line;
+use crate::graphics::draw_rect;
+use crate::graphics::transfer_rect;
+use crate::graphics::BitmapImageBuffer;
+use crate::graphics::GraphicsResult;
 use core::fmt;
 
 pub enum TextAreaMode {
