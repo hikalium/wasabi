@@ -54,7 +54,10 @@ mod attr_bits {
     pub const BIT_DS_WRITABLE: u64 = 1u64 << 41;
 }
 
-use attr_bits::*;
+use attr_bits::{
+    BIT_CS_LONG_MODE, BIT_CS_READABLE, BIT_DS_WRITABLE, BIT_PRESENT, BIT_TYPE_CODE, BIT_TYPE_DATA,
+};
+
 #[repr(u64)]
 enum GdtAttr {
     KernelCode = BIT_TYPE_CODE | BIT_PRESENT | BIT_CS_LONG_MODE | BIT_CS_READABLE,

@@ -7,6 +7,7 @@
 
 extern crate alloc;
 
+use os::arch;
 use os::arch::x86_64;
 use os::arch::x86_64::read_rsp;
 use os::boot_info::BootInfo;
@@ -18,6 +19,7 @@ use os::executor::Executor;
 use os::executor::Task;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
+use os::init;
 use os::init::init_pci;
 use os::println;
 
@@ -105,7 +107,6 @@ fn run_tasks() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    use os::*;
     init::init_graphical_terminal();
     os::println!("Booting Wasabi OS!!!");
     println!("Initial rsp = {:#018X}", arch::x86_64::read_rsp());

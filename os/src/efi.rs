@@ -1,6 +1,6 @@
-use crate::error::*;
+use crate::error::{Result, WasabiError};
 use crate::memory_map_holder;
-use crate::util::*;
+use crate::util::size_in_pages_from_bytes;
 use crate::MemoryMapHolder;
 use core::fmt;
 use core::mem::size_of;

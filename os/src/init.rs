@@ -7,7 +7,10 @@ use crate::executor::Executor;
 use crate::pci::Pci;
 use crate::println;
 use crate::util::size_in_pages_from_bytes;
-use crate::*;
+use crate::{
+    arch, error, hpet, memory_map_holder, serial, text_area, util, vram, BitmapImageBuffer,
+    BootInfo, TextArea, VRAMBufferInfo,
+};
 use alloc::boxed::Box;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
@@ -16,7 +19,7 @@ use arch::x86_64::paging::write_cr3;
 use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
 use core::slice;
-use error::*;
+use error::Result;
 use hpet::Hpet;
 
 pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;

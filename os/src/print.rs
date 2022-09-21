@@ -1,6 +1,6 @@
 use crate::println;
 use crate::serial::SerialConsoleWriter;
-use crate::text_area::*;
+use crate::text_area::TextArea;
 use crate::vram::VRAMBufferInfo;
 use core::cell::RefCell;
 use core::fmt;

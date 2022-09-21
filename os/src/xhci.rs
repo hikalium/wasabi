@@ -37,6 +37,8 @@ use core::task::Context;
 use core::task::Poll;
 use core::{future::Future, pin::Pin};
 
+use regs::{PortLinkState, PortState};
+
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -473,7 +475,10 @@ impl PciDeviceDriver for XhciDriver {
 }
 
 mod regs {
-    use super::*;
+    use super::{
+        busy_loop_hint, extract_bits, fmt, println, read_volatile, transmute, write_volatile,
+        BarMem64, CapabilityRegisters, Debug, Display, Result,
+    };
     // [xhci] 5.4.8: PORTSC
     // OperationalBase + (0x400 + 0x10 * (n - 1))
     // where n = Port Number (1, 2, ..., MaxPorts)
@@ -631,7 +636,6 @@ mod regs {
         }
     }
 }
-use regs::*;
 
 enum PollStatus {
     WaitingSomething,

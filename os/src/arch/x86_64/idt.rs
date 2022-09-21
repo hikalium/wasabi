@@ -251,7 +251,7 @@ mod attr_bits {
     pub const BIT_FLAGS_INTGATE: u8 = 0b0000_1110u8;
     pub const BIT_FLAGS_PRESENT: u8 = 0b1000_0000u8;
 }
-use attr_bits::*;
+use attr_bits::{BIT_FLAGS_INTGATE, BIT_FLAGS_PRESENT};
 
 #[repr(u8)]
 enum IdtAttr {

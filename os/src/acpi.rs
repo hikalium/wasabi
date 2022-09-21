@@ -1,6 +1,6 @@
-use crate::error::*;
+use crate::error::{Result, WasabiError};
 use crate::hpet;
-use crate::*;
+use crate::println;
 use core::fmt;
 use core::mem::size_of;
 use core::slice;

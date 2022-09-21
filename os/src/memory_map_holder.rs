@@ -1,4 +1,4 @@
-use crate::efi::*;
+use crate::efi::EfiMemoryDescriptor;
 
 pub const MEMORY_MAP_BUFFER_SIZE: usize = 0x8000;
 
