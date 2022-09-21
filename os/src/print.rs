@@ -1,8 +1,11 @@
 use crate::println;
+use crate::serial::SerialConsoleWriter;
 use crate::text_area::*;
 use crate::vram::VRAMBufferInfo;
 use core::cell::RefCell;
 use core::fmt;
+use core::mem::size_of;
+use core::slice;
 
 pub struct GlobalPrinter {
     text_area: RefCell<Option<TextArea<VRAMBufferInfo>>>,
@@ -41,7 +44,7 @@ macro_rules! println {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    let mut writer = crate::serial::SerialConsoleWriter::default();
+    let mut writer = SerialConsoleWriter::default();
     fmt::write(&mut writer, args).unwrap();
     match &mut *GLOBAL_PRINTER.text_area.borrow_mut() {
         Some(w) => fmt::write(w, args).unwrap(),
@@ -104,7 +107,5 @@ pub fn hexdump(bytes: &[u8]) {
 }
 
 pub fn hexdump_struct<T>(data: &T) {
-    hexdump(unsafe {
-        core::slice::from_raw_parts(data as *const T as *const u8, core::mem::size_of::<T>())
-    })
+    hexdump(unsafe { slice::from_raw_parts(data as *const T as *const u8, size_of::<T>()) })
 }

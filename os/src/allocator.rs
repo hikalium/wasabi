@@ -12,7 +12,9 @@ use core::borrow::BorrowMut;
 use core::cell::RefCell;
 use core::cmp::max;
 use core::fmt;
+use core::mem::size_of;
 use core::ops::DerefMut;
+use core::ptr::null_mut;
 
 #[cfg(test)]
 use alloc::vec;
@@ -29,7 +31,7 @@ struct Header {
     is_allocated: bool,
     _reserved: usize,
 }
-const HEADER_SIZE: usize = core::mem::size_of::<Header>();
+const HEADER_SIZE: usize = size_of::<Header>();
 #[allow(clippy::assertions_on_constants)]
 const _: () = assert!(HEADER_SIZE == 32);
 // Size of Header should be power of 2
@@ -53,11 +55,11 @@ impl Header {
             is_allocated: false,
             _reserved: 0,
         });
-        alloc::boxed::Box::from_raw(addr as *mut Header)
+        Box::from_raw(addr as *mut Header)
     }
     unsafe fn from_allocated_region(addr: *mut u8) -> Box<Header> {
         let header = addr.sub(HEADER_SIZE) as *mut Header;
-        alloc::boxed::Box::from_raw(header)
+        Box::from_raw(header)
     }
     //
     // Note: std::alloc::Layout doc says:
@@ -159,7 +161,7 @@ impl FirstFitAllocator {
                     }
                 },
                 None => {
-                    break core::ptr::null_mut::<u8>();
+                    break null_mut::<u8>();
                 }
             }
         }
@@ -224,7 +226,7 @@ fn malloc_iterate_free_and_alloc() {
 
 #[test_case]
 fn malloc_align() {
-    let mut pointers = [core::ptr::null_mut::<u8>(); 100];
+    let mut pointers = [null_mut::<u8>(); 100];
     for align in [1, 2, 4, 8, 16, 32, 4096] {
         println!("trying align = {}", align);
         for e in pointers.iter_mut() {
@@ -240,7 +242,7 @@ fn malloc_align() {
 #[test_case]
 fn malloc_align_random_order() {
     for align in [32, 4096, 8, 4, 16, 2, 1] {
-        let mut pointers = [core::ptr::null_mut::<u8>(); 100];
+        let mut pointers = [null_mut::<u8>(); 100];
         println!("trying align = {}", align);
         for e in pointers.iter_mut() {
             *e = ALLOCATOR.alloc_with_options(
@@ -290,7 +292,7 @@ fn allocated_objects_have_no_overlap() {
         Layout::from_size_align(60000, 64).unwrap(),
         Layout::from_size_align(60000, 64).unwrap(),
     ];
-    let mut pointers = vec![core::ptr::null_mut::<u8>(); allocations.len()];
+    let mut pointers = vec![null_mut::<u8>(); allocations.len()];
     for e in allocations.iter().zip(pointers.iter_mut()).enumerate() {
         let (i, (layout, pointer)) = e;
         println!("alloc layout = {:?}", layout);

@@ -7,6 +7,7 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use core::ptr::null;
 use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 use core::task::Context;
 use core::task::Poll;
 use core::{future::Future, pin::Pin};
@@ -18,10 +19,7 @@ pub struct Yield {
 impl Future for Yield {
     type Output = ();
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<()> {
-        if self
-            .polled
-            .fetch_or(true, core::sync::atomic::Ordering::SeqCst)
-        {
+        if self.polled.fetch_or(true, Ordering::SeqCst) {
             Poll::Ready(())
         } else {
             Poll::Pending

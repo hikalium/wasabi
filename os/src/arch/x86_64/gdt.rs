@@ -1,5 +1,6 @@
 use core::arch::asm;
 use core::fmt;
+use core::mem::size_of;
 
 #[allow(dead_code)]
 #[repr(packed)]
@@ -18,7 +19,7 @@ pub struct Gdt {
     user_data_segment: GdtSegmentDescriptor,
     user_code_segment_64: GdtSegmentDescriptor,
 }
-const _: () = assert!(core::mem::size_of::<Gdt>() / 8 == 6);
+const _: () = assert!(size_of::<Gdt>() / 8 == 6);
 impl Gdt {
     /// # Safety
     /// Anything can happen if the GDT given is invalid
@@ -26,7 +27,7 @@ impl Gdt {
     /// that is not matched with the GDT.
     pub unsafe fn load(&'static self) {
         let params = GdtrParameters {
-            limit: (core::mem::size_of::<Gdt>() - 1) as u16,
+            limit: (size_of::<Gdt>() - 1) as u16,
             base: self,
         };
         asm!("lgdt [rcx]",

@@ -12,6 +12,7 @@ use alloc::boxed::Box;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
 use arch::x86_64::gdt::GDT;
+use arch::x86_64::paging::write_cr3;
 use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
 use core::slice;
@@ -209,7 +210,7 @@ pub fn init_paging() -> Result<()> {
     table.create_mapping(0, end_of_mem, 0, PageAttr::ReadWriteKernel)?;
     println!("{:?}", table);
     unsafe {
-        crate::arch::x86_64::paging::write_cr3(Box::into_raw(table));
+        write_cr3(Box::into_raw(table));
     }
     Ok(())
 }

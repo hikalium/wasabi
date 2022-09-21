@@ -3,6 +3,9 @@ use crate::memory_map_holder;
 use crate::util::*;
 use crate::MemoryMapHolder;
 use core::fmt;
+use core::mem::size_of;
+use core::mem::zeroed;
+use core::ptr::null;
 use core::ptr::null_mut;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,7 +303,7 @@ pub struct EfiFileProtocol {
 
 impl EfiFileProtocol {
     pub fn open(&self, name: &EfiFileName) -> &EfiFileProtocol {
-        let mut new_file_protocol = core::ptr::null::<EfiFileProtocol>();
+        let mut new_file_protocol = null::<EfiFileProtocol>();
         let status = (self.open)(
             self as *const EfiFileProtocol,
             &mut new_file_protocol,
@@ -316,8 +319,8 @@ impl EfiFileProtocol {
     fn read_into_type<T>(&self) -> Option<T> {
         // Safety: data will be initialized in this function and it will be returned only if the
         // UEFI protocol succeeds.
-        let mut data = unsafe { core::mem::zeroed::<T>() };
-        let buf_size = core::mem::size_of::<T>();
+        let mut data = unsafe { zeroed::<T>() };
+        let buf_size = size_of::<T>();
         let mut size_read = buf_size;
         let status = (self.read)(
             self as *const EfiFileProtocol,
@@ -353,11 +356,11 @@ impl EfiFileProtocol {
         }
     }
     unsafe fn get_info<T>(&self, information_type: &EfiGuid) -> T {
-        let mut data = core::mem::zeroed::<T>();
+        let mut data = zeroed::<T>();
         let status = (self.get_info)(
             self as *const EfiFileProtocol,
             information_type,
-            &mut core::mem::size_of::<T>(),
+            &mut size_of::<T>(),
             &mut data as *mut T as *mut u8,
         );
         assert_eq!(status, EfiStatus::SUCCESS);
@@ -376,7 +379,7 @@ pub struct EfiSimpleFileSystemProtocol {
 }
 impl EfiSimpleFileSystemProtocol {
     pub fn open_volume(&self) -> &EfiFileProtocol {
-        let mut new_file_protocol = core::ptr::null::<EfiFileProtocol>();
+        let mut new_file_protocol = null::<EfiFileProtocol>();
         let status = (self.open_volume)(self as *const Self, &mut new_file_protocol);
         assert_eq!(status, EfiStatus::SUCCESS);
         unsafe { &*new_file_protocol }

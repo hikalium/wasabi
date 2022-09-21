@@ -1,5 +1,6 @@
 use crate::println;
 use core::fmt;
+use core::mem::size_of;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::sync::atomic::AtomicU64;
@@ -16,7 +17,7 @@ struct TimerRegister {
     comparator_value: u64,
     _reserved: [u64; 2],
 }
-const _: () = assert!(core::mem::size_of::<TimerRegister>() == 0x20);
+const _: () = assert!(size_of::<TimerRegister>() == 0x20);
 impl TimerRegister {
     fn available_interrupt_routes(&self) -> u32 {
         unsafe { (read_volatile(&self.configuration_and_capability) >> 32) as u32 }
@@ -51,7 +52,7 @@ pub struct Registers {
     reserved3: u64,
     timers: [TimerRegister; 32],
 }
-const _: () = assert!(core::mem::size_of::<Registers>() == 0x500);
+const _: () = assert!(size_of::<Registers>() == 0x500);
 
 pub struct Hpet {
     registers: &'static mut Registers,

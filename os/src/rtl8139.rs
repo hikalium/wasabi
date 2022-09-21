@@ -109,10 +109,7 @@ impl<'a> Rtl8139DriverInstance<'a> {
                 Layout::from_size_align(RTL8139_RXBUF_SIZE, 1).expect("Invalid Layout"),
             ) as *mut [u8; RTL8139_RXBUF_SIZE])
         };
-        assert!(
-            (rx_buffer.as_ptr() as usize)
-                < ((core::primitive::u32::MAX) as usize - RTL8139_RXBUF_SIZE)
-        );
+        assert!((rx_buffer.as_ptr() as usize) < ((u32::MAX) as usize - RTL8139_RXBUF_SIZE));
         println!("rx_buffer is at {:#p}", rx_buffer);
 
         write_io_port_u32(io_base + 0x30, rx_buffer.as_ptr() as usize as u32);

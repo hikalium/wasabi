@@ -1,5 +1,6 @@
 use crate::debug_exit;
 use crate::serial;
+use core::any::type_name;
 use core::fmt::Write;
 
 pub trait Testable {
@@ -13,7 +14,7 @@ where
     fn run(&self) {
         serial::com_initialize(serial::IO_ADDR_COM2);
         let mut writer = serial::SerialConsoleWriter::default();
-        write!(writer, "{}...\t", core::any::type_name::<T>()).unwrap();
+        write!(writer, "{}...\t", type_name::<T>()).unwrap();
         self();
         writeln!(writer, "[PASS]").unwrap();
     }

@@ -4,6 +4,8 @@ use core::arch::asm;
 use core::arch::global_asm;
 use core::cell::RefCell;
 use core::fmt;
+use core::mem::size_of;
+use core::mem::size_of_val;
 use core::mem::MaybeUninit;
 
 // System V AMD64 (sysv64) ABI:
@@ -37,7 +39,7 @@ struct GeneralRegisterContext {
     r15: u64,
     rcx: u64,
 }
-const _: () = assert!(core::mem::size_of::<GeneralRegisterContext>() == (16 - 1) * 8);
+const _: () = assert!(size_of::<GeneralRegisterContext>() == (16 - 1) * 8);
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -48,7 +50,7 @@ struct InterruptContext {
     rsp: u64,
     ss: u64,
 }
-const _: () = assert!(core::mem::size_of::<InterruptContext>() == 8 * 5);
+const _: () = assert!(size_of::<InterruptContext>() == 8 * 5);
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -60,7 +62,7 @@ struct InterruptInfo {
     error_code: u64,
     ctx: InterruptContext,
 }
-const _: () = assert!(core::mem::size_of::<InterruptInfo>() == (16 + 4 + 1) * 8 + 8 + 512);
+const _: () = assert!(size_of::<InterruptInfo>() == (16 + 4 + 1) * 8 + 8 + 512);
 impl fmt::Debug for InterruptInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -270,7 +272,7 @@ pub struct IdtDescriptor {
     offset_high: u32,
     _reserved: u32,
 }
-const _: () = assert!(core::mem::size_of::<IdtDescriptor>() == 16);
+const _: () = assert!(size_of::<IdtDescriptor>() == 16);
 impl IdtDescriptor {
     fn new(
         segment_selector: u16,
@@ -356,7 +358,7 @@ impl Idt {
     pub unsafe fn load(&'static self) {
         let entries = &*self.entries.borrow();
         let params = IdtrParameters {
-            limit: (core::mem::size_of_val(entries) - 1) as u16,
+            limit: (size_of_val(entries) - 1) as u16,
             base: entries,
         };
         asm!("lidt [rcx]",

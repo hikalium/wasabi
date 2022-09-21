@@ -68,6 +68,7 @@ commit :
 	rustup component add rustfmt
 	rustup component add clippy
 	cargo fmt
+	make rustcheck
 	make clippy
 	make spellcheck
 	make # build
@@ -88,6 +89,9 @@ spellcheck :
 	@scripts/spellcheck.sh recieve receive
 	@scripts/spellcheck.sh faild failed
 	@scripts/spellcheck.sh mappng mapping
+
+rustcheck :
+	@scripts/rustcheck.sh
 
 run :
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh

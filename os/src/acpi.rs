@@ -32,7 +32,7 @@ struct SystemDescriptionTableHeader {
     length: u32,
     _unused: [u8; 28],
 }
-const _: () = assert!(core::mem::size_of::<SystemDescriptionTableHeader>() == 36);
+const _: () = assert!(size_of::<SystemDescriptionTableHeader>() == 36);
 
 impl SystemDescriptionTableHeader {
     fn expect_signature(&self, sig: &'static [u8; 4]) {
@@ -92,13 +92,13 @@ impl AcpiTable for Mcfg {
         self
     }
 }
-const _: () = assert!(core::mem::size_of::<Mcfg>() == 44);
+const _: () = assert!(size_of::<Mcfg>() == 44);
 impl Mcfg {
     pub fn header_size(&self) -> usize {
         size_of::<Self>()
     }
     pub fn num_of_entries(&self) -> usize {
-        (self.header.length as usize - self.header_size()) / core::mem::size_of::<EcamEntry>()
+        (self.header.length as usize - self.header_size()) / size_of::<EcamEntry>()
     }
     pub fn entry(&self, index: usize) -> Option<&EcamEntry> {
         if index >= self.num_of_entries() {
@@ -147,7 +147,7 @@ trait AcpiIterableTable {
 struct Xsdt {
     header: SystemDescriptionTableHeader,
 }
-const _: () = assert!(core::mem::size_of::<Xsdt>() == 36);
+const _: () = assert!(size_of::<Xsdt>() == 36);
 
 impl Xsdt {
     fn list_all_tables(&self) {
@@ -169,7 +169,7 @@ impl Xsdt {
         size_of::<Self>()
     }
     fn num_of_entries(&self) -> usize {
-        (self.header.length as usize - self.header_size()) / core::mem::size_of::<*const u8>()
+        (self.header.length as usize - self.header_size()) / size_of::<*const u8>()
     }
     unsafe fn entry(&self, index: usize) -> *const u8 {
         *((self as *const Self as *const u8).add(self.header_size()) as *const *const u8).add(index)
@@ -212,7 +212,7 @@ pub struct GenericAddress {
     _unused: [u8; 3],
     address: u64,
 }
-const _: () = assert!(core::mem::size_of::<GenericAddress>() == 12);
+const _: () = assert!(size_of::<GenericAddress>() == 12);
 impl GenericAddress {
     pub fn address_in_memory_space(&self) -> Result<usize> {
         if self.address_space_id == 0 {
@@ -248,7 +248,7 @@ impl Hpet {
         }
     }
 }
-const _: () = assert!(core::mem::size_of::<Hpet>() == 56);
+const _: () = assert!(size_of::<Hpet>() == 56);
 
 #[repr(packed)]
 pub struct Dsdt {
@@ -256,7 +256,7 @@ pub struct Dsdt {
 }
 impl Dsdt {
     pub fn term_list_slice(&self) -> &[u8] {
-        let header_size = core::mem::size_of::<Self>();
+        let header_size = size_of::<Self>();
         let term_list_size = self.header.length as usize - header_size;
         unsafe {
             slice::from_raw_parts(

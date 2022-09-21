@@ -3,6 +3,7 @@ use pdb::FallibleIterator;
 use regex::Regex;
 use rustc_demangle::demangle;
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::io;
 use std::ops::Bound;
 use std::process::Command;
@@ -59,8 +60,7 @@ fn main() -> io::Result<()> {
     println!(".text base   ={:#018X}", text_base);
     println!("addr_in_text ={:#018X}", addr_in_text);
 
-    let file =
-        std::fs::File::open("target/x86_64-unknown-uefi/release/deps/os-618bacc84cc7d911.pdb")?;
+    let file = File::open("target/x86_64-unknown-uefi/release/deps/os-618bacc84cc7d911.pdb")?;
     let mut pdb = pdb::PDB::open(file).unwrap();
 
     let symbol_table = pdb.global_symbols().unwrap();
