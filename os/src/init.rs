@@ -192,7 +192,7 @@ pub fn init_graphical_terminal() {
 pub fn init_paging() -> Result<()> {
     use arch::x86_64::paging::PageAttr;
     use core::cmp::max;
-    use efi::EfiMemoryType::*;
+    use efi::EfiMemoryType::{CONVENTIONAL_MEMORY, LOADER_CODE, LOADER_DATA};
     use util::PAGE_SIZE;
     println!("init_paging");
     println!("Initial rsp = {:#018X}", x86_64::read_rsp());

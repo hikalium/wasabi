@@ -44,9 +44,11 @@ bin: font
 	cd font && cargo build
 	cd os && cargo build
 
+CLIPPY_OPTIONS=-D warnings -D clippy::wildcard_imports -D clippy::enum_glob_use
+
 clippy: font
-	cd font && cargo clippy -- -D warnings -D clippy::wildcard_imports
-	cd os && cargo clippy -- -D warnings -D clippy::wildcard_imports
+	cd font && cargo clippy -- ${CLIPPY_OPTIONS}
+	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
 	# Following ones will run clippy on examples as well, but disabled for now
 	# cd font && cargo clippy --all-features --all-targets -- -D warnings
 	# cd os && cargo clippy --all-features --all-targets -- -D warnings
