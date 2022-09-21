@@ -310,10 +310,10 @@ pub struct CapabilityRegisters {
     hcsparams1: Volatile<u32>,
     hcsparams2: Volatile<u32>,
     hcsparams3: Volatile<u32>,
-    cparams1: Volatile<u32>,
+    hccparams1: Volatile<u32>,
     dboff: Volatile<u32>,
     rtsoff: Volatile<u32>,
-    cparams2: Volatile<u32>,
+    hccparams2: Volatile<u32>,
 }
 const _: () = assert!(size_of::<CapabilityRegisters>() == 0x20);
 impl CapabilityRegisters {
@@ -647,6 +647,32 @@ mod regs {
     }
 }
 
+#[repr(C, align(32))]
+struct EndpointContext {
+    data: [u32; 8],
+}
+const _: () = assert!(size_of::<EndpointContext>() == 0x20);
+
+#[repr(C, align(32))]
+struct DeviceContext {
+    slot_ctx: [u32; 8],
+    ep_ctx: [EndpointContext; 2 * 15 + 1],
+}
+const _: () = assert!(size_of::<DeviceContext>() == 0x400);
+
+#[repr(C, align(32))]
+struct InputControlContext {
+    data: [u32; 8],
+}
+const _: () = assert!(size_of::<InputControlContext>() == 0x20);
+
+#[repr(C, align(32))]
+struct InputContext {
+    input_ctrl_ctx: InputControlContext,
+    device_ctx: DeviceContext,
+}
+const _: () = assert!(size_of::<InputContext>() == 0x420);
+
 enum PollStatus {
     WaitingSomething,
     EnablingPort { port: usize },
@@ -684,6 +710,16 @@ impl Xhci {
 
         let cap_regs =
             unsafe { ManuallyDrop::new(Box::from_raw(bar0.addr() as *mut CapabilityRegisters)) };
+        if cap_regs.hccparams1.read() & 1 == 0 {
+            return Err(WasabiError::Failed(
+                "HCCPARAMS1.AC64 was 0 (No 64-bit addressing capability)",
+            ));
+        }
+        if cap_regs.hccparams1.read() & 4 != 0 {
+            return Err(WasabiError::Failed(
+                "HCCPARAMS1.CSZ was 1 (Context size is 64, not 32)",
+            ));
+        }
         let mut op_regs = unsafe {
             ManuallyDrop::new(Box::from_raw(
                 bar0.addr().add(cap_regs.length.read() as usize) as *mut OperationalRegisters,
