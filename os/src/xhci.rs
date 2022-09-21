@@ -49,12 +49,23 @@ use regs::PortState;
 enum TrbType {
     Link = 6,
     EnableSlotCommand = 9,
+    AddressDeviceCommand = 11,
     NoOpCommand = 23,
     TransferEvent = 32,
     CommandCompletionEvent = 33,
     PortStatusChangeEvent = 34,
     HostControllerEvent = 35,
     DeviceNotificationEvent = 36,
+}
+
+// 6.4.5 TRB Completion Code
+#[derive(Debug, Copy, Clone)]
+#[repr(u32)]
+#[non_exhaustive]
+#[allow(unused)]
+#[derive(PartialEq, Eq)]
+enum CompletionCode {
+    Success = 1,
 }
 
 #[repr(u32)]
@@ -77,8 +88,11 @@ impl GenericTrbEntry {
     fn set_control(&mut self, trb_type: TrbType, trb_control: TrbControl) {
         self.control = (trb_type as u32) << 10 | trb_control as u32;
     }
-    fn trb_type(&self) -> Result<TrbType> {
-        Ok(unsafe { transmute(extract_bits(self.control, 10, 6)) })
+    fn trb_type(&self) -> u32 {
+        extract_bits(self.control, 10, 6)
+    }
+    fn completion_code(&self) -> u32 {
+        extract_bits(self.option, 24, 8)
     }
     fn cycle_state(&self) -> u32 {
         self.control & (TrbControl::CycleBit as u32)
@@ -104,15 +118,41 @@ impl GenericTrbEntry {
         trb.set_control(TrbType::EnableSlotCommand, TrbControl::None);
         trb
     }
+    fn cmd_address_device(input_context: &InputContext, slot_id: u8) -> Self {
+        let mut trb = Self {
+            data: input_context as *const InputContext as u64,
+            option: 0,
+            control: 0,
+        };
+        trb.set_control(TrbType::AddressDeviceCommand, TrbControl::None);
+        trb.set_slot_id(slot_id);
+        trb
+    }
     fn slot_id(&self) -> u8 {
         extract_bits(self.control, 24, 8)
             .try_into()
             .expect("Invalid slot id")
     }
+    fn set_slot_id(&mut self, slot: u8) {
+        self.control &= !(0xFF << 24);
+        self.control |= (slot as u32) << 24;
+    }
 }
 impl Debug for GenericTrbEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TRB@{:#p} type={:?}", self, self.trb_type())
+        match self.trb_type() {
+            e if e == (TrbType::CommandCompletionEvent as u32) => {
+                write!(
+                    f,
+                    "TRB@{:#p} CommandCompletionEvent CompletionCode = {}",
+                    self,
+                    self.completion_code()
+                )
+            }
+            _ => {
+                write!(f, "TRB@{:#p} type={:?}", self, self.trb_type())
+            }
+        }
     }
 }
 fn error_stringify<T: Debug>(x: T) -> String {
@@ -212,7 +252,7 @@ impl<'a> Future for CommandCompletionEventFuture<'a> {
         match self.event_ring.pop() {
             Err(_) => Poll::Pending,
             Ok(trb) => {
-                if trb.trb_type() == Ok(TrbType::CommandCompletionEvent)
+                if trb.trb_type() == TrbType::CommandCompletionEvent as u32
                     && trb.data == self.target_command_trb_addr
                 {
                     Poll::Ready(trb)
@@ -480,6 +520,7 @@ mod regs {
     use super::busy_loop_hint;
     use super::extract_bits;
     use super::fmt;
+    use super::format;
     use super::println;
     use super::read_volatile;
     use super::transmute;
@@ -489,9 +530,8 @@ mod regs {
     use super::Debug;
     use super::Display;
     use super::Result;
-    // [xhci] 5.4.8: PORTSC
-    // OperationalBase + (0x400 + 0x10 * (n - 1))
-    // where n = Port Number (1, 2, ..., MaxPorts)
+    use super::WasabiError;
+
     #[repr(u32)]
     #[non_exhaustive]
     #[derive(Debug)]
@@ -572,6 +612,26 @@ mod regs {
             // PP - Port Power - RWS
             self.value() & Self::BIT_PORT_POWER != 0
         }
+        pub fn port_speed(&self) -> usize {
+            // Port Speed - ROS
+            // Returns Protocol Speed ID (PSI). See 7.2.1 of xhci spec.
+            extract_bits(self.value(), 10, 4) as usize
+        }
+        pub fn max_packet_size(&self) -> Result<u16> {
+            const ID_FS: usize = 1;
+            const ID_LS: usize = 2;
+            const ID_HS: usize = 3;
+            const ID_SS: usize = 4;
+            match self.port_speed() {
+                ID_FS | ID_LS => Ok(8),
+                ID_HS => Ok(64),
+                ID_SS => Ok(512),
+                psi => Err(WasabiError::FailedString(format!(
+                    "Unknown Protocol Speeed ID: {}",
+                    psi
+                ))),
+            }
+        }
         pub fn state(&self) -> PortState {
             // 4.19.1.1 USB2 Root Hub Port
             match (self.pp(), self.ccs(), self.ped(), self.pr()) {
@@ -591,10 +651,11 @@ mod regs {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(
                 f,
-                "PORTSC: value={:#010X}, state={:?}, link_state={:?}",
+                "PORTSC: value={:#010X}, state={:?}, link_state={:?}, speed={}",
                 self.value(),
                 self.state(),
-                self.pls()
+                self.pls(),
+                self.port_speed(),
             )
         }
     }
@@ -630,9 +691,12 @@ mod regs {
             Self { base, num_ports }
         }
         pub fn get(&self, port: usize) -> Result<PortScWrapper> {
+            // [xhci] 5.4.8: PORTSC
+            // OperationalBase + (0x400 + 0x10 * (n - 1))
+            // where n = Port Number (1, 2, ..., MaxPorts)
             if (1..=self.num_ports).contains(&port) {
                 Ok(PortScWrapper {
-                    ptr: unsafe { self.base.add(port * 4) },
+                    ptr: unsafe { self.base.add((port - 1) * 4) },
                 })
             } else {
                 Err("xHC: Port Number Out of Range".into())
@@ -647,11 +711,71 @@ mod regs {
     }
 }
 
+// EndpointType: 0-7
+#[derive(Debug, Copy, Clone)]
+#[repr(u32)]
+#[non_exhaustive]
+#[allow(unused)]
+#[derive(PartialEq, Eq)]
+enum EndpointType {
+    BulkOut = 2,
+    Control = 4,
+    BulkIn = 6,
+}
+
 #[repr(C, align(32))]
 struct EndpointContext {
-    data: [u32; 8],
+    data: [u32; 2],
+    tr_dequeue_ptr: u64,
+    _reserved: [u32; 4],
 }
 const _: () = assert!(size_of::<EndpointContext>() == 0x20);
+impl EndpointContext {
+    fn set_ep_type(&mut self, ep_type: EndpointType) -> Result<()> {
+        let raw_ep_type = ep_type as u32;
+        if raw_ep_type < 8 {
+            self.data[1] &= !(0b111 << 3);
+            self.data[1] |= raw_ep_type << 3;
+            Ok(())
+        } else {
+            Err(WasabiError::FailedString(format!(
+                "Invalid ep_type = {}",
+                raw_ep_type
+            )))
+        }
+    }
+    fn set_ring_dequeue_pointer(&mut self, tr_dequeue_ptr: u64) -> Result<()> {
+        if tr_dequeue_ptr & 0xF == 0 {
+            self.tr_dequeue_ptr = tr_dequeue_ptr | (self.tr_dequeue_ptr & 1);
+            Ok(())
+        } else {
+            Err(WasabiError::Failed("tr_dequeue_ptr is not 16-byte aligned"))
+        }
+    }
+    fn set_dequeue_cycle_state(&mut self, dcs: u64) -> Result<()> {
+        if dcs & !0b1 == 0 {
+            self.tr_dequeue_ptr &= !1;
+            self.tr_dequeue_ptr |= dcs;
+            Ok(())
+        } else {
+            Err(WasabiError::Failed("invalid dcs"))
+        }
+    }
+    fn set_error_count(&mut self, error_count: u32) -> Result<()> {
+        if error_count & !0b11 == 0 {
+            self.data[1] &= !(0b11 << 1);
+            self.data[1] |= error_count << 1;
+            Ok(())
+        } else {
+            Err(WasabiError::Failed("invalid error_count"))
+        }
+    }
+    fn set_max_packet_size(&mut self, max_packet_size: u16) {
+        let max_packet_size = max_packet_size as u32;
+        self.data[1] &= !(0xffff << 16);
+        self.data[1] |= max_packet_size << 16;
+    }
+}
 
 #[repr(C, align(32))]
 struct DeviceContext {
@@ -659,19 +783,76 @@ struct DeviceContext {
     ep_ctx: [EndpointContext; 2 * 15 + 1],
 }
 const _: () = assert!(size_of::<DeviceContext>() == 0x400);
+impl DeviceContext {
+    fn set_root_hub_port_number(&mut self, port: usize) -> Result<()> {
+        if 0 < port && port < 256 {
+            self.slot_ctx[1] &= !(0xFF << 16);
+            self.slot_ctx[1] |= (port as u32) << 16;
+            Ok(())
+        } else {
+            Err(WasabiError::Failed("port out of range"))
+        }
+    }
+    fn set_num_of_ep_contexts(&mut self, num_ep_ctx: usize) -> Result<()> {
+        if num_ep_ctx <= 31 {
+            self.slot_ctx[0] &= !(0b11111 << 27);
+            self.slot_ctx[0] |= (num_ep_ctx as u32) << 27;
+            Ok(())
+        } else {
+            Err(WasabiError::Failed("num_ep_ctx out of range"))
+        }
+    }
+    fn set_port_speed(&mut self, psi: usize) -> Result<()> {
+        if psi < 16 {
+            self.slot_ctx[0] &= !(0xF << 20);
+            self.slot_ctx[0] |= (psi as u32) << 20;
+            Ok(())
+        } else {
+            Err(WasabiError::Failed("psi out of range"))
+        }
+    }
+}
 
 #[repr(C, align(32))]
 struct InputControlContext {
-    data: [u32; 8],
+    drop_context_bitmap: u32,
+    add_context_bitmap: u32,
+    data: [u32; 6],
 }
 const _: () = assert!(size_of::<InputControlContext>() == 0x20);
+impl InputControlContext {
+    fn add_context(&mut self, ici: usize) -> Result<()> {
+        if ici < 32 {
+            self.add_context_bitmap |= 1 << ici;
+            Ok(())
+        } else {
+            Err(WasabiError::Failed("add_context: ici out of range"))
+        }
+    }
+}
 
-#[repr(C, align(32))]
+#[repr(C, align(4096))]
 struct InputContext {
     input_ctrl_ctx: InputControlContext,
     device_ctx: DeviceContext,
 }
-const _: () = assert!(size_of::<InputContext>() == 0x420);
+const _: () = assert!(size_of::<InputContext>() <= 4096);
+impl InputContext {
+    fn alloc() -> Box<InputContext> {
+        Box::new(unsafe { MaybeUninit::zeroed().assume_init() })
+    }
+}
+
+#[repr(C, align(4096))]
+struct OutputContext {
+    device_ctx: DeviceContext,
+}
+const _: () = assert!(size_of::<OutputContext>() <= 4096);
+impl OutputContext {
+    fn alloc() -> Box<OutputContext> {
+        Box::new(unsafe { MaybeUninit::zeroed().assume_init() })
+    }
+}
 
 enum PollStatus {
     WaitingSomething,
@@ -691,6 +872,10 @@ pub struct Xhci {
     primary_event_ring: EventRing,
     device_contexts: DeviceContextBaseAddressArray,
     poll_status: PollStatus,
+    // input_contexts and ctrl_ep_rings are indexed by slot_id (1-255)
+    input_contexts: [Option<Box<InputContext>>; 256],
+    output_contexts: [Option<Box<OutputContext>>; 256],
+    ctrl_ep_rings: [Option<CommandRing>; 256],
 }
 impl Xhci {
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
@@ -740,6 +925,9 @@ impl Xhci {
         let scratchpad_buffers =
             Self::alloc_scratch_pad_buffers(op_regs.page_size()?, cap_regs.num_scratch_pad_bufs())?;
         let device_contexts = DeviceContextBaseAddressArray::new(scratchpad_buffers);
+        const NONE_INPUT_CONTEXT: Option<Box<InputContext>> = None;
+        const NONE_OUTPUT_CONTEXT: Option<Box<OutputContext>> = None;
+        const NONE_CTRL_EP_RING: Option<CommandRing> = None;
         let mut xhc = Xhci {
             bdf,
             cap_regs,
@@ -751,6 +939,9 @@ impl Xhci {
             primary_event_ring: EventRing::new()?,
             device_contexts,
             poll_status: PollStatus::WaitingSomething,
+            input_contexts: [NONE_INPUT_CONTEXT; 256],
+            output_contexts: [NONE_OUTPUT_CONTEXT; 256],
+            ctrl_ep_rings: [NONE_CTRL_EP_RING; 256],
         };
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
@@ -856,7 +1047,6 @@ impl Xhci {
                 if let PortState::Enabled = portsc.state() {
                     if let PortLinkState::U0 = portsc.pls() {
                         // Attached USB3 device
-                        println!("USB3 Device attached to port {}", port);
                         self.poll_status = PollStatus::USB3Attached { port };
                     }
                 }
@@ -867,8 +1057,59 @@ impl Xhci {
                     .send_command(GenericTrbEntry::cmd_enable_slot())
                     .await?;
                 println!("event: {:?}", e);
-
+                let slot = e.slot_id();
                 println!("Done! Slot {} is assigned for Port {}", e.slot_id(), port);
+
+                // Setup an input context and send AddressDevice command.
+                // 4.3.3 Device Slot Initialization
+                let input_context = &mut self.input_contexts[slot as usize];
+                if input_context.is_none() {
+                    *input_context = Some(InputContext::alloc());
+                }
+                let input_context = input_context
+                    .as_mut()
+                    .expect("InputContext is not allocated");
+                input_context.input_ctrl_ctx.add_context(0)?;
+                input_context.input_ctrl_ctx.add_context(1)?;
+                // 3. Initialize the Input Slot Context data structure (6.2.2)
+                input_context.device_ctx.set_root_hub_port_number(port)?;
+                input_context.device_ctx.set_num_of_ep_contexts(1)?;
+                // 4. Initialize the Transfer Ring for the Default Control Endpoint
+                let ctrl_ep_ring = &mut self.ctrl_ep_rings[slot as usize];
+                if ctrl_ep_ring.is_none() {
+                    *ctrl_ep_ring = Some(CommandRing::new());
+                }
+                let ctrl_ep_ring = ctrl_ep_ring
+                    .as_mut()
+                    .expect("ctrl_ep_ring is not allocated");
+                // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
+                let portsc = self.portsc.get(port)?;
+                input_context
+                    .device_ctx
+                    .set_port_speed(portsc.port_speed())?;
+                let ep0 = &mut input_context.device_ctx.ep_ctx[0];
+                ep0.set_ep_type(EndpointType::Control)?;
+                ep0.set_ring_dequeue_pointer(ctrl_ep_ring.ring.phys_addr())?;
+                ep0.set_dequeue_cycle_state(1)?;
+                ep0.set_error_count(3)?;
+                ep0.set_max_packet_size(portsc.max_packet_size()?);
+
+                let output_context = &mut self.output_contexts[slot as usize];
+                if output_context.is_none() {
+                    *output_context = Some(OutputContext::alloc());
+                }
+                let output_context = output_context
+                    .as_mut()
+                    .expect("OutputContext is not allocated");
+                self.device_contexts.inner.context[slot as usize] =
+                    output_context.as_mut() as *mut OutputContext as u64;
+                // 8. Issue an Address Device Command for the Device Slot
+                let cmd = GenericTrbEntry::cmd_address_device(input_context, slot);
+                println!("Sending address device command....");
+                let e = self.send_command(cmd).await?;
+                println!("event: {:?}", e);
+                println!("AddressDevice Command Done! {:?}", e);
+
                 self.poll_status = PollStatus::WaitingSomething;
             }
         }

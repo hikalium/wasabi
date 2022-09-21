@@ -3,7 +3,7 @@ cd `dirname $0`
 cd ..
 
 set +e
-RESULT=`git grep '::' *.rs | grep -v -E ':\s*use' | grep -E '::[a-zA-Z0-9_]+::[a-zA-Z0-9_]+::'`
+RESULT=`git grep -n '::' *.rs | grep -v -E ':\s*use' | grep -E '::[a-zA-Z0-9_]+::[a-zA-Z0-9_]+::'`
 RESULT_STATUS=$?
 set -e
 if test $RESULT_STATUS -eq 0; then
