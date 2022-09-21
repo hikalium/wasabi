@@ -799,14 +799,13 @@ impl Xhci {
                 for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
                     let state = portsc.state();
                     if let regs::PortState::Disabled = state {
+                        // Reset port to Enable the port (via Reset state)
                         println!(
-                            "portsc[port = {}] = {:#10X} {:?}",
+                            "Resetting port: prev state: portsc[port = {}] = {:#10X} {:?}",
                             port,
                             portsc.value(),
                             portsc.state()
                         );
-                        // Reset port to Enable the port (via Reset state)
-                        println!("Resetting port {}...", portsc.value());
                         portsc.reset();
                         println!("Done!");
                         self.poll_status = PollStatus::EnablingPort { port };
