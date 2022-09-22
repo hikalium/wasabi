@@ -12,6 +12,7 @@
 #![feature(const_result_drop)]
 #![feature(new_uninit)]
 #![feature(saturating_int_impl)]
+#![feature(sync_unsafe_cell)]
 #![deny(clippy::wildcard_imports)]
 #![deny(clippy::enum_glob_use)]
 

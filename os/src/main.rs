@@ -3,10 +3,13 @@
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![test_runner(os::test_runner::test_runner)]
+#![feature(sync_unsafe_cell)]
 #![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
 
+use alloc::rc::Rc;
+use core::cell::SyncUnsafeCell;
 use os::arch;
 use os::arch::x86_64;
 use os::arch::x86_64::read_rsp;
@@ -98,11 +101,11 @@ fn run_tasks() -> Result<()> {
             yield_execution().await;
         }
     };
-    let mut executor = Executor::default();
-    executor.spawn(Task::new(task0));
-    executor.spawn(Task::new(task1));
-    init_pci(&mut executor);
-    executor.run();
+    let executor = Rc::new(SyncUnsafeCell::new(Executor::default()));
+    unsafe { &mut *executor.get() }.spawn(Task::new(task0));
+    unsafe { &mut *executor.get() }.spawn(Task::new(task1));
+    init_pci(executor.clone());
+    Executor::run(executor);
     Ok(())
 }
 

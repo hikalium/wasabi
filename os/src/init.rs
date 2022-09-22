@@ -20,6 +20,7 @@ use crate::BootInfo;
 use crate::TextArea;
 use crate::VRAMBufferInfo;
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
 use arch::x86_64::gdt::GDT;
@@ -27,6 +28,7 @@ use arch::x86_64::paging::write_cr3;
 use arch::x86_64::paging::PageAttr;
 use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
+use core::cell::SyncUnsafeCell;
 use core::cmp::max;
 use core::slice;
 use efi::EfiMemoryType::CONVENTIONAL_MEMORY;
@@ -294,7 +296,7 @@ pub fn init_timer() {
     }
 }
 
-pub fn init_pci(executor: &mut Executor) {
+pub fn init_pci(executor: Rc<SyncUnsafeCell<Executor>>) {
     println!("init_pci()");
     let acpi = BootInfo::take().acpi();
     let mcfg = acpi.mcfg();

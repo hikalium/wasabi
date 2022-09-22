@@ -18,7 +18,9 @@ use crate::pci::VendorDeviceId;
 use crate::print::hexdump;
 use crate::println;
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 use core::alloc::Layout;
+use core::cell::SyncUnsafeCell;
 use core::slice;
 
 pub struct Rtl8139Driver {}
@@ -48,7 +50,7 @@ impl PciDeviceDriver for Rtl8139Driver {
     fn attach(
         &self,
         bdf: BusDeviceFunction,
-        _: &mut Executor,
+        _: Rc<SyncUnsafeCell<Executor>>,
     ) -> Result<Box<dyn PciDeviceDriverInstance>> {
         Ok(Box::new(Rtl8139DriverInstance::new(bdf)?) as Box<dyn PciDeviceDriverInstance>)
     }

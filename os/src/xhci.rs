@@ -27,7 +27,9 @@ use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::fmt::Display;
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::string::String;
+use core::cell::SyncUnsafeCell;
 use core::future::Future;
 use core::mem::size_of;
 use core::mem::transmute;
@@ -282,8 +284,8 @@ struct TrbRing {
 // to avoid crossing 64KiB boundaries. See Table 6-1 of xhci spec.
 const _: () = assert!(size_of::<TrbRing>() <= 4096);
 impl TrbRing {
-    fn new() -> Box<Self> {
-        let mut ring: Box<Self> = Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
+    fn new() -> Pin<Box<Self>> {
+        let mut ring: Pin<Box<Self>> = Box::pin(unsafe { MaybeUninit::zeroed().assume_init() });
         ring.init();
         ring
     }
@@ -314,17 +316,17 @@ impl TrbRing {
         }
         self.current_index = next_index;
     }
-    fn current(&self) -> &GenericTrbEntry {
-        &self.trb[self.current_index]
+    fn current(&self) -> Pin<&GenericTrbEntry> {
+        Pin::new(&self.trb[self.current_index])
     }
-    fn current_mut(&mut self) -> &mut GenericTrbEntry {
-        &mut self.trb[self.current_index]
+    fn current_mut(&mut self) -> Pin<&mut GenericTrbEntry> {
+        Pin::new(&mut self.trb[self.current_index])
     }
 }
 
 struct EventRing {
-    ring: Box<TrbRing>,
-    erst: Box<EventRingSegmentTableEntry>,
+    ring: Pin<Box<TrbRing>>,
+    erst: Pin<Box<EventRingSegmentTableEntry>>,
     cycle_state_ours: u32,
 }
 impl EventRing {
@@ -337,11 +339,11 @@ impl EventRing {
             cycle_state_ours: 1,
         })
     }
-    fn ring(&self) -> &TrbRing {
-        &self.ring
+    fn ring(&self) -> Pin<&TrbRing> {
+        self.ring.as_ref()
     }
     fn erst_phys_addr(&self) -> usize {
-        self.erst.as_ref() as *const EventRingSegmentTableEntry as usize
+        self.erst.as_ref().get_ref() as *const EventRingSegmentTableEntry as usize
     }
     fn has_next_event(&self) -> bool {
         self.ring.current().cycle_state() == self.cycle_state_ours
@@ -402,7 +404,7 @@ impl<'a> Future for TransferEventFuture<'a> {
 
 #[derive(Debug)]
 struct CommandRing {
-    ring: Box<TrbRing>,
+    ring: Pin<Box<TrbRing>>,
     cycle_state_ours: u32,
 }
 impl CommandRing {
@@ -412,11 +414,11 @@ impl CommandRing {
             cycle_state_ours: 0,
         }
     }
-    fn ring(&self) -> &TrbRing {
-        &self.ring
+    fn ring(&self) -> Pin<&TrbRing> {
+        self.ring.as_ref()
     }
     fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
-        let dst = self.ring.current_mut();
+        let mut dst = self.ring.current_mut();
         if dst.cycle_state() != self.cycle_state_ours {
             return Err(WasabiError::Failed("Command Ring is Full"));
         }
@@ -424,7 +426,7 @@ impl CommandRing {
             src.flip_cycle_state();
         }
         *dst = src;
-        let dst_ptr = dst as *mut GenericTrbEntry as u64;
+        let dst_ptr = dst.as_ref().get_ref() as *const GenericTrbEntry as u64;
         self.ring.advance_index();
         // The returned ptr will be used for waiting on command completion events.
         Ok(dst_ptr)
@@ -443,20 +445,20 @@ impl RawDeviceContextBaseAddressArray {
 }
 
 struct DeviceContextBaseAddressArray {
-    inner: RawDeviceContextBaseAddressArray,
-    _scratchpad_buffers: Box<[*mut u8]>,
+    inner: Pin<Box<RawDeviceContextBaseAddressArray>>,
+    _scratchpad_buffers: Pin<Box<[*mut u8]>>,
 }
 impl DeviceContextBaseAddressArray {
-    fn new(scratchpad_buffers: Box<[*mut u8]>) -> Self {
+    fn new(scratchpad_buffers: Pin<Box<[*mut u8]>>) -> Self {
         let mut inner = RawDeviceContextBaseAddressArray::new();
         inner.context[0] = scratchpad_buffers.as_ptr() as u64;
         Self {
-            inner,
+            inner: Box::pin(inner),
             _scratchpad_buffers: scratchpad_buffers,
         }
     }
     fn inner_mut_ptr(&mut self) -> *mut RawDeviceContextBaseAddressArray {
-        &mut self.inner as *mut RawDeviceContextBaseAddressArray
+        self.inner.as_mut().get_mut() as *mut RawDeviceContextBaseAddressArray
     }
 }
 
@@ -467,8 +469,8 @@ struct EventRingSegmentTableEntry {
 }
 const _: () = assert!(size_of::<EventRingSegmentTableEntry>() == 16);
 impl EventRingSegmentTableEntry {
-    fn new(ring: &TrbRing) -> Result<Box<Self>> {
-        let mut erst: Box<Self> = Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
+    fn new(ring: &TrbRing) -> Result<Pin<Box<Self>>> {
+        let mut erst: Pin<Box<Self>> = Box::pin(unsafe { MaybeUninit::zeroed().assume_init() });
         erst.ring_segment_base_address = ring.phys_addr();
         erst.ring_segment_size = ring.num_trbs().try_into()?;
         Ok(erst)
@@ -642,7 +644,7 @@ impl PciDeviceDriver for XhciDriver {
     fn attach(
         &self,
         bdf: BusDeviceFunction,
-        executor: &mut Executor,
+        executor: Rc<SyncUnsafeCell<Executor>>,
     ) -> Result<Box<dyn PciDeviceDriverInstance>> {
         Ok(Box::new(XhciDriverInstance::new(bdf, executor)?) as Box<dyn PciDeviceDriverInstance>)
     }
@@ -973,8 +975,8 @@ struct InputContext {
 }
 const _: () = assert!(size_of::<InputContext>() <= 4096);
 impl InputContext {
-    fn alloc() -> Box<InputContext> {
-        Box::new(unsafe { MaybeUninit::zeroed().assume_init() })
+    fn alloc() -> Pin<Box<InputContext>> {
+        Box::pin(unsafe { MaybeUninit::zeroed().assume_init() })
     }
 }
 
@@ -984,8 +986,8 @@ struct OutputContext {
 }
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
 impl OutputContext {
-    fn alloc() -> Box<OutputContext> {
-        Box::new(unsafe { MaybeUninit::zeroed().assume_init() })
+    fn alloc() -> Pin<Box<OutputContext>> {
+        Box::pin(unsafe { MaybeUninit::zeroed().assume_init() })
     }
 }
 
@@ -998,18 +1000,18 @@ enum PollStatus {
 pub struct Xhci {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
-    cap_regs: ManuallyDrop<Box<CapabilityRegisters>>,
-    op_regs: ManuallyDrop<Box<OperationalRegisters>>,
-    rt_regs: ManuallyDrop<Box<RuntimeRegisters>>,
+    cap_regs: ManuallyDrop<Pin<Box<CapabilityRegisters>>>,
+    op_regs: ManuallyDrop<Pin<Box<OperationalRegisters>>>,
+    rt_regs: ManuallyDrop<Pin<Box<RuntimeRegisters>>>,
     portsc: regs::PortSc,
-    doorbell_regs: ManuallyDrop<Box<[u32; 256]>>,
+    doorbell_regs: ManuallyDrop<Pin<Box<[u32; 256]>>>,
     command_ring: CommandRing,
     primary_event_ring: EventRing,
     device_contexts: DeviceContextBaseAddressArray,
     poll_status: PollStatus,
     // input_contexts and ctrl_ep_rings are indexed by slot_id (1-255)
-    input_contexts: [Option<Box<InputContext>>; 256],
-    output_contexts: [Option<Box<OutputContext>>; 256],
+    input_contexts: [Option<Pin<Box<InputContext>>>; 256],
+    output_contexts: [Option<Pin<Box<OutputContext>>>; 256],
     device_descriptors: [DeviceDescriptor; 256],
     ctrl_ep_rings: [Option<CommandRing>; 256],
 }
@@ -1029,8 +1031,11 @@ impl Xhci {
             })
         }
 
-        let cap_regs =
-            unsafe { ManuallyDrop::new(Box::from_raw(bar0.addr() as *mut CapabilityRegisters)) };
+        let cap_regs = unsafe {
+            ManuallyDrop::new(Pin::new(Box::from_raw(
+                bar0.addr() as *mut CapabilityRegisters
+            )))
+        };
         if cap_regs.hccparams1.read() & 1 == 0 {
             return Err(WasabiError::Failed(
                 "HCCPARAMS1.AC64 was 0 (No 64-bit addressing capability)",
@@ -1042,27 +1047,27 @@ impl Xhci {
             ));
         }
         let mut op_regs = unsafe {
-            ManuallyDrop::new(Box::from_raw(
+            ManuallyDrop::new(Pin::new(Box::from_raw(
                 bar0.addr().add(cap_regs.length.read() as usize) as *mut OperationalRegisters,
-            ))
+            )))
         };
         op_regs.reset_xhc();
         let rt_regs = unsafe {
-            ManuallyDrop::new(Box::from_raw(
+            ManuallyDrop::new(Pin::new(Box::from_raw(
                 bar0.addr().add(cap_regs.rtsoff.read() as usize) as *mut RuntimeRegisters,
-            ))
+            )))
         };
         let doorbell_regs = unsafe {
-            ManuallyDrop::new(Box::from_raw(
+            ManuallyDrop::new(Pin::new(Box::from_raw(
                 bar0.addr().add(cap_regs.dboff.read() as usize) as *mut [u32; 256],
-            ))
+            )))
         };
         let portsc = regs::PortSc::new(&bar0, &cap_regs);
         let scratchpad_buffers =
             Self::alloc_scratch_pad_buffers(op_regs.page_size()?, cap_regs.num_scratch_pad_bufs())?;
         let device_contexts = DeviceContextBaseAddressArray::new(scratchpad_buffers);
-        const NONE_INPUT_CONTEXT: Option<Box<InputContext>> = None;
-        const NONE_OUTPUT_CONTEXT: Option<Box<OutputContext>> = None;
+        const NONE_INPUT_CONTEXT: Option<Pin<Box<InputContext>>> = None;
+        const NONE_OUTPUT_CONTEXT: Option<Pin<Box<OutputContext>>> = None;
         const NONE_CTRL_EP_RING: Option<CommandRing> = None;
         let mut xhc = Xhci {
             bdf,
@@ -1110,7 +1115,7 @@ impl Xhci {
     fn alloc_scratch_pad_buffers(
         page_size: usize,
         num_scratch_pad_bufs: usize,
-    ) -> Result<Box<[*mut u8]>> {
+    ) -> Result<Pin<Box<[*mut u8]>>> {
         // 4.20 Scratchpad Buffers
         // This should be done before xHC starts.
         // device_contexts.context[0] points Scratchpad Buffer Arrary.
@@ -1125,7 +1130,7 @@ impl Xhci {
         let scratchpad_buffers = unsafe {
             slice::from_raw_parts(scratchpad_buffers as *mut *mut u8, num_scratch_pad_bufs)
         };
-        let mut scratchpad_buffers = Box::<[*mut u8]>::from(scratchpad_buffers);
+        let mut scratchpad_buffers = Pin::new(Box::<[*mut u8]>::from(scratchpad_buffers));
         for sb in scratchpad_buffers.iter_mut() {
             *sb = ALLOCATOR.alloc_with_options(
                 Layout::from_size_align(page_size, page_size).map_err(error_stringify)?,
@@ -1269,7 +1274,7 @@ impl Xhci {
                     .as_mut()
                     .expect("OutputContext is not allocated");
                 self.device_contexts.inner.context[slot as usize] =
-                    output_context.as_mut() as *mut OutputContext as u64;
+                    output_context.as_mut().get_mut() as *mut OutputContext as u64;
                 // 8. Issue an Address Device Command for the Device Slot
                 let cmd = GenericTrbEntry::cmd_address_device(input_context, slot);
                 println!("Sending address device command....");
@@ -1292,8 +1297,8 @@ impl Xhci {
 }
 struct XhciDriverInstance {}
 impl XhciDriverInstance {
-    fn new(bdf: BusDeviceFunction, executor: &mut Executor) -> Result<Self> {
-        executor.spawn(Task::new(async move {
+    fn new(bdf: BusDeviceFunction, executor: Rc<SyncUnsafeCell<Executor>>) -> Result<Self> {
+        unsafe { &mut *executor.get() }.spawn(Task::new(async move {
             let mut xhc = Xhci::new(bdf)?;
             xhc.ensure_ring_is_working().await?;
             loop {

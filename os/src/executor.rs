@@ -5,6 +5,8 @@ use crate::error::Result;
 use crate::println;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use alloc::rc::Rc;
+use core::cell::SyncUnsafeCell;
 use core::future::Future;
 use core::pin::Pin;
 use core::ptr::null;
@@ -71,16 +73,19 @@ impl Executor {
     pub fn spawn(&mut self, task: Task) {
         self.task_queue.push_back(task)
     }
-    pub fn run(&mut self) {
-        while let Some(mut task) = self.task_queue.pop_front() {
-            let waker = dummy_waker();
-            let mut context = Context::from_waker(&waker);
-            match task.poll(&mut context) {
-                Poll::Ready(result) => {
-                    println!("Task done! {:?}", result);
-                }
-                Poll::Pending => {
-                    self.task_queue.push_back(task);
+    pub fn run(executor: Rc<SyncUnsafeCell<Self>>) {
+        loop {
+            let executor_locked = unsafe { &mut *executor.get() };
+            if let Some(mut task) = executor_locked.task_queue.pop_front() {
+                let waker = dummy_waker();
+                let mut context = Context::from_waker(&waker);
+                match task.poll(&mut context) {
+                    Poll::Ready(result) => {
+                        println!("Task done! {:?}", result);
+                    }
+                    Poll::Pending => {
+                        executor_locked.task_queue.push_back(task);
+                    }
                 }
             }
         }

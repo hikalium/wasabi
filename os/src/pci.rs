@@ -14,6 +14,7 @@ use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use core::cell::SyncUnsafeCell;
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::size_of;
@@ -149,7 +150,7 @@ pub trait PciDeviceDriver {
     fn attach(
         &self,
         bdf: BusDeviceFunction,
-        executor: &mut Executor,
+        executor: Rc<SyncUnsafeCell<Executor>>,
     ) -> Result<Box<dyn PciDeviceDriverInstance>>;
     fn name(&self) -> &str;
 }
@@ -336,7 +337,7 @@ impl Pci {
             Some(VendorDeviceId { vendor, device })
         }
     }
-    pub fn probe_devices(&self, executor: &mut Executor) -> Result<()> {
+    pub fn probe_devices(&self, executor: Rc<SyncUnsafeCell<Executor>>) -> Result<()> {
         println!("Probing PCI devices...");
         for bdf in BusDeviceFunction::iter() {
             if let Some(vd) = self.read_vendor_id_and_device_id(bdf) {
@@ -346,7 +347,7 @@ impl Pci {
                 }
                 for d in &self.drivers {
                     if d.supports(vd) {
-                        match d.attach(bdf, executor) {
+                        match d.attach(bdf, executor.clone()) {
                             Ok(di) => {
                                 println!("{:?} driver is loaded for {:?}", di, bdf);
                                 self.devices.borrow_mut().insert(bdf, Rc::new(di));
