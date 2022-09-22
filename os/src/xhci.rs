@@ -17,6 +17,8 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
+use crate::usb::DescriptorType;
+use crate::usb::DeviceDescriptor;
 use crate::util::extract_bits;
 use crate::volatile::Volatile;
 use alloc::alloc::Layout;
@@ -47,6 +49,9 @@ use regs::PortState;
 #[allow(unused)]
 #[derive(PartialEq, Eq)]
 enum TrbType {
+    SetupStage = 2,
+    DataStage = 3,
+    StatusStage = 4,
     Link = 6,
     EnableSlotCommand = 9,
     AddressDeviceCommand = 11,
@@ -74,6 +79,7 @@ enum TrbControl {
     None = 0,
     CycleBit = 1,
     ToggleCycle = 2,
+    ImmediateData = 1 << 6,
 }
 
 #[derive(Copy, Clone)]
@@ -155,6 +161,113 @@ impl Debug for GenericTrbEntry {
         }
     }
 }
+// Following From<*Trb> impls are safe
+// since GenericTrbEntry generated from any TRB will be valid.
+impl From<SetupStageTrb> for GenericTrbEntry {
+    fn from(trb: SetupStageTrb) -> GenericTrbEntry {
+        unsafe { transmute(trb) }
+    }
+}
+impl From<DataStageTrb> for GenericTrbEntry {
+    fn from(trb: DataStageTrb) -> GenericTrbEntry {
+        unsafe { transmute(trb) }
+    }
+}
+impl From<StatusStageTrb> for GenericTrbEntry {
+    fn from(trb: StatusStageTrb) -> GenericTrbEntry {
+        unsafe { transmute(trb) }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C, align(16))]
+struct SetupStageTrb {
+    // [xHCI] 6.4.1.2.1 Setup Stage TRB
+    request_type: u8,
+    request: u8,
+    value: u16,
+    index: u16,
+    length: u16,
+    option: u32,
+    control: u32,
+}
+const _: () = assert!(size_of::<SetupStageTrb>() == 16);
+impl SetupStageTrb {
+    const REQ_TYPE_DIR_DEVICE_TO_HOST_BIT: u8 = 1 << 7;
+    const REQ_GET_DESCRIPTOR: u8 = 6;
+    // const REQ_SET_CONFIGURATION: u8 = 9;
+    // const REQ_SET_INTERFACE: u8 = 11;
+    fn new(request_type: u8, request: u8, value: u16, index: u16, length: u16) -> Self {
+        // Table 4-7: USB SETUP Data to Data Stage TRB and Status Stage TRB mapping
+        const TRT_NO_DATA_STAGE: u32 = 0;
+        const TRT_OUT_DATA_STAGE: u32 = 2;
+        const TRT_IN_DATA_STAGE: u32 = 3;
+        let transfer_type = if length == 0 {
+            TRT_NO_DATA_STAGE
+        } else if request & Self::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT != 0 {
+            TRT_IN_DATA_STAGE
+        } else {
+            TRT_OUT_DATA_STAGE
+        };
+        Self {
+            request_type,
+            request,
+            value,
+            index,
+            length,
+            option: 8,
+            control: transfer_type << 16
+                | (TrbType::SetupStage as u32) << 10
+                | (TrbControl::ImmediateData as u32),
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C, align(16))]
+struct DataStageTrb {
+    buf: u64,
+    option: u32,
+    control: u32,
+}
+const _: () = assert!(size_of::<DataStageTrb>() == 16);
+impl DataStageTrb {
+    const CONTROL_DATA_DIR_IN: u32 = 1 << 16;
+    const CONTROL_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
+    const CONTROL_INTERRUPT_ON_SHORT_PACKET: u32 = 1 << 2;
+    fn new_in(buf: &mut [u8]) -> Self {
+        Self {
+            buf: buf.as_ptr() as u64,
+            option: buf.len() as u32,
+            control: Self::CONTROL_DATA_DIR_IN
+                | (TrbType::DataStage as u32) << 10
+                | Self::CONTROL_INTERRUPT_ON_COMPLETION
+                | Self::CONTROL_INTERRUPT_ON_SHORT_PACKET,
+        }
+    }
+}
+
+// Status stage direction will be opposite of the data.
+// If there is no data transfer, status direction should be "in".
+// See Table 4-7 of xHCI spec.
+#[derive(Copy, Clone)]
+#[repr(C, align(16))]
+struct StatusStageTrb {
+    reserved: u64,
+    option: u32,
+    control: u32,
+}
+const _: () = assert!(size_of::<StatusStageTrb>() == 16);
+impl StatusStageTrb {
+    fn new_out() -> Self {
+        Self {
+            reserved: 0,
+            option: 0,
+            control: (TrbType::StatusStage as u32) << 10,
+        }
+    }
+}
+
 fn error_stringify<T: Debug>(x: T) -> String {
     format!("[xHC] Error: {x:?}")
 }
@@ -253,6 +366,28 @@ impl<'a> Future for CommandCompletionEventFuture<'a> {
             Err(_) => Poll::Pending,
             Ok(trb) => {
                 if trb.trb_type() == TrbType::CommandCompletionEvent as u32
+                    && trb.data == self.target_command_trb_addr
+                {
+                    Poll::Ready(trb)
+                } else {
+                    println!("Ignoring event: {:?}", trb);
+                    Poll::Pending
+                }
+            }
+        }
+    }
+}
+struct TransferEventFuture<'a> {
+    event_ring: &'a mut EventRing,
+    target_command_trb_addr: u64,
+}
+impl<'a> Future for TransferEventFuture<'a> {
+    type Output = GenericTrbEntry;
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context) -> Poll<GenericTrbEntry> {
+        match self.event_ring.pop() {
+            Err(_) => Poll::Pending,
+            Ok(trb) => {
+                if trb.trb_type() == TrbType::TransferEvent as u32
                     && trb.data == self.target_command_trb_addr
                 {
                     Poll::Ready(trb)
@@ -875,6 +1010,7 @@ pub struct Xhci {
     // input_contexts and ctrl_ep_rings are indexed by slot_id (1-255)
     input_contexts: [Option<Box<InputContext>>; 256],
     output_contexts: [Option<Box<OutputContext>>; 256],
+    device_descriptors: [DeviceDescriptor; 256],
     ctrl_ep_rings: [Option<CommandRing>; 256],
 }
 impl Xhci {
@@ -942,6 +1078,7 @@ impl Xhci {
             input_contexts: [NONE_INPUT_CONTEXT; 256],
             output_contexts: [NONE_OUTPUT_CONTEXT; 256],
             ctrl_ep_rings: [NONE_CTRL_EP_RING; 256],
+            device_descriptors: [DeviceDescriptor::default(); 256],
         };
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
@@ -1001,12 +1138,42 @@ impl Xhci {
             write_volatile(&mut self.doorbell_regs[0], 0);
         }
     }
+    fn notify_ep(&mut self, slot: u8, dci: usize) {
+        unsafe {
+            write_volatile(&mut self.doorbell_regs[slot as usize], dci as u32);
+        }
+    }
     async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.push(cmd)?;
         self.notify_xhc();
         Ok(CommandCompletionEventFuture {
             event_ring: &mut self.primary_event_ring,
             target_command_trb_addr: cmd_ptr,
+        }
+        .await)
+    }
+    async fn request_device_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
+        let ctrl_ep_ring = self.ctrl_ep_rings[slot as usize]
+            .as_mut()
+            .ok_or(WasabiError::Failed("ctrl_ep is not initialized"))?;
+        ctrl_ep_ring.push(
+            SetupStageTrb::new(
+                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT,
+                SetupStageTrb::REQ_GET_DESCRIPTOR,
+                (DescriptorType::Device as u16) << 8,
+                0,
+                size_of::<DeviceDescriptor>() as u16,
+            )
+            .into(),
+        )?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(
+            DataStageTrb::new_in(self.device_descriptors[slot as usize].as_mut_slice()).into(),
+        )?;
+        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
+        self.notify_ep(slot, 1);
+        Ok(TransferEventFuture {
+            event_ring: &mut self.primary_event_ring,
+            target_command_trb_addr: trb_ptr_waiting,
         }
         .await)
     }
@@ -1109,6 +1276,13 @@ impl Xhci {
                 let e = self.send_command(cmd).await?;
                 println!("event: {:?}", e);
                 println!("AddressDevice Command Done! {:?}", e);
+                println!("Requesting a device descriptor...");
+                let e = self.request_device_descriptor(slot).await;
+                println!("event: {:?}", e);
+                println!(
+                    "Got device descriptor! {:?}",
+                    self.device_descriptors[slot as usize]
+                );
 
                 self.poll_status = PollStatus::WaitingSomething;
             }

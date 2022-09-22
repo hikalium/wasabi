@@ -36,6 +36,7 @@ pub mod rtl8139;
 pub mod serial;
 pub mod test_runner;
 pub mod text_area;
+pub mod usb;
 pub mod util;
 pub mod volatile;
 pub mod vram;
