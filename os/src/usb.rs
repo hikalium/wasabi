@@ -16,6 +16,7 @@ pub enum DescriptorType {
 
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
+#[repr(C)]
 pub struct DeviceDescriptor {
     desc_length: u8,
     desc_type: u8,
