@@ -17,6 +17,7 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
+use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorType;
 use crate::usb::DeviceDescriptor;
 use crate::util::extract_bits;
@@ -1013,6 +1014,7 @@ pub struct Xhci {
     input_contexts: [Option<Pin<Box<InputContext>>>; 256],
     output_contexts: [Option<Pin<Box<OutputContext>>>; 256],
     device_descriptors: [DeviceDescriptor; 256],
+    config_descriptors: [ConfigDescriptor; 256],
     ctrl_ep_rings: [Option<CommandRing>; 256],
 }
 impl Xhci {
@@ -1084,6 +1086,7 @@ impl Xhci {
             output_contexts: [NONE_OUTPUT_CONTEXT; 256],
             ctrl_ep_rings: [NONE_CTRL_EP_RING; 256],
             device_descriptors: [DeviceDescriptor::default(); 256],
+            config_descriptors: [ConfigDescriptor::default(); 256],
         };
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
@@ -1173,6 +1176,31 @@ impl Xhci {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(
             DataStageTrb::new_in(self.device_descriptors[slot as usize].as_mut_slice()).into(),
+        )?;
+        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
+        self.notify_ep(slot, 1);
+        Ok(TransferEventFuture {
+            event_ring: &mut self.primary_event_ring,
+            target_command_trb_addr: trb_ptr_waiting,
+        }
+        .await)
+    }
+    async fn request_config_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
+        let ctrl_ep_ring = self.ctrl_ep_rings[slot as usize]
+            .as_mut()
+            .ok_or(WasabiError::Failed("ctrl_ep is not initialized"))?;
+        ctrl_ep_ring.push(
+            SetupStageTrb::new(
+                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT,
+                SetupStageTrb::REQ_GET_DESCRIPTOR,
+                (DescriptorType::Config as u16) << 8,
+                0,
+                size_of::<ConfigDescriptor>() as u16,
+            )
+            .into(),
+        )?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(
+            DataStageTrb::new_in(self.config_descriptors[slot as usize].as_mut_slice()).into(),
         )?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
@@ -1284,10 +1312,14 @@ impl Xhci {
                 println!("Requesting a device descriptor...");
                 let e = self.request_device_descriptor(slot).await;
                 println!("event: {:?}", e);
-                println!(
-                    "Got device descriptor! {:?}",
-                    self.device_descriptors[slot as usize]
-                );
+                let device_descriptor = self.device_descriptors[slot as usize];
+                println!("Got device descriptor! {:?}", device_descriptor,);
+
+                println!("Requesting a config descriptor...");
+                let e = self.request_config_descriptor(slot).await;
+                println!("event: {:?}", e);
+                let config_descriptor = self.config_descriptors[slot as usize];
+                println!("Got config descriptor! {:?}", config_descriptor,);
 
                 self.poll_status = PollStatus::WaitingSomething;
             }

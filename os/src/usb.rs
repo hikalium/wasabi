@@ -39,3 +39,39 @@ impl DeviceDescriptor {
         unsafe { slice::from_raw_parts_mut(self as *mut Self as *mut u8, size_of::<Self>()) }
     }
 }
+
+#[derive(Debug, Copy, Clone, Default)]
+#[allow(unused)]
+#[repr(packed)]
+pub struct ConfigDescriptor {
+    desc_length: u8,
+    desc_type: u8,
+    total_length: u16,
+    num_of_interfaces: u8,
+    config_value: u8,
+    config_string_index: u8,
+    attribute: u8,
+    max_power: u8,
+}
+const _: () = assert!(size_of::<ConfigDescriptor>() == 9);
+impl ConfigDescriptor {
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { slice::from_raw_parts_mut(self as *mut Self as *mut u8, size_of::<Self>()) }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+#[allow(unused)]
+#[repr(C)]
+pub struct InterfaceDescriptor {
+    desc_length: u8,
+    desc_type: u8,
+    interface_number: u8,
+    alt_setting: u8,
+    num_of_endpoints: u8,
+    interface_class: u8,
+    interface_subclass: u8,
+    interface_protocol: u8,
+    interface_index: u8,
+}
+const _: () = assert!(size_of::<InterfaceDescriptor>() == 9);
