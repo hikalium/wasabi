@@ -20,6 +20,7 @@ use crate::println;
 use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorType;
 use crate::usb::DeviceDescriptor;
+use crate::usb::UsbDescriptor;
 use crate::util::extract_bits;
 use crate::volatile::Volatile;
 use alloc::alloc::Layout;
@@ -30,6 +31,7 @@ use alloc::fmt::Display;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::cell::SyncUnsafeCell;
 use core::future::Future;
 use core::mem::size_of;
@@ -1185,7 +1187,7 @@ impl Xhci {
         }
         .await)
     }
-    async fn request_config_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
+    async fn request_config_descriptor(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {
         let ctrl_ep_ring = self.ctrl_ep_rings[slot as usize]
             .as_mut()
             .ok_or(WasabiError::Failed("ctrl_ep is not initialized"))?;
@@ -1204,11 +1206,17 @@ impl Xhci {
         )?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
-        Ok(TransferEventFuture {
+        let e = TransferEventFuture {
             event_ring: &mut self.primary_event_ring,
             target_command_trb_addr: trb_ptr_waiting,
         }
-        .await)
+        .await;
+        println!("event: {:?}", e);
+        let config_descriptor = self.config_descriptors[slot as usize];
+        println!("Got config descriptor! {:?}", config_descriptor,);
+        let mut descriptors = Vec::new();
+        descriptors.push(UsbDescriptor::Config(config_descriptor));
+        Ok(descriptors)
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
         let e = self.send_command(GenericTrbEntry::cmd_no_op()).await;
@@ -1316,10 +1324,9 @@ impl Xhci {
                 println!("Got device descriptor! {:?}", device_descriptor,);
 
                 println!("Requesting a config descriptor...");
-                let e = self.request_config_descriptor(slot).await;
+                let descriptors = self.request_config_descriptor(slot).await?;
                 println!("event: {:?}", e);
-                let config_descriptor = self.config_descriptors[slot as usize];
-                println!("Got config descriptor! {:?}", config_descriptor,);
+                println!("Got descriptors! {:?}", descriptors,);
 
                 self.poll_status = PollStatus::WaitingSomething;
             }

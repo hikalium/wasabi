@@ -14,9 +14,18 @@ pub enum DescriptorType {
     Endpoint = 5,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum UsbDescriptor {
+    Device(DeviceDescriptor),
+    Config(ConfigDescriptor),
+    String,
+    Interface(InterfaceDescriptor),
+    Endpoint(EndpointDescriptor),
+}
+
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
-#[repr(C)]
+#[repr(packed)]
 pub struct DeviceDescriptor {
     desc_length: u8,
     desc_type: u8,
@@ -62,7 +71,7 @@ impl ConfigDescriptor {
 
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
-#[repr(C)]
+#[repr(packed)]
 pub struct InterfaceDescriptor {
     desc_length: u8,
     desc_type: u8,
@@ -75,3 +84,16 @@ pub struct InterfaceDescriptor {
     interface_index: u8,
 }
 const _: () = assert!(size_of::<InterfaceDescriptor>() == 9);
+
+#[derive(Debug, Copy, Clone, Default)]
+#[allow(unused)]
+#[repr(packed)]
+pub struct EndpointDescriptor {
+    desc_length: u8,
+    desc_type: u8,
+    endpoint_address: u8,
+    attributes: u8,
+    max_packet_size: u16,
+    interval_ms: u8,
+}
+const _: () = assert!(size_of::<EndpointDescriptor>() == 7);
