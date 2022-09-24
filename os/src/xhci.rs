@@ -20,6 +20,7 @@ use crate::println;
 use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorType;
 use crate::usb::DeviceDescriptor;
+use crate::usb::IntoPinnedMutableSlice;
 use crate::usb::UsbDescriptor;
 use crate::util::extract_bits;
 use crate::volatile::Volatile;
@@ -31,9 +32,11 @@ use alloc::fmt::Display;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::SyncUnsafeCell;
 use core::future::Future;
+use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::mem::transmute;
 use core::mem::ManuallyDrop;
@@ -87,7 +90,7 @@ enum TrbControl {
     ImmediateData = 1 << 6,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 #[repr(C, align(16))]
 struct GenericTrbEntry {
     data: u64,
@@ -129,9 +132,9 @@ impl GenericTrbEntry {
         trb.set_control(TrbType::EnableSlotCommand, TrbControl::None);
         trb
     }
-    fn cmd_address_device(input_context: &InputContext, slot_id: u8) -> Self {
+    fn cmd_address_device(input_context: Pin<&InputContext>, slot_id: u8) -> Self {
         let mut trb = Self {
-            data: input_context as *const InputContext as u64,
+            data: input_context.get_ref() as *const InputContext as u64,
             option: 0,
             control: 0,
         };
@@ -240,7 +243,7 @@ impl DataStageTrb {
     const CONTROL_DATA_DIR_IN: u32 = 1 << 16;
     const CONTROL_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
     const CONTROL_INTERRUPT_ON_SHORT_PACKET: u32 = 1 << 2;
-    fn new_in(buf: &mut [u8]) -> Self {
+    fn new_in(buf: Pin<&mut [u8]>) -> Self {
         Self {
             buf: buf.as_ptr() as u64,
             option: buf.len() as u32,
@@ -282,6 +285,7 @@ fn error_stringify<T: Debug>(x: T) -> String {
 struct TrbRing {
     trb: [GenericTrbEntry; 128],
     current_index: usize,
+    _pinned: PhantomPinned,
 }
 // Limiting the size of TrbRing to be equal or less than 4096
 // to avoid crossing 64KiB boundaries. See Table 6-1 of xhci spec.
@@ -289,15 +293,19 @@ const _: () = assert!(size_of::<TrbRing>() <= 4096);
 impl TrbRing {
     fn new() -> Pin<Box<Self>> {
         let mut ring: Pin<Box<Self>> = Box::pin(unsafe { MaybeUninit::zeroed().assume_init() });
-        ring.init();
+        ring.as_mut().init();
         ring
     }
-    fn init(&mut self) {
+    fn init(self: &mut Pin<&mut Self>) {
         let trb_head_paddr = self.phys_addr() as u64;
-        let link = &mut self.trb[self.trb.len() - 1];
-        link.data = trb_head_paddr;
-        link.option = 0;
-        link.set_control(TrbType::Link, TrbControl::ToggleCycle);
+        let mut link_trb = GenericTrbEntry {
+            data: trb_head_paddr,
+            option: 0,
+            control: 0,
+        };
+        link_trb.set_control(TrbType::Link, TrbControl::ToggleCycle);
+        self.write(self.trb.len() - 1, link_trb)
+            .expect("failed to write a link trb");
     }
     fn phys_addr(&self) -> u64 {
         &self.trb[0] as *const GenericTrbEntry as u64
@@ -305,7 +313,7 @@ impl TrbRing {
     fn num_trbs(&self) -> usize {
         self.trb.len()
     }
-    fn advance_index(&mut self) {
+    fn advance_index(self: &mut Pin<&mut Self>) {
         let current_index = self.current_index;
         let next_index = (current_index + 1) % self.trb.len();
         let (next_index, link_trb_index) = if next_index == self.trb.len() - 2 {
@@ -313,17 +321,33 @@ impl TrbRing {
         } else {
             (next_index, None)
         };
-        self.trb[current_index].flip_cycle_state();
+        let mutable_self = unsafe { self.as_mut().get_unchecked_mut() };
+        mutable_self.trb[current_index].flip_cycle_state();
         if let Some(link_trb_index) = link_trb_index {
-            self.trb[link_trb_index].flip_cycle_state();
+            mutable_self.trb[link_trb_index].flip_cycle_state();
         }
-        self.current_index = next_index;
+        mutable_self.current_index = next_index;
     }
-    fn current(&self) -> Pin<&GenericTrbEntry> {
-        Pin::new(&self.trb[self.current_index])
+    fn current(&self) -> GenericTrbEntry {
+        self.trb[self.current_index]
     }
-    fn current_mut(&mut self) -> Pin<&mut GenericTrbEntry> {
-        Pin::new(&mut self.trb[self.current_index])
+    fn current_ptr(&self) -> usize {
+        &self.trb[self.current_index] as *const GenericTrbEntry as usize
+    }
+    fn write(self: &mut Pin<&mut Self>, index: usize, trb: GenericTrbEntry) -> Result<()> {
+        if index < self.trb.len() {
+            // Using get_unchecked_mut here is safe, since we are not moving the pinned contents.
+            unsafe {
+                self.as_mut().get_unchecked_mut().trb[index] = trb;
+            }
+            Ok(())
+        } else {
+            Err(WasabiError::Failed("TrbRing Out of Range"))
+        }
+    }
+    fn write_current(self: &mut Pin<&mut Self>, trb: GenericTrbEntry) {
+        self.write(self.current_index, trb)
+            .expect("writing to the current index shall not fail")
     }
 }
 
@@ -352,11 +376,11 @@ impl EventRing {
         self.ring.current().cycle_state() == self.cycle_state_ours
     }
     fn pop(&mut self) -> Result<GenericTrbEntry> {
-        let e = *self.ring.current();
         if !self.has_next_event() {
             return Err(WasabiError::Failed("EventRingIsEmpty"));
         }
-        self.ring.advance_index();
+        let e = self.ring.current();
+        self.ring.as_mut().advance_index();
         Ok(e)
     }
 }
@@ -410,29 +434,30 @@ struct CommandRing {
     ring: Pin<Box<TrbRing>>,
     cycle_state_ours: u32,
 }
-impl CommandRing {
-    fn new() -> Self {
+impl Default for CommandRing {
+    fn default() -> Self {
         Self {
             ring: TrbRing::new(),
             cycle_state_ours: 0,
         }
     }
+}
+impl CommandRing {
     fn ring(&self) -> Pin<&TrbRing> {
         self.ring.as_ref()
     }
     fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
-        let mut dst = self.ring.current_mut();
-        if dst.cycle_state() != self.cycle_state_ours {
+        if self.ring.current().cycle_state() != self.cycle_state_ours {
             return Err(WasabiError::Failed("Command Ring is Full"));
         }
         if src.cycle_state() != self.cycle_state_ours {
             src.flip_cycle_state();
         }
-        *dst = src;
-        let dst_ptr = dst.as_ref().get_ref() as *const GenericTrbEntry as u64;
-        self.ring.advance_index();
+        self.ring.as_mut().write_current(src);
+        let dst_ptr = self.ring.current_ptr();
+        self.ring.as_mut().advance_index();
         // The returned ptr will be used for waiting on command completion events.
-        Ok(dst_ptr)
+        Ok(dst_ptr as u64)
     }
 }
 
@@ -864,6 +889,7 @@ enum EndpointType {
 }
 
 #[repr(C, align(32))]
+#[derive(Default)]
 struct EndpointContext {
     data: [u32; 2],
     tr_dequeue_ptr: u64,
@@ -918,6 +944,7 @@ impl EndpointContext {
 }
 
 #[repr(C, align(32))]
+#[derive(Default)]
 struct DeviceContext {
     slot_ctx: [u32; 8],
     ep_ctx: [EndpointContext; 2 * 15 + 1],
@@ -954,6 +981,7 @@ impl DeviceContext {
 }
 
 #[repr(C, align(32))]
+#[derive(Default)]
 struct InputControlContext {
     drop_context_bitmap: u32,
     add_context_bitmap: u32,
@@ -972,32 +1000,90 @@ impl InputControlContext {
 }
 
 #[repr(C, align(4096))]
+#[derive(Default)]
 struct InputContext {
     input_ctrl_ctx: InputControlContext,
     device_ctx: DeviceContext,
+    //
+    _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<InputContext>() <= 4096);
 impl InputContext {
-    fn alloc() -> Pin<Box<InputContext>> {
-        Box::pin(unsafe { MaybeUninit::zeroed().assume_init() })
+    fn add_context(self: &mut Pin<&mut Self>, ici: usize) -> Result<()> {
+        unsafe { self.as_mut().get_unchecked_mut() }
+            .input_ctrl_ctx
+            .add_context(ici)
+    }
+    fn set_root_hub_port_number(self: &mut Pin<&mut Self>, port: usize) -> Result<()> {
+        unsafe { self.as_mut().get_unchecked_mut() }
+            .device_ctx
+            .set_root_hub_port_number(port)
+    }
+    fn set_num_of_ep_contexts(self: &mut Pin<&mut Self>, num_ep_ctx: usize) -> Result<()> {
+        unsafe { self.as_mut().get_unchecked_mut() }
+            .device_ctx
+            .set_num_of_ep_contexts(num_ep_ctx)
+    }
+    fn set_port_speed(self: &mut Pin<&mut Self>, psi: usize) -> Result<()> {
+        unsafe { self.as_mut().get_unchecked_mut() }
+            .device_ctx
+            .set_port_speed(psi)
+    }
+    fn init_ctrl_ep(
+        self: &mut Pin<&mut Self>,
+        ctrl_ep_ring_phys_addr: u64,
+        portsc: regs::PortScWrapper,
+    ) -> Result<()> {
+        let ep0 = &mut unsafe { self.as_mut().get_unchecked_mut() }
+            .device_ctx
+            .ep_ctx[0];
+        ep0.set_ep_type(EndpointType::Control)?;
+        ep0.set_ring_dequeue_pointer(ctrl_ep_ring_phys_addr)?;
+        ep0.set_dequeue_cycle_state(1)?;
+        ep0.set_error_count(3)?;
+        ep0.set_max_packet_size(portsc.max_packet_size()?);
+        Ok(())
     }
 }
 
 #[repr(C, align(4096))]
+#[derive(Default)]
 struct OutputContext {
     device_ctx: DeviceContext,
+    //
+    _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
-impl OutputContext {
-    fn alloc() -> Pin<Box<OutputContext>> {
-        Box::pin(unsafe { MaybeUninit::zeroed().assume_init() })
-    }
-}
 
 enum PollStatus {
     WaitingSomething,
     EnablingPort { port: usize },
     USB3Attached { port: usize },
+}
+
+struct SlotContext {
+    input_context: Pin<Box<InputContext>>,
+    output_context: Pin<Box<OutputContext>>,
+    device_descriptor: Pin<Box<DeviceDescriptor>>,
+    ctrl_ep_ring: CommandRing,
+}
+impl SlotContext {
+    fn device_descriptor(&mut self) -> Pin<&mut DeviceDescriptor> {
+        self.device_descriptor.as_mut()
+    }
+    fn output_context(&mut self) -> Pin<&mut OutputContext> {
+        self.output_context.as_mut()
+    }
+}
+impl Default for SlotContext {
+    fn default() -> Self {
+        Self {
+            input_context: Box::pin(InputContext::default()),
+            output_context: Box::pin(OutputContext::default()),
+            device_descriptor: Box::pin(DeviceDescriptor::default()),
+            ctrl_ep_ring: CommandRing::default(),
+        }
+    }
 }
 
 pub struct Xhci {
@@ -1010,14 +1096,10 @@ pub struct Xhci {
     doorbell_regs: ManuallyDrop<Pin<Box<[u32; 256]>>>,
     command_ring: CommandRing,
     primary_event_ring: EventRing,
-    device_contexts: DeviceContextBaseAddressArray,
+    device_context_base_array: DeviceContextBaseAddressArray,
     poll_status: PollStatus,
-    // input_contexts and ctrl_ep_rings are indexed by slot_id (1-255)
-    input_contexts: [Option<Pin<Box<InputContext>>>; 256],
-    output_contexts: [Option<Pin<Box<OutputContext>>>; 256],
-    device_descriptors: [DeviceDescriptor; 256],
-    config_descriptors: [ConfigDescriptor; 256],
-    ctrl_ep_rings: [Option<CommandRing>; 256],
+    // slot_context is indexed by slot_id (1-255)
+    slot_context: [SlotContext; 256],
 }
 impl Xhci {
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
@@ -1069,10 +1151,7 @@ impl Xhci {
         let portsc = regs::PortSc::new(&bar0, &cap_regs);
         let scratchpad_buffers =
             Self::alloc_scratch_pad_buffers(op_regs.page_size()?, cap_regs.num_scratch_pad_bufs())?;
-        let device_contexts = DeviceContextBaseAddressArray::new(scratchpad_buffers);
-        const NONE_INPUT_CONTEXT: Option<Pin<Box<InputContext>>> = None;
-        const NONE_OUTPUT_CONTEXT: Option<Pin<Box<OutputContext>>> = None;
-        const NONE_CTRL_EP_RING: Option<CommandRing> = None;
+        let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
         let mut xhc = Xhci {
             bdf,
             cap_regs,
@@ -1080,15 +1159,11 @@ impl Xhci {
             rt_regs,
             portsc,
             doorbell_regs,
-            command_ring: CommandRing::new(),
+            command_ring: CommandRing::default(),
             primary_event_ring: EventRing::new()?,
-            device_contexts,
+            device_context_base_array,
             poll_status: PollStatus::WaitingSomething,
-            input_contexts: [NONE_INPUT_CONTEXT; 256],
-            output_contexts: [NONE_OUTPUT_CONTEXT; 256],
-            ctrl_ep_rings: [NONE_CTRL_EP_RING; 256],
-            device_descriptors: [DeviceDescriptor::default(); 256],
-            config_descriptors: [ConfigDescriptor::default(); 256],
+            slot_context: [(); 256].map(|_| SlotContext::default()),
         };
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
@@ -1110,7 +1185,8 @@ impl Xhci {
         let num_slots = self.cap_regs.num_of_device_slots();
         println!("num_slots = {}", num_slots);
         self.op_regs.set_num_device_slots(num_slots)?;
-        self.op_regs.set_dcbaa_ptr(&mut self.device_contexts)?;
+        self.op_regs
+            .set_dcbaa_ptr(&mut self.device_context_base_array)?;
         Ok(())
     }
     fn init_command_ring(&mut self) -> Result<()> {
@@ -1163,23 +1239,23 @@ impl Xhci {
         .await)
     }
     async fn request_device_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
-        let ctrl_ep_ring = self.ctrl_ep_rings[slot as usize]
-            .as_mut()
-            .ok_or(WasabiError::Failed("ctrl_ep is not initialized"))?;
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT,
-                SetupStageTrb::REQ_GET_DESCRIPTOR,
-                (DescriptorType::Device as u16) << 8,
-                0,
-                size_of::<DeviceDescriptor>() as u16,
-            )
-            .into(),
-        )?;
-        let trb_ptr_waiting = ctrl_ep_ring.push(
-            DataStageTrb::new_in(self.device_descriptors[slot as usize].as_mut_slice()).into(),
-        )?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
+        let setup_stage = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT,
+            SetupStageTrb::REQ_GET_DESCRIPTOR,
+            (DescriptorType::Device as u16) << 8,
+            0,
+            size_of::<DeviceDescriptor>() as u16,
+        );
+        let data_stage = DataStageTrb::new_in(
+            self.slot_context[slot as usize]
+                .device_descriptor()
+                .as_mut_slice(),
+        );
+        let status_stage = StatusStageTrb::new_out();
+        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
+        ctrl_ep_ring.push(setup_stage.into())?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(data_stage.into())?;
+        ctrl_ep_ring.push(status_stage.into())?;
         self.notify_ep(slot, 1);
         Ok(TransferEventFuture {
             event_ring: &mut self.primary_event_ring,
@@ -1187,23 +1263,23 @@ impl Xhci {
         }
         .await)
     }
-    async fn request_config_descriptor(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {
-        let ctrl_ep_ring = self.ctrl_ep_rings[slot as usize]
-            .as_mut()
-            .ok_or(WasabiError::Failed("ctrl_ep is not initialized"))?;
+    async fn request_config_descriptor_bytes(
+        &mut self,
+        slot: u8,
+        buf: Pin<&mut [u8]>,
+    ) -> Result<()> {
+        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT,
                 SetupStageTrb::REQ_GET_DESCRIPTOR,
                 (DescriptorType::Config as u16) << 8,
                 0,
-                size_of::<ConfigDescriptor>() as u16,
+                buf.len() as u16,
             )
             .into(),
         )?;
-        let trb_ptr_waiting = ctrl_ep_ring.push(
-            DataStageTrb::new_in(self.config_descriptors[slot as usize].as_mut_slice()).into(),
-        )?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
         let e = TransferEventFuture {
@@ -1212,10 +1288,14 @@ impl Xhci {
         }
         .await;
         println!("event: {:?}", e);
-        let config_descriptor = self.config_descriptors[slot as usize];
+        Ok(())
+    }
+    async fn request_config_descriptor_and_rest(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {
+        let mut config_descriptor = Box::pin(ConfigDescriptor::default());
+        self.request_config_descriptor_bytes(slot, config_descriptor.as_mut().as_mut_slice())
+            .await?;
         println!("Got config descriptor! {:?}", config_descriptor,);
-        let mut descriptors = Vec::new();
-        descriptors.push(UsbDescriptor::Config(config_descriptor));
+        let descriptors = vec![UsbDescriptor::Config(*config_descriptor)];
         Ok(descriptors)
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
@@ -1270,49 +1350,26 @@ impl Xhci {
 
                 // Setup an input context and send AddressDevice command.
                 // 4.3.3 Device Slot Initialization
-                let input_context = &mut self.input_contexts[slot as usize];
-                if input_context.is_none() {
-                    *input_context = Some(InputContext::alloc());
-                }
-                let input_context = input_context
-                    .as_mut()
-                    .expect("InputContext is not allocated");
-                input_context.input_ctrl_ctx.add_context(0)?;
-                input_context.input_ctrl_ctx.add_context(1)?;
+                let slot_context = &mut self.slot_context[slot as usize];
+                let output_context_addr =
+                    unsafe { slot_context.output_context().get_unchecked_mut() }
+                        as *mut OutputContext;
+                let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring.ring.phys_addr();
+                let input_context = &mut slot_context.input_context.as_mut();
+                input_context.add_context(0)?;
+                input_context.add_context(1)?;
                 // 3. Initialize the Input Slot Context data structure (6.2.2)
-                input_context.device_ctx.set_root_hub_port_number(port)?;
-                input_context.device_ctx.set_num_of_ep_contexts(1)?;
+                input_context.set_root_hub_port_number(port)?;
+                input_context.set_num_of_ep_contexts(1)?;
                 // 4. Initialize the Transfer Ring for the Default Control Endpoint
-                let ctrl_ep_ring = &mut self.ctrl_ep_rings[slot as usize];
-                if ctrl_ep_ring.is_none() {
-                    *ctrl_ep_ring = Some(CommandRing::new());
-                }
-                let ctrl_ep_ring = ctrl_ep_ring
-                    .as_mut()
-                    .expect("ctrl_ep_ring is not allocated");
                 // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
                 let portsc = self.portsc.get(port)?;
-                input_context
-                    .device_ctx
-                    .set_port_speed(portsc.port_speed())?;
-                let ep0 = &mut input_context.device_ctx.ep_ctx[0];
-                ep0.set_ep_type(EndpointType::Control)?;
-                ep0.set_ring_dequeue_pointer(ctrl_ep_ring.ring.phys_addr())?;
-                ep0.set_dequeue_cycle_state(1)?;
-                ep0.set_error_count(3)?;
-                ep0.set_max_packet_size(portsc.max_packet_size()?);
-
-                let output_context = &mut self.output_contexts[slot as usize];
-                if output_context.is_none() {
-                    *output_context = Some(OutputContext::alloc());
-                }
-                let output_context = output_context
-                    .as_mut()
-                    .expect("OutputContext is not allocated");
-                self.device_contexts.inner.context[slot as usize] =
-                    output_context.as_mut().get_mut() as *mut OutputContext as u64;
+                input_context.set_port_speed(portsc.port_speed())?;
+                input_context.init_ctrl_ep(ctrl_ep_ring_phys_addr, portsc)?;
+                self.device_context_base_array.inner.context[slot as usize] =
+                    output_context_addr as u64;
                 // 8. Issue an Address Device Command for the Device Slot
-                let cmd = GenericTrbEntry::cmd_address_device(input_context, slot);
+                let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
                 println!("Sending address device command....");
                 let e = self.send_command(cmd).await?;
                 println!("event: {:?}", e);
@@ -1320,11 +1377,11 @@ impl Xhci {
                 println!("Requesting a device descriptor...");
                 let e = self.request_device_descriptor(slot).await;
                 println!("event: {:?}", e);
-                let device_descriptor = self.device_descriptors[slot as usize];
+                let device_descriptor = self.slot_context[slot as usize].device_descriptor();
                 println!("Got device descriptor! {:?}", device_descriptor,);
 
                 println!("Requesting a config descriptor...");
-                let descriptors = self.request_config_descriptor(slot).await?;
+                let descriptors = self.request_config_descriptor_and_rest(slot).await?;
                 println!("event: {:?}", e);
                 println!("Got descriptors! {:?}", descriptors,);
 

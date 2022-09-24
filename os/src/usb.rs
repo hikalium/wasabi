@@ -1,4 +1,6 @@
+use core::marker::PhantomPinned;
 use core::mem::size_of;
+use core::pin::Pin;
 use core::slice;
 
 #[derive(Debug, Copy, Clone)]
@@ -43,11 +45,24 @@ pub struct DeviceDescriptor {
     num_of_config: u8,
 }
 const _: () = assert!(size_of::<DeviceDescriptor>() == 18);
-impl DeviceDescriptor {
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        unsafe { slice::from_raw_parts_mut(self as *mut Self as *mut u8, size_of::<Self>()) }
+
+/// # Safety
+/// Implementing this trait is safe only when the target type can be constructed from any byte
+/// sequences that has the same size. If not, modification made via the byte slice produced by
+/// as_mut_slice can be an undefined behavior since the bytes can not be interpreted as the
+/// original type.
+pub unsafe trait IntoPinnedMutableSlice: Sized {
+    fn as_mut_slice(self: Pin<&mut Self>) -> Pin<&mut [u8]> {
+        Pin::new(unsafe {
+            slice::from_raw_parts_mut(
+                self.get_unchecked_mut() as *mut Self as *mut u8,
+                size_of::<Self>(),
+            )
+        })
     }
 }
+unsafe impl IntoPinnedMutableSlice for DeviceDescriptor {}
+unsafe impl IntoPinnedMutableSlice for ConfigDescriptor {}
 
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
@@ -61,13 +76,10 @@ pub struct ConfigDescriptor {
     config_string_index: u8,
     attribute: u8,
     max_power: u8,
+    //
+    _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<ConfigDescriptor>() == 9);
-impl ConfigDescriptor {
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        unsafe { slice::from_raw_parts_mut(self as *mut Self as *mut u8, size_of::<Self>()) }
-    }
-}
 
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
