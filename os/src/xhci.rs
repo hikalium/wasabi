@@ -67,8 +67,7 @@ enum TrbType {
     TransferEvent = 32,
     CommandCompletionEvent = 33,
     PortStatusChangeEvent = 34,
-    HostControllerEvent = 35,
-    DeviceNotificationEvent = 36,
+    HostControllerEvent = 37,
 }
 
 // 6.4.5 TRB Completion Code
@@ -79,6 +78,16 @@ enum TrbType {
 #[derive(PartialEq, Eq)]
 enum CompletionCode {
     Success = 1,
+    EventRingFullError = 21,
+}
+impl CompletionCode {
+    fn parse(code: u32) -> &'static str {
+        match code {
+            code if code == CompletionCode::Success as u32 => "Success",
+            code if code == CompletionCode::EventRingFullError as u32 => "EventRingFullError",
+            _ => "?",
+        }
+    }
 }
 
 #[repr(u32)]
@@ -128,8 +137,8 @@ impl GenericTrbEntry {
     fn cycle_state(&self) -> u32 {
         self.control & (TrbControl::CycleBit as u32)
     }
-    fn flip_cycle_state(&mut self) {
-        self.control ^= TrbControl::CycleBit as u32
+    fn set_cycle_state(&mut self, cycle: u32) {
+        self.control = (self.control & !(TrbControl::CycleBit as u32)) | cycle;
     }
     fn cmd_no_op() -> Self {
         let mut trb = Self {
@@ -175,13 +184,29 @@ impl Debug for GenericTrbEntry {
             e if e == (TrbType::CommandCompletionEvent as u32) => {
                 write!(
                     f,
-                    "TRB@{:#p} CommandCompletionEvent CompletionCode = {}",
-                    self,
-                    self.completion_code()
+                    "CommandCompletionEvent CompletionCode = {} ({})",
+                    self.completion_code(),
+                    CompletionCode::parse(self.completion_code())
+                )
+            }
+            e if e == (TrbType::TransferEvent as u32) => {
+                write!(
+                    f,
+                    "TransferEvent CompletionCode = {} ({})",
+                    self.completion_code(),
+                    CompletionCode::parse(self.completion_code())
+                )
+            }
+            e if e == (TrbType::HostControllerEvent as u32) => {
+                write!(
+                    f,
+                    "HostControllerEvent CompletionCode = {} ({})",
+                    self.completion_code(),
+                    CompletionCode::parse(self.completion_code())
                 )
             }
             _ => {
-                write!(f, "TRB@{:#p} type={:?}", self, self.trb_type())
+                write!(f, "TRB type={:?}", self.trb_type())
             }
         }
     }
@@ -218,10 +243,34 @@ struct SetupStageTrb {
 }
 const _: () = assert!(size_of::<SetupStageTrb>() == 16);
 impl SetupStageTrb {
-    const REQ_TYPE_DIR_DEVICE_TO_HOST_BIT: u8 = 1 << 7;
+    // bmRequest bit[7]: Data Transfer Direction
+    //      0: Host to Device
+    //      1: Device to Host
+    const REQ_TYPE_DIR_DEVICE_TO_HOST: u8 = 1 << 7;
+    //const REQ_TYPE_DIR_HOST_TO_DEVICE: u8 = 0 << 7;
+    // bmRequest bit[5..=6]: Request Type
+    //      0: Standard
+    //      1: Class
+    //      2: Vendor
+    //      _: Reserved
+    //const REQ_TYPE_TYPE_STANDARD: u8 = 0 << 5;
+    const REQ_TYPE_TYPE_CLASS: u8 = 1 << 5;
+    //const REQ_TYPE_TYPE_VENDOR: u8 = 2 << 5;
+    // bmRequest bit[0..=4]: Recipient
+    //      0: Device
+    //      1: Interface
+    //      2: Endpoint
+    //      3: Other
+    //      _: Reserved
+    //const REQ_TYPE_TO_DEVICE: u8 = 0;
+    const REQ_TYPE_TO_INTERFACE: u8 = 1;
+    //const REQ_TYPE_TO_ENDPOINT: u8 = 2;
+    //const REQ_TYPE_TO_OTHER: u8 = 3;
+
+    const REQ_GET_REPORT: u8 = 1;
     const REQ_GET_DESCRIPTOR: u8 = 6;
-    // const REQ_SET_CONFIGURATION: u8 = 9;
-    // const REQ_SET_INTERFACE: u8 = 11;
+    //const REQ_SET_CONFIGURATION: u8 = 9;
+    //const REQ_SET_INTERFACE: u8 = 11;
     fn new(request_type: u8, request: u8, value: u16, index: u16, length: u16) -> Self {
         // Table 4-7: USB SETUP Data to Data Stage TRB and Status Stage TRB mapping
         const TRT_NO_DATA_STAGE: u32 = 0;
@@ -229,7 +278,7 @@ impl SetupStageTrb {
         const TRT_IN_DATA_STAGE: u32 = 3;
         let transfer_type = if length == 0 {
             TRT_NO_DATA_STAGE
-        } else if request & Self::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT != 0 {
+        } else if request & Self::REQ_TYPE_DIR_DEVICE_TO_HOST != 0 {
             TRT_IN_DATA_STAGE
         } else {
             TRT_OUT_DATA_STAGE
@@ -309,20 +358,7 @@ struct TrbRing {
 const _: () = assert!(size_of::<TrbRing>() <= 4096);
 impl TrbRing {
     fn new() -> Pin<Box<Self>> {
-        let mut ring: Pin<Box<Self>> = Box::pin(unsafe { MaybeUninit::zeroed().assume_init() });
-        ring.as_mut().init();
-        ring
-    }
-    fn init(self: &mut Pin<&mut Self>) {
-        let trb_head_paddr = self.phys_addr() as u64;
-        let mut link_trb = GenericTrbEntry {
-            data: trb_head_paddr,
-            option: 0,
-            control: 0,
-        };
-        link_trb.set_control(TrbType::Link, TrbControl::ToggleCycle);
-        self.write(self.trb.len() - 1, link_trb)
-            .expect("failed to write a link trb");
+        Box::pin(unsafe { MaybeUninit::zeroed().assume_init() })
     }
     fn phys_addr(&self) -> u64 {
         &self.trb[0] as *const GenericTrbEntry as u64
@@ -330,23 +366,19 @@ impl TrbRing {
     fn num_trbs(&self) -> usize {
         self.trb.len()
     }
-    fn advance_index(self: &mut Pin<&mut Self>) {
+    fn advance_index(self: &mut Pin<&mut Self>, cycle_ours: u32) {
+        let cycle_theirs = 1 - cycle_ours;
         let current_index = self.current_index;
         let next_index = (current_index + 1) % self.trb.len();
-        let (next_index, link_trb_index) = if next_index == self.trb.len() - 2 {
-            (0, Some(next_index))
-        } else {
-            (next_index, None)
-        };
         let mutable_self = unsafe { self.as_mut().get_unchecked_mut() };
-        mutable_self.trb[current_index].flip_cycle_state();
-        if let Some(link_trb_index) = link_trb_index {
-            mutable_self.trb[link_trb_index].flip_cycle_state();
-        }
+        mutable_self.trb[current_index].set_cycle_state(cycle_theirs);
         mutable_self.current_index = next_index;
     }
     fn current(&self) -> GenericTrbEntry {
         self.trb[self.current_index]
+    }
+    fn current_index(&self) -> usize {
+        self.current_index
     }
     fn current_ptr(&self) -> usize {
         &self.trb[self.current_index] as *const GenericTrbEntry as usize
@@ -368,10 +400,57 @@ impl TrbRing {
     }
 }
 
+#[derive(Debug)]
+struct CommandRing {
+    ring: Pin<Box<TrbRing>>,
+    cycle_state_ours: u32,
+}
+impl Default for CommandRing {
+    fn default() -> Self {
+        let mut ring = TrbRing::new();
+        let trb_head_paddr = ring.phys_addr() as u64;
+        let mut link_trb = GenericTrbEntry {
+            data: trb_head_paddr,
+            option: 0,
+            control: 0,
+        };
+        link_trb.set_control(TrbType::Link, TrbControl::ToggleCycle);
+        let num_trbs = ring.num_trbs();
+        ring.as_mut()
+            .write(num_trbs - 1, link_trb)
+            .expect("failed to write a link trb");
+        Self {
+            ring,
+            cycle_state_ours: 0,
+        }
+    }
+}
+impl CommandRing {
+    fn ring(&self) -> Pin<&TrbRing> {
+        self.ring.as_ref()
+    }
+    fn push(&mut self, src: GenericTrbEntry) -> Result<u64> {
+        if self.ring.current().cycle_state() != self.cycle_state_ours {
+            return Err(WasabiError::Failed("Command Ring is Full"));
+        }
+        self.ring.as_mut().write_current(src);
+        let dst_ptr = self.ring.current_ptr();
+        self.ring.as_mut().advance_index(self.cycle_state_ours);
+        if self.ring.current_index() == self.ring.num_trbs() - 1 {
+            // Reached to Link TRB. Let's skip it and toggle the cycle.
+            self.ring.as_mut().advance_index(self.cycle_state_ours);
+            self.cycle_state_ours = 1 - self.cycle_state_ours;
+        }
+        // The returned ptr will be used for waiting on command completion events.
+        Ok(dst_ptr as u64)
+    }
+}
+
 struct EventRing {
     ring: Pin<Box<TrbRing>>,
     erst: Pin<Box<EventRingSegmentTableEntry>>,
     cycle_state_ours: u32,
+    erdp: Option<*mut u64>,
 }
 impl EventRing {
     fn new() -> Result<Self> {
@@ -381,7 +460,11 @@ impl EventRing {
             ring,
             erst,
             cycle_state_ours: 1,
+            erdp: None,
         })
+    }
+    fn set_erdp(&mut self, erdp: *mut u64) {
+        self.erdp = Some(erdp);
     }
     fn ring(&self) -> Pin<&TrbRing> {
         self.ring.as_ref()
@@ -397,86 +480,42 @@ impl EventRing {
             return Err(WasabiError::Failed("EventRingIsEmpty"));
         }
         let e = self.ring.current();
-        self.ring.as_mut().advance_index();
+        unsafe {
+            write_volatile(
+                self.erdp.expect("erdp is not set"),
+                self.ring.current_ptr() as u64,
+            );
+        }
+        self.ring.as_mut().advance_index(self.cycle_state_ours);
+        if self.ring.current_index() == 0 {
+            self.cycle_state_ours = 1 - self.cycle_state_ours;
+        }
         Ok(e)
     }
 }
-struct CommandCompletionEventFuture<'a> {
-    event_ring: &'a mut EventRing,
-    target_command_trb_addr: u64,
-}
-impl<'a> Future for CommandCompletionEventFuture<'a> {
-    type Output = GenericTrbEntry;
-    fn poll(mut self: Pin<&mut Self>, _: &mut Context) -> Poll<GenericTrbEntry> {
-        match self.event_ring.pop() {
-            Err(_) => Poll::Pending,
-            Ok(trb) => {
-                if trb.trb_type() == TrbType::CommandCompletionEvent as u32
-                    && trb.data == self.target_command_trb_addr
-                {
-                    Poll::Ready(trb)
-                } else {
-                    println!("Ignoring event: {:?}", trb);
-                    Poll::Pending
-                }
-            }
-        }
-    }
-}
-struct TransferEventFuture<'a> {
-    event_ring: &'a mut EventRing,
-    target_command_trb_addr: u64,
-}
-impl<'a> Future for TransferEventFuture<'a> {
-    type Output = GenericTrbEntry;
-    fn poll(mut self: Pin<&mut Self>, _: &mut Context) -> Poll<GenericTrbEntry> {
-        match self.event_ring.pop() {
-            Err(_) => Poll::Pending,
-            Ok(trb) => {
-                if trb.trb_type() == TrbType::TransferEvent as u32
-                    && trb.data == self.target_command_trb_addr
-                {
-                    Poll::Ready(trb)
-                } else {
-                    println!("Ignoring event: {:?}", trb);
-                    Poll::Pending
-                }
-            }
-        }
-    }
-}
 
-#[derive(Debug)]
-struct CommandRing {
-    ring: Pin<Box<TrbRing>>,
-    cycle_state_ours: u32,
+struct EventFuture<'a, const E: TrbType> {
+    event_ring: &'a mut EventRing,
+    target_command_trb_addr: u64,
 }
-impl Default for CommandRing {
-    fn default() -> Self {
-        Self {
-            ring: TrbRing::new(),
-            cycle_state_ours: 0,
+impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
+    type Output = GenericTrbEntry;
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context) -> Poll<GenericTrbEntry> {
+        match self.event_ring.pop() {
+            Err(_) => Poll::Pending,
+            Ok(trb) => {
+                if trb.trb_type() == E as u32 && trb.data == self.target_command_trb_addr {
+                    Poll::Ready(trb)
+                } else {
+                    println!("Ignoring event: {:?}", trb);
+                    Poll::Pending
+                }
+            }
         }
     }
 }
-impl CommandRing {
-    fn ring(&self) -> Pin<&TrbRing> {
-        self.ring.as_ref()
-    }
-    fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
-        if self.ring.current().cycle_state() != self.cycle_state_ours {
-            return Err(WasabiError::Failed("Command Ring is Full"));
-        }
-        if src.cycle_state() != self.cycle_state_ours {
-            src.flip_cycle_state();
-        }
-        self.ring.as_mut().write_current(src);
-        let dst_ptr = self.ring.current_ptr();
-        self.ring.as_mut().advance_index();
-        // The returned ptr will be used for waiting on command completion events.
-        Ok(dst_ptr as u64)
-    }
-}
+type CommandCompletionEventFuture<'a> = EventFuture<'a, { TrbType::CommandCompletionEvent }>;
+type TransferEventFuture<'a> = EventFuture<'a, { TrbType::TransferEvent }>;
 
 #[repr(C, align(64))]
 struct RawDeviceContextBaseAddressArray {
@@ -1190,12 +1229,13 @@ impl Xhci {
         Ok(xhc)
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
-        let eq = &self.primary_event_ring;
+        let eq = &mut self.primary_event_ring;
         let irs = &mut self.rt_regs.irs[0];
         irs.erst_size = 1;
         irs.erdp = eq.ring().phys_addr() as u64;
         irs.erst_base = eq.erst_phys_addr() as u64;
         irs.management = 0;
+        eq.set_erdp(&mut irs.erdp as *mut u64);
         Ok(())
     }
     fn init_slots_and_contexts(&mut self) -> Result<()> {
@@ -1254,7 +1294,7 @@ impl Xhci {
     }
     async fn request_device_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
         let setup_stage = SetupStageTrb::new(
-            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT,
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
             SetupStageTrb::REQ_GET_DESCRIPTOR,
             (DescriptorType::Device as u16) << 8,
             0,
@@ -1277,6 +1317,31 @@ impl Xhci {
         }
         .await)
     }
+    async fn request_report_bytes(&mut self, slot: u8, buf: Pin<&mut [u8]>) -> Result<()> {
+        // [HID] 7.2.1 Get_Report Request
+        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
+        ctrl_ep_ring.push(
+            SetupStageTrb::new(
+                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                    | SetupStageTrb::REQ_TYPE_TYPE_CLASS
+                    | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+                SetupStageTrb::REQ_GET_REPORT,
+                0x2201, /* Report | Input */
+                0,
+                buf.len() as u16,
+            )
+            .into(),
+        )?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
+        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
+        self.notify_ep(slot, 1);
+        TransferEventFuture {
+            event_ring: &mut self.primary_event_ring,
+            target_command_trb_addr: trb_ptr_waiting,
+        }
+        .await
+        .completed()
+    }
     async fn request_config_descriptor_bytes(
         &mut self,
         slot: u8,
@@ -1285,7 +1350,7 @@ impl Xhci {
         let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
         ctrl_ep_ring.push(
             SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST_BIT,
+                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
                 SetupStageTrb::REQ_GET_DESCRIPTOR,
                 (DescriptorType::Config as u16) << 8,
                 0,
@@ -1325,6 +1390,70 @@ impl Xhci {
             .completed()?;
         Ok(())
     }
+    async fn attach_device(&mut self, port: usize) -> Result<()> {
+        let e = self
+            .send_command(GenericTrbEntry::cmd_enable_slot())
+            .await?;
+        let slot = e.slot_id();
+        println!(
+            "USB3 Device Detected, slot = {}, port {}",
+            e.slot_id(),
+            port
+        );
+
+        // Setup an input context and send AddressDevice command.
+        // 4.3.3 Device Slot Initialization
+        let slot_context = &mut self.slot_context[slot as usize];
+        let output_context_addr =
+            unsafe { slot_context.output_context().get_unchecked_mut() } as *mut OutputContext;
+        let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring.ring.phys_addr();
+        let input_context = &mut slot_context.input_context.as_mut();
+        input_context.add_context(0)?;
+        input_context.add_context(1)?;
+        // 3. Initialize the Input Slot Context data structure (6.2.2)
+        input_context.set_root_hub_port_number(port)?;
+        input_context.set_num_of_ep_contexts(1)?;
+        // 4. Initialize the Transfer Ring for the Default Control Endpoint
+        // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
+        let portsc = self.portsc.get(port)?;
+        input_context.set_port_speed(portsc.port_speed())?;
+        input_context.init_ctrl_ep(ctrl_ep_ring_phys_addr, portsc)?;
+        self.device_context_base_array.inner.context[slot as usize] = output_context_addr as u64;
+        // 8. Issue an Address Device Command for the Device Slot
+        let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
+        self.send_command(cmd).await?.completed()?;
+        self.request_device_descriptor(slot).await?.completed()?;
+        let descriptors = self.request_config_descriptor_and_rest(slot).await?;
+        for d in &descriptors {
+            println!("{d:?}");
+        }
+        let device_descriptor = self.slot_context[slot as usize].device_descriptor();
+        println!("{device_descriptor:?}");
+        if device_descriptor.device_class() == 0 {
+            // Device class is derived from Interface Descriptor
+            for d in &descriptors {
+                if let UsbDescriptor::Interface(interface_desc) = d {
+                    match interface_desc.triple() {
+                        (3, 1, 1) => {
+                            println!("!!!!! USB KBD");
+                            let mut bytes = [0; 8];
+                            loop {
+                                let buf = Pin::new(&mut bytes);
+                                self.request_report_bytes(slot, buf).await?;
+                                println!("{bytes:?}");
+                            }
+                        }
+                        (3, 1, 2) => println!("!!!!! USB MOUSE"),
+                        (3, subclass, protocol) => println!(
+                            "Unknown HID Device (subclass = {subclass}, protocol = {protocol})"
+                        ),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
     async fn poll(&mut self) -> Result<()> {
         match self.poll_status {
             PollStatus::WaitingSomething => {
@@ -1355,60 +1484,12 @@ impl Xhci {
                 }
             }
             PollStatus::USB3Attached { port } => {
-                let e = self
-                    .send_command(GenericTrbEntry::cmd_enable_slot())
-                    .await?;
-                let slot = e.slot_id();
-                println!(
-                    "USB3 Device Detected, slot = {}, port {}",
-                    e.slot_id(),
-                    port
-                );
-
-                // Setup an input context and send AddressDevice command.
-                // 4.3.3 Device Slot Initialization
-                let slot_context = &mut self.slot_context[slot as usize];
-                let output_context_addr =
-                    unsafe { slot_context.output_context().get_unchecked_mut() }
-                        as *mut OutputContext;
-                let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring.ring.phys_addr();
-                let input_context = &mut slot_context.input_context.as_mut();
-                input_context.add_context(0)?;
-                input_context.add_context(1)?;
-                // 3. Initialize the Input Slot Context data structure (6.2.2)
-                input_context.set_root_hub_port_number(port)?;
-                input_context.set_num_of_ep_contexts(1)?;
-                // 4. Initialize the Transfer Ring for the Default Control Endpoint
-                // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
-                let portsc = self.portsc.get(port)?;
-                input_context.set_port_speed(portsc.port_speed())?;
-                input_context.init_ctrl_ep(ctrl_ep_ring_phys_addr, portsc)?;
-                self.device_context_base_array.inner.context[slot as usize] =
-                    output_context_addr as u64;
-                // 8. Issue an Address Device Command for the Device Slot
-                let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
-                self.send_command(cmd).await?.completed()?;
-                self.request_device_descriptor(slot).await?.completed()?;
-                let descriptors = self.request_config_descriptor_and_rest(slot).await?;
-                for d in &descriptors {
-                    println!("{d:?}");
+                if let Err(e) = self.attach_device(port).await {
+                    println!(
+                        "Failed to initialize an USB device on port {}: {:?}",
+                        port, e
+                    );
                 }
-                let device_descriptor = self.slot_context[slot as usize].device_descriptor();
-                println!("{device_descriptor:?}");
-                if device_descriptor.device_class() == 0 {
-                    // Device class is derived from Interface Descriptor
-                    for d in &descriptors {
-                        if let UsbDescriptor::Interface(interface_desc) = d {
-                            match interface_desc.triple() {
-                            (3, 1, 1) => println!("!!!!! USB KBD"),
-                            (3, 1, 2) => println!("!!!!! USB MOUSE"),
-                            (3, subclass, protocol) => println!("Unknown HID Device (subclass = {subclass}, protocol = {protocol})"),
-                            _ => {},
-                        }
-                        }
-                    }
-                }
-
                 self.poll_status = PollStatus::WaitingSomething;
             }
         }
