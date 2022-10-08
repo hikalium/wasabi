@@ -270,7 +270,7 @@ impl SetupStageTrb {
     const REQ_GET_REPORT: u8 = 1;
     const REQ_GET_DESCRIPTOR: u8 = 6;
     //const REQ_SET_CONFIGURATION: u8 = 9;
-    //const REQ_SET_INTERFACE: u8 = 11;
+    const REQ_SET_INTERFACE: u8 = 11;
     fn new(request_type: u8, request: u8, value: u16, index: u16, length: u16) -> Self {
         // Table 4-7: USB SETUP Data to Data Stage TRB and Status Stage TRB mapping
         const TRT_NO_DATA_STAGE: u32 = 0;
@@ -313,8 +313,8 @@ impl DataStageTrb {
         Self {
             buf: buf.as_ptr() as u64,
             option: buf.len() as u32,
-            control: Self::CONTROL_DATA_DIR_IN
-                | (TrbType::DataStage as u32) << 10
+            control: (TrbType::DataStage as u32) << 10
+                | Self::CONTROL_DATA_DIR_IN
                 | Self::CONTROL_INTERRUPT_ON_COMPLETION
                 | Self::CONTROL_INTERRUPT_ON_SHORT_PACKET,
         }
@@ -333,11 +333,24 @@ struct StatusStageTrb {
 }
 const _: () = assert!(size_of::<StatusStageTrb>() == 16);
 impl StatusStageTrb {
+    const CONTROL_DATA_DIR_IN: u32 = 1 << 16;
+    const CONTROL_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
+    const CONTROL_INTERRUPT_ON_SHORT_PACKET: u32 = 1 << 2;
     fn new_out() -> Self {
         Self {
             reserved: 0,
             option: 0,
             control: (TrbType::StatusStage as u32) << 10,
+        }
+    }
+    fn new_in() -> Self {
+        Self {
+            reserved: 0,
+            option: 0,
+            control: (TrbType::StatusStage as u32) << 10
+                | Self::CONTROL_DATA_DIR_IN
+                | Self::CONTROL_INTERRUPT_ON_COMPLETION
+                | Self::CONTROL_INTERRUPT_ON_SHORT_PACKET,
         }
     }
 }
@@ -1317,6 +1330,33 @@ impl Xhci {
         }
         .await)
     }
+    async fn request_set_interface(
+        &mut self,
+        slot: u8,
+        interface_number: u8,
+        alt_setting: u8,
+    ) -> Result<()> {
+        // [HID] 7.2.1 Get_Report Request
+        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
+        ctrl_ep_ring.push(
+            SetupStageTrb::new(
+                SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+                SetupStageTrb::REQ_SET_INTERFACE,
+                alt_setting as u16,
+                interface_number as u16,
+                0,
+            )
+            .into(),
+        )?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
+        self.notify_ep(slot, 1);
+        TransferEventFuture {
+            event_ring: &mut self.primary_event_ring,
+            target_command_trb_addr: trb_ptr_waiting,
+        }
+        .await
+        .completed()
+    }
     async fn request_report_bytes(&mut self, slot: u8, buf: Pin<&mut [u8]>) -> Result<()> {
         // [HID] 7.2.1 Get_Report Request
         let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
@@ -1439,6 +1479,14 @@ impl Xhci {
                             let mut bytes = [0; 8];
                             loop {
                                 let buf = Pin::new(&mut bytes);
+                                println!("setting interface");
+                                self.request_set_interface(
+                                    slot,
+                                    interface_desc.interface_number(),
+                                    interface_desc.alt_setting(),
+                                )
+                                .await?;
+                                println!("setting interface done!");
                                 self.request_report_bytes(slot, buf).await?;
                                 println!("{bytes:?}");
                             }

@@ -165,6 +165,12 @@ impl InterfaceDescriptor {
             self.interface_protocol,
         )
     }
+    pub fn interface_number(&self) -> u8 {
+        self.interface_number
+    }
+    pub fn alt_setting(&self) -> u8 {
+        self.alt_setting
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]
