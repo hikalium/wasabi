@@ -1295,6 +1295,12 @@ impl Xhci {
         self.request_config_descriptor_bytes(slot, config_descriptor.as_mut().as_mut_slice())
             .await?;
         println!("Got config descriptor! {:?}", config_descriptor,);
+        let mut buf = Vec::<u8>::new();
+        buf.resize(config_descriptor.total_length(), 0);
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        self.request_config_descriptor_bytes(slot, buf.as_mut())
+            .await?;
+        crate::print::hexdump(&buf);
         let descriptors = vec![UsbDescriptor::Config(*config_descriptor)];
         Ok(descriptors)
     }

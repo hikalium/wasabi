@@ -80,6 +80,11 @@ pub struct ConfigDescriptor {
     _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<ConfigDescriptor>() == 9);
+impl ConfigDescriptor {
+    pub fn total_length(&self) -> usize {
+        self.total_length as usize
+    }
+}
 
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
