@@ -1389,11 +1389,24 @@ impl Xhci {
                 let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
                 self.send_command(cmd).await?.completed()?;
                 self.request_device_descriptor(slot).await?.completed()?;
+                let descriptors = self.request_config_descriptor_and_rest(slot).await?;
+                for d in &descriptors {
+                    println!("{d:?}");
+                }
                 let device_descriptor = self.slot_context[slot as usize].device_descriptor();
                 println!("{device_descriptor:?}");
-                let descriptors = self.request_config_descriptor_and_rest(slot).await?;
-                for d in descriptors {
-                    println!("{d:?}");
+                if device_descriptor.device_class() == 0 {
+                    // Device class is derived from Interface Descriptor
+                    for d in &descriptors {
+                        if let UsbDescriptor::Interface(interface_desc) = d {
+                            match interface_desc.triple() {
+                            (3, 1, 1) => println!("!!!!! USB KBD"),
+                            (3, 1, 2) => println!("!!!!! USB MOUSE"),
+                            (3, subclass, protocol) => println!("Unknown HID Device (subclass = {subclass}, protocol = {protocol})"),
+                            _ => {},
+                        }
+                        }
+                    }
                 }
 
                 self.poll_status = PollStatus::WaitingSomething;

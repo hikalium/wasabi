@@ -87,6 +87,11 @@ pub struct DeviceDescriptor {
     num_of_config: u8,
 }
 const _: () = assert!(size_of::<DeviceDescriptor>() == 18);
+impl DeviceDescriptor {
+    pub fn device_class(&self) -> u8 {
+        self.device_class
+    }
+}
 
 /// # Safety
 /// Implementing this trait is safe only when the target type can be constructed from any byte
@@ -152,6 +157,15 @@ pub struct InterfaceDescriptor {
     interface_index: u8,
 }
 const _: () = assert!(size_of::<InterfaceDescriptor>() == 9);
+impl InterfaceDescriptor {
+    pub fn triple(&self) -> (u8, u8, u8) {
+        (
+            self.interface_class,
+            self.interface_subclass,
+            self.interface_protocol,
+        )
+    }
+}
 
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
