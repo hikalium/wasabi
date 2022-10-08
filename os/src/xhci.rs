@@ -18,6 +18,7 @@ use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
 use crate::usb::ConfigDescriptor;
+use crate::usb::DescriptorIterator;
 use crate::usb::DescriptorType;
 use crate::usb::DeviceDescriptor;
 use crate::usb::IntoPinnedMutableSlice;
@@ -32,7 +33,6 @@ use alloc::fmt::Display;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::SyncUnsafeCell;
 use core::future::Future;
@@ -1301,7 +1301,8 @@ impl Xhci {
         self.request_config_descriptor_bytes(slot, buf.as_mut())
             .await?;
         crate::print::hexdump(&buf);
-        let descriptors = vec![UsbDescriptor::Config(*config_descriptor)];
+        let iter = DescriptorIterator::new(&buf);
+        let descriptors: Vec<UsbDescriptor> = iter.collect();
         Ok(descriptors)
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
@@ -1389,7 +1390,10 @@ impl Xhci {
                 println!("Requesting a config descriptor...");
                 let descriptors = self.request_config_descriptor_and_rest(slot).await?;
                 println!("event: {:?}", e);
-                println!("Got descriptors! {:?}", descriptors,);
+                println!("Got descriptors!");
+                for d in descriptors {
+                    println!("{d:?}");
+                }
 
                 self.poll_status = PollStatus::WaitingSomething;
             }

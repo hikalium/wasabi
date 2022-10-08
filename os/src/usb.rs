@@ -1,3 +1,5 @@
+use crate::error::Result;
+use crate::error::WasabiError;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::pin::Pin;
@@ -23,6 +25,46 @@ pub enum UsbDescriptor {
     String,
     Interface(InterfaceDescriptor),
     Endpoint(EndpointDescriptor),
+    Unknown { desc_len: u8, desc_type: u8 },
+}
+
+pub struct DescriptorIterator<'a> {
+    buf: &'a [u8],
+    index: usize,
+}
+impl<'a> DescriptorIterator<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf, index: 0 }
+    }
+}
+impl<'a> Iterator for DescriptorIterator<'a> {
+    type Item = UsbDescriptor;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.buf.len() {
+            None
+        } else {
+            let buf = &self.buf[self.index..];
+            let desc_len = buf[0];
+            let desc_type = buf[1];
+            let desc = match desc_type {
+                e if e == DescriptorType::Config as u8 => {
+                    UsbDescriptor::Config(ConfigDescriptor::copy_from_slice(buf).ok()?)
+                }
+                e if e == DescriptorType::Interface as u8 => {
+                    UsbDescriptor::Interface(InterfaceDescriptor::copy_from_slice(buf).ok()?)
+                }
+                e if e == DescriptorType::Endpoint as u8 => {
+                    UsbDescriptor::Endpoint(EndpointDescriptor::copy_from_slice(buf).ok()?)
+                }
+                _ => UsbDescriptor::Unknown {
+                    desc_len,
+                    desc_type,
+                },
+            };
+            self.index += desc_len as usize;
+            Some(desc)
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -51,7 +93,7 @@ const _: () = assert!(size_of::<DeviceDescriptor>() == 18);
 /// sequences that has the same size. If not, modification made via the byte slice produced by
 /// as_mut_slice can be an undefined behavior since the bytes can not be interpreted as the
 /// original type.
-pub unsafe trait IntoPinnedMutableSlice: Sized {
+pub unsafe trait IntoPinnedMutableSlice: Sized + Copy + Clone {
     fn as_mut_slice(self: Pin<&mut Self>) -> Pin<&mut [u8]> {
         Pin::new(unsafe {
             slice::from_raw_parts_mut(
@@ -60,9 +102,18 @@ pub unsafe trait IntoPinnedMutableSlice: Sized {
             )
         })
     }
+    fn copy_from_slice(data: &[u8]) -> Result<Self> {
+        if size_of::<Self>() > data.len() {
+            Err(WasabiError::Failed("data is too short"))
+        } else {
+            Ok(unsafe { *(data.as_ptr() as *const Self) })
+        }
+    }
 }
 unsafe impl IntoPinnedMutableSlice for DeviceDescriptor {}
 unsafe impl IntoPinnedMutableSlice for ConfigDescriptor {}
+unsafe impl IntoPinnedMutableSlice for InterfaceDescriptor {}
+unsafe impl IntoPinnedMutableSlice for EndpointDescriptor {}
 
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
