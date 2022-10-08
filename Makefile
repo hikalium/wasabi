@@ -6,7 +6,9 @@ PORT_MONITOR?=2222
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
 		-bios $(OVMF) \
-		-device qemu-xhci -device usb-mouse \
+		-device qemu-xhci \
+		-device usb-mouse \
+		-device usb-kbd \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=net0 -device usb-net,netdev=net0 \
 		-object filter-dump,id=f1,netdev=net0,file=dump_net0.dat \

@@ -108,6 +108,23 @@ impl GenericTrbEntry {
     fn completion_code(&self) -> u32 {
         extract_bits(self.option, 24, 8)
     }
+    fn completed(&self) -> Result<()> {
+        if self.trb_type() != TrbType::CommandCompletionEvent as u32
+            && self.trb_type() != TrbType::TransferEvent as u32
+        {
+            Err(WasabiError::FailedString(format!(
+                "Expected TrbType == CommandCompletionEvent or TransferEvent but got {}",
+                self.trb_type(),
+            )))
+        } else if self.completion_code() != CompletionCode::Success as u32 {
+            Err(WasabiError::FailedString(format!(
+                "Expected CompletionCode == Success but got {}",
+                self.completion_code() as u32
+            )))
+        } else {
+            Ok(())
+        }
+    }
     fn cycle_state(&self) -> u32 {
         self.control & (TrbControl::CycleBit as u32)
     }
@@ -1183,7 +1200,6 @@ impl Xhci {
     }
     fn init_slots_and_contexts(&mut self) -> Result<()> {
         let num_slots = self.cap_regs.num_of_device_slots();
-        println!("num_slots = {}", num_slots);
         self.op_regs.set_num_device_slots(num_slots)?;
         self.op_regs
             .set_dcbaa_ptr(&mut self.device_context_base_array)?;
@@ -1202,8 +1218,6 @@ impl Xhci {
         // device_contexts.context[0] points Scratchpad Buffer Arrary.
         // The array contains pointers to a memory region which is sized PAGESIZE and aligned on
         // PAGESIZE. (PAGESIZE can be retrieved from op_regs.PAGESIZE)
-        println!("PAGE_SIZE = {}", page_size);
-        println!("num_scratch_pad_bufs = {}", num_scratch_pad_bufs);
         let scratchpad_buffers = ALLOCATOR.alloc_with_options(
             Layout::from_size_align(size_of::<usize>() * num_scratch_pad_bufs, page_size)
                 .map_err(error_stringify)?,
@@ -1282,37 +1296,33 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
-        let e = TransferEventFuture {
+        TransferEventFuture {
             event_ring: &mut self.primary_event_ring,
             target_command_trb_addr: trb_ptr_waiting,
         }
-        .await;
-        println!("event: {:?}", e);
-        Ok(())
+        .await
+        .completed()
     }
     async fn request_config_descriptor_and_rest(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {
         let mut config_descriptor = Box::pin(ConfigDescriptor::default());
         self.request_config_descriptor_bytes(slot, config_descriptor.as_mut().as_mut_slice())
             .await?;
-        println!("Got config descriptor! {:?}", config_descriptor,);
         let mut buf = Vec::<u8>::new();
         buf.resize(config_descriptor.total_length(), 0);
         let mut buf = Box::into_pin(buf.into_boxed_slice());
         self.request_config_descriptor_bytes(slot, buf.as_mut())
             .await?;
-        crate::print::hexdump(&buf);
         let iter = DescriptorIterator::new(&buf);
         let descriptors: Vec<UsbDescriptor> = iter.collect();
         Ok(descriptors)
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
-        let e = self.send_command(GenericTrbEntry::cmd_no_op()).await;
-        println!("event: {:?}", e);
-
-        let e = self.send_command(GenericTrbEntry::cmd_no_op()).await;
-        println!("event: {:?}", e);
-
-        println!("Done!");
+        self.send_command(GenericTrbEntry::cmd_no_op())
+            .await?
+            .completed()?;
+        self.send_command(GenericTrbEntry::cmd_no_op())
+            .await?
+            .completed()?;
         Ok(())
     }
     async fn poll(&mut self) -> Result<()> {
@@ -1329,7 +1339,6 @@ impl Xhci {
                             portsc.state()
                         );
                         portsc.reset();
-                        println!("Done!");
                         self.poll_status = PollStatus::EnablingPort { port };
                         break;
                     }
@@ -1338,7 +1347,6 @@ impl Xhci {
             PollStatus::EnablingPort { port } => {
                 println!("Enabling Port {}...", port);
                 let portsc = self.portsc.get(port)?;
-                println!("{}", portsc);
                 if let PortState::Enabled = portsc.state() {
                     if let PortLinkState::U0 = portsc.pls() {
                         // Attached USB3 device
@@ -1347,13 +1355,15 @@ impl Xhci {
                 }
             }
             PollStatus::USB3Attached { port } => {
-                println!("USB3 Device attached to port {}", port);
                 let e = self
                     .send_command(GenericTrbEntry::cmd_enable_slot())
                     .await?;
-                println!("event: {:?}", e);
                 let slot = e.slot_id();
-                println!("Done! Slot {} is assigned for Port {}", e.slot_id(), port);
+                println!(
+                    "USB3 Device Detected, slot = {}, port {}",
+                    e.slot_id(),
+                    port
+                );
 
                 // Setup an input context and send AddressDevice command.
                 // 4.3.3 Device Slot Initialization
@@ -1377,20 +1387,11 @@ impl Xhci {
                     output_context_addr as u64;
                 // 8. Issue an Address Device Command for the Device Slot
                 let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
-                println!("Sending address device command....");
-                let e = self.send_command(cmd).await?;
-                println!("event: {:?}", e);
-                println!("AddressDevice Command Done! {:?}", e);
-                println!("Requesting a device descriptor...");
-                let e = self.request_device_descriptor(slot).await;
-                println!("event: {:?}", e);
+                self.send_command(cmd).await?.completed()?;
+                self.request_device_descriptor(slot).await?.completed()?;
                 let device_descriptor = self.slot_context[slot as usize].device_descriptor();
-                println!("Got device descriptor! {:?}", device_descriptor,);
-
-                println!("Requesting a config descriptor...");
+                println!("{device_descriptor:?}");
                 let descriptors = self.request_config_descriptor_and_rest(slot).await?;
-                println!("event: {:?}", e);
-                println!("Got descriptors!");
                 for d in descriptors {
                     println!("{d:?}");
                 }
