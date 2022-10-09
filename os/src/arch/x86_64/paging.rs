@@ -22,7 +22,7 @@ pub fn disable_cache<T: Sized>(data: &Pin<Box<T>>) {
                 .expect("Failed to create mapping")
         })
     }
-    println!("Mapped {:#018X} - {:#018X}", vstart, vend);
+    println!("Disabled CPU Caches for {:#018X} - {:#018X}", vstart, vend);
 }
 
 pub fn read_cr3() -> *mut PML4 {
