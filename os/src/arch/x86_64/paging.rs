@@ -234,7 +234,6 @@ impl PML4 {
         phys: u64,
         attr: PageAttr,
     ) -> Result<()> {
-        println!("create_mapping(virt_start={virt_start:#018X}, virt_end={virt_end:#018X}, phys={phys:#018X}, attr={attr:?})");
         if virt_start & ATTR_MASK != 0 {
             return Err(WasabiError::Failed("Invalid virt_start"));
         }

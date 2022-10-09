@@ -1186,14 +1186,16 @@ impl Xhci {
         pci.disable_interrupt(bdf)?;
         pci.enable_bus_master(bdf)?;
         let bar0 = pci.try_bar0_mem64(bdf)?;
-
-        let vstart = bar0.addr() as u64;
-        let vend = bar0.addr() as u64 + bar0.size();
-        unsafe {
-            with_current_page_table(|pt| {
-                pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
-                    .expect("Failed to create mapping")
-            })
+        {
+            let vstart = bar0.addr() as u64;
+            let vend = bar0.addr() as u64 + bar0.size();
+            unsafe {
+                with_current_page_table(|pt| {
+                    pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
+                        .expect("Failed to create mapping")
+                })
+            }
+            println!("Disabled CPU Caches for {:#018X} - {:#018X}", vstart, vend);
         }
 
         let cap_regs = unsafe {
