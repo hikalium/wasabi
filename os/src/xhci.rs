@@ -452,7 +452,6 @@ impl CommandRing {
         src.set_cycle_state(self.cycle_state_ours);
         let dst_ptr = ring.current_ptr();
         ring.write_current(src);
-        println!("{:#018X} Enqueued", dst_ptr);
         ring.advance_index(self.cycle_state_ours);
         if ring.current_index() == ring.num_trbs() - 1 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
@@ -501,7 +500,6 @@ impl EventRing {
         }
         let e = self.ring.as_ref().current();
         let eptr = self.ring.as_ref().current_ptr() as u64;
-        println!("{:#018X} {:?}", eptr, e);
         unsafe { self.ring.get_unchecked_mut() }.advance_index(self.cycle_state_ours);
         unsafe {
             write_volatile(self.erdp.expect("erdp is not set"), eptr);
