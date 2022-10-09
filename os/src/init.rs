@@ -73,7 +73,7 @@ impl EfiServices {
         let simple_fs_protocol = self
             .efi_system_table
             .boot_services()
-            .handle_simple_file_system_protocol((*loaded_image_protocol).device_handle)
+            .handle_simple_file_system_protocol(loaded_image_protocol.device_handle)
             .expect("Failed to get Simple Filesystem Protocol");
         println!("Got SimpleFileSystemProtocol.",);
         let root_file = simple_fs_protocol.open_volume();

@@ -159,12 +159,7 @@ impl Xsdt {
         }
     }
     fn find_table(&self, sig: &'static [u8; 4]) -> Option<&'static SystemDescriptionTableHeader> {
-        for e in self.iter() {
-            if e.signature() == sig {
-                return Some(e);
-            }
-        }
-        None
+        self.iter().find(|&e| e.signature() == sig)
     }
     fn header_size(&self) -> usize {
         size_of::<Self>()

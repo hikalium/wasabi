@@ -9,7 +9,7 @@ use core::arch::asm;
 use core::fmt;
 use core::marker::PhantomData;
 use core::marker::PhantomPinned;
-use core::mem::size_of;
+use core::mem::size_of_val;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
@@ -59,12 +59,13 @@ impl<T: Sized> Default for IoBox<T> {
 
 #[test_case]
 fn io_box_addr() {
-    let io_box = IoBox::<u64>::new();
+    IoBox::<u64>::new();
 }
 
-pub fn disable_cache<T: Sized>(data: &IoBox<T>) {
-    let vstart = data.as_ref() as *const T as u64;
-    let vend = vstart + size_of::<T>() as u64;
+pub fn disable_cache<T: Sized>(io_box: &IoBox<T>) {
+    let region = io_box.inner.as_ref().get_ref();
+    let vstart = region as *const IoBoxInner<T> as u64;
+    let vend = vstart + size_of_val(region) as u64;
     unsafe {
         with_current_page_table(|pt| {
             pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
