@@ -4,6 +4,7 @@ use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::busy_loop_hint;
 use crate::arch::x86_64::paging::disable_cache;
 use crate::arch::x86_64::paging::with_current_page_table;
+use crate::arch::x86_64::paging::IoBox;
 use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Result;
 use crate::error::WasabiError;
@@ -36,6 +37,7 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::SyncUnsafeCell;
+use core::convert::AsRef;
 use core::future::Future;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
@@ -374,10 +376,8 @@ struct TrbRing {
 // to avoid crossing 64KiB boundaries. See Table 6-1 of xhci spec.
 const _: () = assert!(size_of::<TrbRing>() <= 4096);
 impl TrbRing {
-    fn new() -> Pin<Box<Self>> {
-        let ring = Box::pin(unsafe { MaybeUninit::<Self>::zeroed().assume_init() });
-        disable_cache(&ring);
-        ring
+    fn new() -> IoBox<Self> {
+        IoBox::new()
     }
     fn phys_addr(&self) -> u64 {
         &self.trb[0] as *const GenericTrbEntry as u64
@@ -385,13 +385,12 @@ impl TrbRing {
     fn num_trbs(&self) -> usize {
         self.trb.len()
     }
-    fn advance_index(self: &mut Pin<&mut Self>, cycle_ours: u32) {
+    fn advance_index(&mut self, cycle_ours: u32) {
         let cycle_theirs = 1 - cycle_ours;
         let current_index = self.current_index;
         let next_index = (current_index + 1) % self.trb.len();
-        let mutable_self = unsafe { self.as_mut().get_unchecked_mut() };
-        mutable_self.trb[current_index].set_cycle_state(cycle_theirs);
-        mutable_self.current_index = next_index;
+        self.trb[current_index].set_cycle_state(cycle_theirs);
+        self.current_index = next_index;
     }
     fn current(&self) -> GenericTrbEntry {
         self.trb[self.current_index]
@@ -402,37 +401,35 @@ impl TrbRing {
     fn current_ptr(&self) -> usize {
         &self.trb[self.current_index] as *const GenericTrbEntry as usize
     }
-    fn write(self: &mut Pin<&mut Self>, index: usize, trb: GenericTrbEntry) -> Result<()> {
+    fn write(&mut self, index: usize, trb: GenericTrbEntry) -> Result<()> {
         if index < self.trb.len() {
-            // Using get_unchecked_mut here is safe, since we are not moving the pinned contents.
             unsafe {
-                write_volatile(&mut self.as_mut().get_unchecked_mut().trb[index], trb);
+                write_volatile(&mut self.trb[index], trb);
             }
             Ok(())
         } else {
             Err(WasabiError::Failed("TrbRing Out of Range"))
         }
     }
-    fn write_current(self: &mut Pin<&mut Self>, trb: GenericTrbEntry) {
+    fn write_current(&mut self, trb: GenericTrbEntry) {
         self.write(self.current_index, trb)
             .expect("writing to the current index shall not fail")
     }
 }
 
-#[derive(Debug)]
 struct CommandRing {
-    ring: Pin<Box<TrbRing>>,
+    ring: IoBox<TrbRing>,
     cycle_state_ours: u32,
 }
 impl Default for CommandRing {
     fn default() -> Self {
         let mut ring = TrbRing::new();
-        let trb_head_paddr = ring.phys_addr() as u64;
+        let trb_head_paddr = ring.as_ref().phys_addr() as u64;
         let mut link_trb = GenericTrbEntry::default();
         link_trb.data.write(trb_head_paddr);
         link_trb.set_control(TrbType::Link, TrbControl::ToggleCycle);
-        let num_trbs = ring.num_trbs();
-        ring.as_mut()
+        let num_trbs = ring.as_ref().num_trbs();
+        unsafe { ring.get_unchecked_mut() }
             .write(num_trbs - 1, link_trb)
             .expect("failed to write a link trb");
         Self {
@@ -442,21 +439,24 @@ impl Default for CommandRing {
     }
 }
 impl CommandRing {
-    fn ring(&self) -> Pin<&TrbRing> {
-        self.ring.as_ref()
+    fn ring_phys_addr(&self) -> u64 {
+        self.ring.as_ref() as *const TrbRing as u64
     }
     fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
-        if self.ring.current().cycle_state() != self.cycle_state_ours {
+        // Calling get_unchecked_mut() here is safe
+        // as far as this function does not move the ring out.
+        let ring = unsafe { self.ring.get_unchecked_mut() };
+        if ring.current().cycle_state() != self.cycle_state_ours {
             return Err(WasabiError::Failed("Command Ring is Full"));
         }
         src.set_cycle_state(self.cycle_state_ours);
-        self.ring.as_mut().write_current(src);
-        let dst_ptr = self.ring.current_ptr();
+        let dst_ptr = ring.current_ptr();
+        ring.write_current(src);
         println!("{:#018X} Enqueued", dst_ptr);
-        self.ring.as_mut().advance_index(self.cycle_state_ours);
-        if self.ring.current_index() == self.ring.num_trbs() - 1 {
+        ring.advance_index(self.cycle_state_ours);
+        if ring.current_index() == ring.num_trbs() - 1 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
-            self.ring.as_mut().advance_index(self.cycle_state_ours);
+            ring.advance_index(self.cycle_state_ours);
             self.cycle_state_ours = 1 - self.cycle_state_ours;
         }
         // The returned ptr will be used for waiting on command completion events.
@@ -465,8 +465,8 @@ impl CommandRing {
 }
 
 struct EventRing {
-    ring: Pin<Box<TrbRing>>,
-    erst: Pin<Box<EventRingSegmentTableEntry>>,
+    ring: IoBox<TrbRing>,
+    erst: IoBox<EventRingSegmentTableEntry>,
     cycle_state_ours: u32,
     erdp: Option<*mut u64>,
 }
@@ -474,7 +474,6 @@ impl EventRing {
     fn new() -> Result<Self> {
         let ring = TrbRing::new();
         let erst = EventRingSegmentTableEntry::new(&ring)?;
-        disable_cache(&ring);
         disable_cache(&erst);
 
         Ok(Self {
@@ -487,27 +486,27 @@ impl EventRing {
     fn set_erdp(&mut self, erdp: *mut u64) {
         self.erdp = Some(erdp);
     }
-    fn ring(&self) -> Pin<&TrbRing> {
-        self.ring.as_ref()
+    fn ring_phys_addr(&self) -> u64 {
+        self.ring.as_ref() as *const TrbRing as u64
     }
-    fn erst_phys_addr(&self) -> usize {
-        self.erst.as_ref().get_ref() as *const EventRingSegmentTableEntry as usize
+    fn erst_phys_addr(&self) -> u64 {
+        self.erst.as_ref() as *const EventRingSegmentTableEntry as u64
     }
     fn has_next_event(&self) -> bool {
-        self.ring.current().cycle_state() == self.cycle_state_ours
+        self.ring.as_ref().current().cycle_state() == self.cycle_state_ours
     }
     fn pop(&mut self) -> Result<GenericTrbEntry> {
         if !self.has_next_event() {
             return Err(WasabiError::Failed("EventRingIsEmpty"));
         }
-        let e = self.ring.current();
-        let eptr = self.ring.current_ptr() as u64;
+        let e = self.ring.as_ref().current();
+        let eptr = self.ring.as_ref().current_ptr() as u64;
         println!("{:#018X} {:?}", eptr, e);
-        self.ring.as_mut().advance_index(self.cycle_state_ours);
+        unsafe { self.ring.get_unchecked_mut() }.advance_index(self.cycle_state_ours);
         unsafe {
             write_volatile(self.erdp.expect("erdp is not set"), eptr);
         }
-        if self.ring.current_index() == 0 {
+        if self.ring.as_ref().current_index() == 0 {
             self.cycle_state_ours = 1 - self.cycle_state_ours;
         }
         Ok(e)
@@ -576,10 +575,13 @@ struct EventRingSegmentTableEntry {
 }
 const _: () = assert!(size_of::<EventRingSegmentTableEntry>() == 4096);
 impl EventRingSegmentTableEntry {
-    fn new(ring: &TrbRing) -> Result<Pin<Box<Self>>> {
-        let mut erst: Pin<Box<Self>> = Box::pin(unsafe { MaybeUninit::zeroed().assume_init() });
-        erst.ring_segment_base_address = ring.phys_addr();
-        erst.ring_segment_size = ring.num_trbs().try_into()?;
+    fn new(ring: &IoBox<TrbRing>) -> Result<IoBox<Self>> {
+        let mut erst: IoBox<Self> = IoBox::new();
+        {
+            let erst = unsafe { erst.get_unchecked_mut() };
+            erst.ring_segment_base_address = ring.as_ref() as *const TrbRing as u64;
+            erst.ring_segment_size = ring.as_ref().num_trbs().try_into()?;
+        }
         Ok(erst)
     }
 }
@@ -1257,8 +1259,8 @@ impl Xhci {
         let eq = &mut self.primary_event_ring;
         let irs = &mut self.rt_regs.irs[0];
         irs.erst_size = 1;
-        irs.erdp = eq.ring().phys_addr() as u64;
-        irs.erst_base = eq.erst_phys_addr() as u64;
+        irs.erdp = eq.ring_phys_addr();
+        irs.erst_base = eq.erst_phys_addr();
         irs.management = 0;
         eq.set_erdp(&mut irs.erdp as *mut u64);
         Ok(())
@@ -1271,7 +1273,7 @@ impl Xhci {
         Ok(())
     }
     fn init_command_ring(&mut self) -> Result<()> {
-        self.op_regs.cmd_ring_ctrl = self.command_ring.ring().phys_addr() | 1 /* Ring Cycle State */;
+        self.op_regs.cmd_ring_ctrl = self.command_ring.ring_phys_addr() | 1 /* Ring Cycle State */;
         Ok(())
     }
     fn alloc_scratch_pad_buffers(
@@ -1486,7 +1488,6 @@ impl Xhci {
         let slot_context = &mut self.slot_context[slot as usize];
         let output_context_addr =
             unsafe { slot_context.output_context().get_unchecked_mut() } as *mut OutputContext;
-        let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring.ring.phys_addr();
         let input_context = &mut slot_context.input_context.as_mut();
         input_context.add_context(0)?;
         input_context.add_context(1)?;
@@ -1497,6 +1498,7 @@ impl Xhci {
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
         let portsc = self.portsc.get(port)?;
         input_context.set_port_speed(portsc.port_speed())?;
+        let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring.ring_phys_addr();
         input_context.init_ctrl_ep(ctrl_ep_ring_phys_addr, portsc)?;
         self.device_context_base_array.inner.context[slot as usize] = output_context_addr as u64;
         // 8. Issue an Address Device Command for the Device Slot
@@ -1527,7 +1529,7 @@ impl Xhci {
                             )
                             .await?;
                             let mut bytes = [0; 8];
-                            for _ in 0..5 {
+                            loop {
                                 let buf = Pin::new(&mut bytes);
                                 self.request_report_bytes(slot, buf).await?;
                                 println!("{bytes:?}");

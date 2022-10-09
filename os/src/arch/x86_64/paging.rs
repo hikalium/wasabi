@@ -8,13 +8,62 @@ use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
 use core::marker::PhantomData;
+use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 
-pub fn disable_cache<T: Sized>(data: &Pin<Box<T>>) {
-    let vstart = data.as_ref().get_ref() as *const T as u64;
+#[repr(align(4096))]
+pub struct IoBoxInner<T: Sized> {
+    data: T,
+    _pinned: PhantomPinned,
+}
+impl<T: Sized> IoBoxInner<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            data,
+            _pinned: PhantomPinned,
+        }
+    }
+}
+
+pub struct IoBox<T: Sized> {
+    inner: Pin<Box<IoBoxInner<T>>>,
+}
+impl<T: Sized> IoBox<T> {
+    pub fn new() -> Self {
+        let inner = Box::pin(IoBoxInner::new(unsafe {
+            MaybeUninit::<T>::zeroed().assume_init()
+        }));
+        let this = Self { inner };
+        disable_cache(&this);
+        this
+    }
+    /// # Safety
+    /// Same rules as Pin::get_unchecked_mut() applies.
+    pub unsafe fn get_unchecked_mut(&mut self) -> &mut T {
+        &mut self.inner.as_mut().get_unchecked_mut().data
+    }
+}
+impl<T> AsRef<T> for IoBox<T> {
+    fn as_ref(&self) -> &T {
+        &self.inner.as_ref().get_ref().data
+    }
+}
+impl<T: Sized> Default for IoBox<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[test_case]
+fn io_box_addr() {
+    let io_box = IoBox::<u64>::new();
+}
+
+pub fn disable_cache<T: Sized>(data: &IoBox<T>) {
+    let vstart = data.as_ref() as *const T as u64;
     let vend = vstart + size_of::<T>() as u64;
     unsafe {
         with_current_page_table(|pt| {
