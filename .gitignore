@@ -20,6 +20,7 @@ Cargo.lock
 
 # serial port outputs
 *.log
+*.txt
 
 # generated files
 generated/

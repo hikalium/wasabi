@@ -5,20 +5,27 @@ use rustc_demangle::demangle;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
+use std::io::Read;
 use std::ops::Bound;
 use std::process::Command;
 
 fn main() -> io::Result<()> {
     let find_pdb_path_output = Command::new("bash")
         .arg("-c")
-        .arg("ls -1t ../target/x86_64-unknown-uefi/release/deps/os-*.pdb | head -1")
+        .arg("ls -1t target/x86_64-unknown-uefi/release/deps/os-*.pdb | head -1")
         .output()
         .expect("failed to execute objdump");
-    let find_pdb_path_output = String::from_utf8(find_pdb_path_output.stdout).unwrap();
-    println!("{}", find_pdb_path_output);
+    println!("{:?}", find_pdb_path_output.stdout);
+    let mut pdb_path = String::from_utf8(find_pdb_path_output.stdout)
+        .unwrap()
+        .to_string();
+    let pdb_path = pdb_path.trim();
+    println!("{}", pdb_path);
 
     println!("Paste console output here and press Ctrl-D:");
-    let input = io::read_to_string(&mut io::stdin())?;
+    let mut buf = vec![];
+    io::stdin().read_to_end(&mut buf)?;
+    let input = String::from_utf8_lossy(&buf);
     let lines: Vec<&str> = input.split('\n').collect();
     let re_loader_code = Regex::new(r"\[0x(.*)-0x(.*)\).*type: LOADER_CODE").unwrap();
     let re_qemu_exception_info = Regex::new(r"v=.* cpl=.* IP=.*:(.*) pc=.*").unwrap();
@@ -41,7 +48,7 @@ fn main() -> io::Result<()> {
     let re_objdump_section_text = Regex::new(r"([a-zA-Z0-9]+) <.text>").unwrap();
     let objdump_output = Command::new("objdump")
         .arg("-d")
-        .arg("target/x86_64-unknown-uefi/release/os.efi")
+        .arg("target/x86_64-unknown-uefi/debug/os.efi")
         .output()
         .expect("failed to execute objdump");
     let input = String::from_utf8(objdump_output.stdout).unwrap();
@@ -60,7 +67,7 @@ fn main() -> io::Result<()> {
     println!(".text base   ={:#018X}", text_base);
     println!("addr_in_text ={:#018X}", addr_in_text);
 
-    let file = File::open("target/x86_64-unknown-uefi/release/deps/os-618bacc84cc7d911.pdb")?;
+    let file = File::open(pdb_path)?;
     let mut pdb = pdb::PDB::open(file).unwrap();
 
     let symbol_table = pdb.global_symbols().unwrap();
