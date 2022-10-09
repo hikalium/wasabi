@@ -514,14 +514,26 @@ impl EventRing {
 struct EventFuture<'a, const E: TrbType> {
     event_ring: &'a mut EventRing,
     target_command_trb_addr: u64,
+    _pinned: PhantomPinned,
+}
+impl<'a, const E: TrbType> EventFuture<'a, E> {
+    fn new(event_ring: &'a mut EventRing, target_command_trb_addr: u64) -> Self {
+        Self {
+            event_ring,
+            target_command_trb_addr,
+            _pinned: PhantomPinned,
+        }
+    }
 }
 impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
     type Output = GenericTrbEntry;
-    fn poll(mut self: Pin<&mut Self>, _: &mut Context) -> Poll<GenericTrbEntry> {
-        match self.event_ring.pop() {
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<GenericTrbEntry> {
+        let mut_self = unsafe { self.get_unchecked_mut() };
+        match mut_self.event_ring.pop() {
             Err(_) => Poll::Pending,
             Ok(trb) => {
-                if trb.trb_type() == E as u32 && trb.data.read() == self.target_command_trb_addr {
+                if trb.trb_type() == E as u32 && trb.data.read() == mut_self.target_command_trb_addr
+                {
                     Poll::Ready(trb)
                 } else {
                     if trb.completion_code() != CompletionCode::ShortPacket as u32 {
@@ -539,6 +551,7 @@ type TransferEventFuture<'a> = EventFuture<'a, { TrbType::TransferEvent }>;
 #[repr(C, align(64))]
 struct RawDeviceContextBaseAddressArray {
     context: [u64; 256],
+    _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<RawDeviceContextBaseAddressArray>() == 2048);
 impl RawDeviceContextBaseAddressArray {
@@ -560,8 +573,14 @@ impl DeviceContextBaseAddressArray {
             _scratchpad_buffers: scratchpad_buffers,
         }
     }
-    fn inner_mut_ptr(&mut self) -> *mut RawDeviceContextBaseAddressArray {
-        self.inner.as_mut().get_mut() as *mut RawDeviceContextBaseAddressArray
+    unsafe fn inner_mut_ptr(&mut self) -> *mut RawDeviceContextBaseAddressArray {
+        self.inner.as_mut().get_unchecked_mut() as *mut RawDeviceContextBaseAddressArray
+    }
+    fn set_output_context(&mut self, slot: u8, output_context: Pin<&mut OutputContext>) {
+        unsafe {
+            self.inner.as_mut().get_unchecked_mut().context[slot as usize] =
+                output_context.as_ref().get_ref() as *const OutputContext as u64
+        }
     }
 }
 
@@ -1311,11 +1330,7 @@ impl Xhci {
     async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.push(cmd)?;
         self.notify_xhc();
-        Ok(CommandCompletionEventFuture {
-            event_ring: &mut self.primary_event_ring,
-            target_command_trb_addr: cmd_ptr,
-        }
-        .await)
+        Ok(CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr).await)
     }
     async fn request_device_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
         let setup_stage = SetupStageTrb::new(
@@ -1336,11 +1351,7 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(data_stage.into())?;
         ctrl_ep_ring.push(status_stage.into())?;
         self.notify_ep(slot, 1);
-        Ok(TransferEventFuture {
-            event_ring: &mut self.primary_event_ring,
-            target_command_trb_addr: trb_ptr_waiting,
-        }
-        .await)
+        Ok(TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting).await)
     }
     async fn request_set_interface(
         &mut self,
@@ -1361,12 +1372,9 @@ impl Xhci {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1);
-        TransferEventFuture {
-            event_ring: &mut self.primary_event_ring,
-            target_command_trb_addr: trb_ptr_waiting,
-        }
-        .await
-        .completed()
+        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+            .await
+            .completed()
     }
     async fn request_set_protocol(
         &mut self,
@@ -1390,12 +1398,9 @@ impl Xhci {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1);
-        TransferEventFuture {
-            event_ring: &mut self.primary_event_ring,
-            target_command_trb_addr: trb_ptr_waiting,
-        }
-        .await
-        .completed()
+        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+            .await
+            .completed()
     }
     async fn request_report_bytes(&mut self, slot: u8, buf: Pin<&mut [u8]>) -> Result<()> {
         // [HID] 7.2.1 Get_Report Request
@@ -1415,12 +1420,9 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
-        TransferEventFuture {
-            event_ring: &mut self.primary_event_ring,
-            target_command_trb_addr: trb_ptr_waiting,
-        }
-        .await
-        .completed()
+        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+            .await
+            .completed()
     }
     async fn request_config_descriptor_bytes(
         &mut self,
@@ -1441,12 +1443,9 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
-        TransferEventFuture {
-            event_ring: &mut self.primary_event_ring,
-            target_command_trb_addr: trb_ptr_waiting,
-        }
-        .await
-        .completed()
+        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+            .await
+            .completed()
     }
     async fn request_config_descriptor_and_rest(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {
         let mut config_descriptor = Box::pin(ConfigDescriptor::default());
@@ -1484,8 +1483,8 @@ impl Xhci {
         // Setup an input context and send AddressDevice command.
         // 4.3.3 Device Slot Initialization
         let slot_context = &mut self.slot_context[slot as usize];
-        let output_context_addr =
-            unsafe { slot_context.output_context().get_unchecked_mut() } as *mut OutputContext;
+        self.device_context_base_array
+            .set_output_context(slot, slot_context.output_context());
         let input_context = &mut slot_context.input_context.as_mut();
         input_context.add_context(0)?;
         input_context.add_context(1)?;
@@ -1498,7 +1497,6 @@ impl Xhci {
         input_context.set_port_speed(portsc.port_speed())?;
         let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring.ring_phys_addr();
         input_context.init_ctrl_ep(ctrl_ep_ring_phys_addr, portsc)?;
-        self.device_context_base_array.inner.context[slot as usize] = output_context_addr as u64;
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
