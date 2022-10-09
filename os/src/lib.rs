@@ -14,9 +14,9 @@
 #![feature(saturating_int_impl)]
 #![feature(sync_unsafe_cell)]
 #![feature(pin_macro)]
-#![feature(box_into_pin)]
 #![deny(clippy::wildcard_imports)]
 #![deny(clippy::enum_glob_use)]
+#![feature(associated_type_bounds)]
 
 pub mod acpi;
 pub mod allocator;
