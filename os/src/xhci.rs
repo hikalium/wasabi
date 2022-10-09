@@ -4,6 +4,7 @@ use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::busy_loop_hint;
 use crate::arch::x86_64::paging::disable_cache;
 use crate::arch::x86_64::paging::IoBox;
+use crate::arch::x86_64::paging::Mmio;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::executor::yield_execution;
@@ -40,7 +41,6 @@ use core::future::Future;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::mem::transmute;
-use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 use core::ptr::read_volatile;
@@ -1185,11 +1185,11 @@ impl Default for SlotContext {
 pub struct Xhci {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
-    cap_regs: ManuallyDrop<Pin<Box<CapabilityRegisters>>>,
-    op_regs: ManuallyDrop<Pin<Box<OperationalRegisters>>>,
-    rt_regs: ManuallyDrop<Pin<Box<RuntimeRegisters>>>,
+    cap_regs: Mmio<CapabilityRegisters>,
+    op_regs: Mmio<OperationalRegisters>,
+    rt_regs: Mmio<RuntimeRegisters>,
     portsc: regs::PortSc,
-    doorbell_regs: ManuallyDrop<Pin<Box<[u32; 256]>>>,
+    doorbell_regs: Mmio<[u32; 256]>,
     command_ring: CommandRing,
     primary_event_ring: EventRing,
     device_context_base_array: DeviceContextBaseAddressArray,
@@ -1205,40 +1205,37 @@ impl Xhci {
         let bar0 = pci.try_bar0_mem64(bdf)?;
         bar0.disable_cache();
 
-        let cap_regs = unsafe {
-            ManuallyDrop::new(Pin::new(Box::from_raw(
-                bar0.addr() as *mut CapabilityRegisters
-            )))
-        };
-        if cap_regs.hccparams1.read() & 1 == 0 {
+        let cap_regs = unsafe { Mmio::from_raw(bar0.addr() as *mut CapabilityRegisters) };
+        if cap_regs.as_ref().hccparams1.read() & 1 == 0 {
             return Err(WasabiError::Failed(
                 "HCCPARAMS1.AC64 was 0 (No 64-bit addressing capability)",
             ));
         }
-        if cap_regs.hccparams1.read() & 4 != 0 {
+        if cap_regs.as_ref().hccparams1.read() & 4 != 0 {
             return Err(WasabiError::Failed(
                 "HCCPARAMS1.CSZ was 1 (Context size is 64, not 32)",
             ));
         }
         let mut op_regs = unsafe {
-            ManuallyDrop::new(Pin::new(Box::from_raw(
-                bar0.addr().add(cap_regs.length.read() as usize) as *mut OperationalRegisters,
-            )))
+            Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().length.read() as usize)
+                as *mut OperationalRegisters)
         };
-        op_regs.reset_xhc();
+        unsafe { op_regs.get_unchecked_mut() }.reset_xhc();
         let rt_regs = unsafe {
-            ManuallyDrop::new(Pin::new(Box::from_raw(
-                bar0.addr().add(cap_regs.rtsoff.read() as usize) as *mut RuntimeRegisters,
-            )))
+            Mmio::from_raw(
+                bar0.addr().add(cap_regs.as_ref().rtsoff.read() as usize) as *mut RuntimeRegisters
+            )
         };
         let doorbell_regs = unsafe {
-            ManuallyDrop::new(Pin::new(Box::from_raw(
-                bar0.addr().add(cap_regs.dboff.read() as usize) as *mut [u32; 256],
-            )))
+            Mmio::from_raw(
+                bar0.addr().add(cap_regs.as_ref().dboff.read() as usize) as *mut [u32; 256]
+            )
         };
-        let portsc = regs::PortSc::new(&bar0, &cap_regs);
-        let scratchpad_buffers =
-            Self::alloc_scratch_pad_buffers(op_regs.page_size()?, cap_regs.num_scratch_pad_bufs())?;
+        let portsc = regs::PortSc::new(&bar0, cap_regs.as_ref());
+        let scratchpad_buffers = Self::alloc_scratch_pad_buffers(
+            op_regs.as_ref().page_size()?,
+            cap_regs.as_ref().num_scratch_pad_bufs(),
+        )?;
         let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
         let mut xhc = Xhci {
             bdf,
@@ -1256,13 +1253,13 @@ impl Xhci {
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
         xhc.init_command_ring()?;
-        xhc.op_regs.start_xhc();
+        unsafe { xhc.op_regs.get_unchecked_mut() }.start_xhc();
 
         Ok(xhc)
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
         let eq = &mut self.primary_event_ring;
-        let irs = &mut self.rt_regs.irs[0];
+        let irs = &mut unsafe { self.rt_regs.get_unchecked_mut() }.irs[0];
         irs.erst_size = 1;
         irs.erdp = eq.ring_phys_addr();
         irs.erst_base = eq.erst_phys_addr();
@@ -1271,14 +1268,14 @@ impl Xhci {
         Ok(())
     }
     fn init_slots_and_contexts(&mut self) -> Result<()> {
-        let num_slots = self.cap_regs.num_of_device_slots();
-        self.op_regs.set_num_device_slots(num_slots)?;
-        self.op_regs
+        let num_slots = self.cap_regs.as_ref().num_of_device_slots();
+        unsafe { self.op_regs.get_unchecked_mut() }.set_num_device_slots(num_slots)?;
+        unsafe { self.op_regs.get_unchecked_mut() }
             .set_dcbaa_ptr(&mut self.device_context_base_array)?;
         Ok(())
     }
     fn init_command_ring(&mut self) -> Result<()> {
-        self.op_regs.cmd_ring_ctrl = self.command_ring.ring_phys_addr() | 1 /* Ring Cycle State */;
+        unsafe {self.op_regs.get_unchecked_mut()}.cmd_ring_ctrl = self.command_ring.ring_phys_addr() | 1 /* Ring Cycle State */;
         Ok(())
     }
     fn alloc_scratch_pad_buffers(
@@ -1307,12 +1304,15 @@ impl Xhci {
     }
     fn notify_xhc(&mut self) {
         unsafe {
-            write_volatile(&mut self.doorbell_regs[0], 0);
+            write_volatile(&mut self.doorbell_regs.get_unchecked_mut()[0], 0);
         }
     }
     fn notify_ep(&mut self, slot: u8, dci: usize) {
         unsafe {
-            write_volatile(&mut self.doorbell_regs[slot as usize], dci as u32);
+            write_volatile(
+                &mut self.doorbell_regs.get_unchecked_mut()[slot as usize],
+                dci as u32,
+            );
         }
     }
     async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
