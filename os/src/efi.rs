@@ -1,8 +1,8 @@
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::memory_map_holder;
+use crate::memory_map_holder::MemoryMapHolder;
 use crate::util::size_in_pages_from_bytes;
-use crate::MemoryMapHolder;
 use core::fmt;
 use core::mem::size_of;
 use core::mem::zeroed;

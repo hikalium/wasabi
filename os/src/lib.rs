@@ -52,12 +52,3 @@ fn efi_main(image_handle: efi::EfiHandle, efi_system_table: &'static mut efi::Ef
     crate::init::init_basic_runtime(image_handle, efi_system_table);
     test_main();
 }
-
-// Structs
-pub use boot_info::BootInfo;
-pub use memory_map_holder::MemoryMapHolder;
-pub use text_area::TextArea;
-pub use vram::VRAMBufferInfo;
-
-// Trait impls
-use crate::graphics::BitmapImageBuffer;
