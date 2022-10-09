@@ -3,9 +3,7 @@ extern crate alloc;
 use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::busy_loop_hint;
 use crate::arch::x86_64::paging::disable_cache;
-use crate::arch::x86_64::paging::with_current_page_table;
 use crate::arch::x86_64::paging::IoBox;
-use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::executor::yield_execution;
@@ -1205,17 +1203,7 @@ impl Xhci {
         pci.disable_interrupt(bdf)?;
         pci.enable_bus_master(bdf)?;
         let bar0 = pci.try_bar0_mem64(bdf)?;
-        {
-            let vstart = bar0.addr() as u64;
-            let vend = bar0.addr() as u64 + bar0.size();
-            unsafe {
-                with_current_page_table(|pt| {
-                    pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
-                        .expect("Failed to create mapping")
-                })
-            }
-            println!("Disabled CPU Caches for {:#018X} - {:#018X}", vstart, vend);
-        }
+        bar0.disable_cache();
 
         let cap_regs = unsafe {
             ManuallyDrop::new(Pin::new(Box::from_raw(

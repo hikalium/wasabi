@@ -1,6 +1,8 @@
 extern crate alloc;
 
 use crate::acpi::Mcfg;
+use crate::arch::x86_64::paging::with_current_page_table;
+use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::executor::Executor;
@@ -200,6 +202,17 @@ impl BarMem64 {
     }
     pub fn size(&self) -> u64 {
         self.size
+    }
+    pub fn disable_cache(&self) {
+        let vstart = self.addr() as u64;
+        let vend = self.addr() as u64 + self.size();
+        unsafe {
+            with_current_page_table(|pt| {
+                pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
+                    .expect("Failed to create mapping")
+            })
+        }
+        println!("Disabled CPU Caches for {:#018X} - {:#018X}", vstart, vend);
     }
 }
 
