@@ -137,12 +137,15 @@ unsafe impl Sync for FirstFitAllocator {}
 
 unsafe impl GlobalAlloc for FirstFitAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.alloc_with_options(layout)
+        let addr = self.alloc_with_options(layout);
+        println!("ALLOCATOR! {:#p} {} alloc", addr, layout.size());
+        addr
     }
-    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let mut region = Header::from_allocated_region(ptr);
         region.is_allocated = false;
         Box::leak(region);
+        println!("ALLOCATOR! {:#p} {} dealloc", ptr, layout.size());
         // region is leaked here to avoid dropping the free info on the memory.
     }
 }
