@@ -8,8 +8,22 @@ use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
 use core::marker::PhantomData;
+use core::mem::size_of;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
+use core::pin::Pin;
+
+pub fn disable_cache<T: Sized>(data: &Pin<Box<T>>) {
+    let vstart = data.as_ref().get_ref() as *const T as u64;
+    let vend = vstart + size_of::<T>() as u64;
+    unsafe {
+        with_current_page_table(|pt| {
+            pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
+                .expect("Failed to create mapping")
+        })
+    }
+    println!("Mapped {:#018X} - {:#018X}", vstart, vend);
+}
 
 pub fn read_cr3() -> *mut PML4 {
     let mut cr3: *mut PML4;

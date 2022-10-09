@@ -2,7 +2,7 @@ use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 
 #[repr(transparent)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct Volatile<T> {
     _value: T,
 }

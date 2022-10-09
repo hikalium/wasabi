@@ -70,13 +70,14 @@ fn run_tasks() -> Result<()> {
         let h = 10;
         let colors = [0xFF0000, 0x00FF00, 0x0000FF];
         let y = vram.height() / 3;
-        let mut x = 0;
+        let xbegin = vram.width() / 2;
+        let mut x = xbegin;
         let mut c = 0;
         loop {
             draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
             x += 1;
             if x >= vram.width() {
-                x = 0;
+                x = xbegin;
                 c += 1;
             }
             delay().await;
@@ -88,13 +89,14 @@ fn run_tasks() -> Result<()> {
         let h = 10;
         let colors = [0xFF0000, 0x00FF00, 0x0000FF];
         let y = vram.height() / 3 * 2;
-        let mut x = 0;
+        let xbegin = vram.width() / 2;
+        let mut x = xbegin;
         let mut c = 0;
         loop {
             draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
             x += 1;
             if x >= vram.width() {
-                x = 0;
+                x = xbegin;
                 c += 1;
             }
             delay().await;
