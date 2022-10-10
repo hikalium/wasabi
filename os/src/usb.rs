@@ -140,6 +140,9 @@ impl ConfigDescriptor {
     pub fn total_length(&self) -> usize {
         self.total_length as usize
     }
+    pub fn config_value(&self) -> u8 {
+        self.config_value
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]

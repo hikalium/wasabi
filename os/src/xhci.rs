@@ -141,12 +141,17 @@ impl GenericTrbEntry {
             Ok(())
         }
     }
-    fn cycle_state(&self) -> u32 {
-        self.control.read() & (TrbControl::CycleBit as u32)
+    fn cycle_state(&self) -> bool {
+        self.control.read() & (TrbControl::CycleBit as u32) != 0
     }
-    fn set_cycle_state(&mut self, cycle: u32) {
-        self.control
-            .write((self.control.read() & !(TrbControl::CycleBit as u32)) | cycle);
+    fn set_cycle_state(&mut self, cycle: bool) {
+        if cycle {
+            self.control
+                .write(self.control.read() | (TrbControl::CycleBit as u32));
+        } else {
+            self.control
+                .write(self.control.read() & !(TrbControl::CycleBit as u32));
+        }
     }
     fn cmd_no_op() -> Self {
         let mut trb = Self::default();
@@ -272,7 +277,7 @@ impl SetupStageTrb {
 
     const REQ_GET_REPORT: u8 = 1;
     const REQ_GET_DESCRIPTOR: u8 = 6;
-    //const REQ_SET_CONFIGURATION: u8 = 9;
+    const REQ_SET_CONFIGURATION: u8 = 9;
     const REQ_SET_INTERFACE: u8 = 11;
     const REQ_SET_PROTOCOL: u8 = 0x0b;
     fn new(request_type: u8, request: u8, value: u16, index: u16, length: u16) -> Self {
@@ -366,7 +371,7 @@ fn error_stringify<T: Debug>(x: T) -> String {
 #[derive(Debug)]
 #[repr(C, align(4096))]
 struct TrbRing {
-    trb: [GenericTrbEntry; 16],
+    trb: [GenericTrbEntry; 32],
     current_index: usize,
     _pinned: PhantomPinned,
 }
@@ -383,12 +388,15 @@ impl TrbRing {
     fn num_trbs(&self) -> usize {
         self.trb.len()
     }
-    fn advance_index(&mut self, cycle_ours: u32) {
-        let cycle_theirs = 1 - cycle_ours;
+    fn advance_index(&mut self, cycle_ours: bool) {
+        let cycle_theirs = !cycle_ours;
         let current_index = self.current_index;
         let next_index = (current_index + 1) % self.trb.len();
         self.trb[current_index].set_cycle_state(cycle_theirs);
         self.current_index = next_index;
+    }
+    fn advance_index_notoggle(&mut self) {
+        self.current_index = (self.current_index + 1) % self.trb.len();
     }
     fn current(&self) -> GenericTrbEntry {
         self.trb[self.current_index]
@@ -417,7 +425,7 @@ impl TrbRing {
 
 struct CommandRing {
     ring: IoBox<TrbRing>,
-    cycle_state_ours: u32,
+    cycle_state_ours: bool,
 }
 impl Default for CommandRing {
     fn default() -> Self {
@@ -432,7 +440,7 @@ impl Default for CommandRing {
             .expect("failed to write a link trb");
         Self {
             ring,
-            cycle_state_ours: 0,
+            cycle_state_ours: false,
         }
     }
 }
@@ -447,14 +455,14 @@ impl CommandRing {
         if ring.current().cycle_state() != self.cycle_state_ours {
             return Err(WasabiError::Failed("Command Ring is Full"));
         }
-        src.set_cycle_state(self.cycle_state_ours);
+        src.set_cycle_state(!self.cycle_state_ours);
         let dst_ptr = ring.current_ptr();
         ring.write_current(src);
         ring.advance_index(self.cycle_state_ours);
         if ring.current_index() == ring.num_trbs() - 1 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
             ring.advance_index(self.cycle_state_ours);
-            self.cycle_state_ours = 1 - self.cycle_state_ours;
+            self.cycle_state_ours = !self.cycle_state_ours;
         }
         // The returned ptr will be used for waiting on command completion events.
         Ok(dst_ptr as u64)
@@ -464,7 +472,7 @@ impl CommandRing {
 struct EventRing {
     ring: IoBox<TrbRing>,
     erst: IoBox<EventRingSegmentTableEntry>,
-    cycle_state_ours: u32,
+    cycle_state_ours: bool,
     erdp: Option<*mut u64>,
 }
 impl EventRing {
@@ -476,7 +484,7 @@ impl EventRing {
         Ok(Self {
             ring,
             erst,
-            cycle_state_ours: 1,
+            cycle_state_ours: true,
             erdp: None,
         })
     }
@@ -498,12 +506,13 @@ impl EventRing {
         }
         let e = self.ring.as_ref().current();
         let eptr = self.ring.as_ref().current_ptr() as u64;
-        unsafe { self.ring.get_unchecked_mut() }.advance_index(self.cycle_state_ours);
+        unsafe { self.ring.get_unchecked_mut() }.advance_index_notoggle();
         unsafe {
-            write_volatile(self.erdp.expect("erdp is not set"), eptr);
+            let erdp = self.erdp.expect("erdp is not set");
+            write_volatile(erdp, eptr | (*erdp & 0b1111));
         }
         if self.ring.as_ref().current_index() == 0 {
-            self.cycle_state_ours = 1 - self.cycle_state_ours;
+            self.cycle_state_ours = !self.cycle_state_ours;
         }
         Ok(e)
     }
@@ -534,9 +543,7 @@ impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
                 {
                     Poll::Ready(trb)
                 } else {
-                    if trb.completion_code() != CompletionCode::ShortPacket as u32 {
-                        println!("Ignoring event: {:?}", trb);
-                    }
+                    println!("Ignoring event: {:?}", trb);
                     Poll::Pending
                 }
             }
@@ -1341,6 +1348,24 @@ impl Xhci {
         self.notify_ep(slot, 1);
         Ok(TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting).await)
     }
+    async fn request_set_config(&mut self, slot: u8, config_value: u8) -> Result<()> {
+        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
+        ctrl_ep_ring.push(
+            SetupStageTrb::new(
+                0,
+                SetupStageTrb::REQ_SET_CONFIGURATION,
+                config_value as u16,
+                0,
+                0,
+            )
+            .into(),
+        )?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
+        self.notify_ep(slot, 1);
+        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+            .await
+            .completed()
+    }
     async fn request_set_interface(
         &mut self,
         slot: u8,
@@ -1491,39 +1516,58 @@ impl Xhci {
         self.request_device_descriptor(slot).await?.completed()?;
         let descriptors = self.request_config_descriptor_and_rest(slot).await?;
         let device_descriptor = self.slot_context[slot as usize].device_descriptor();
+        println!("{:?}", device_descriptor);
+        let mut last_config: Option<ConfigDescriptor> = None;
         if device_descriptor.device_class() == 0 {
             // Device class is derived from Interface Descriptor
             for d in &descriptors {
-                if let UsbDescriptor::Interface(interface_desc) = d {
-                    match interface_desc.triple() {
-                        (3, 1, 1) => {
-                            println!("!!!!! USB KBD");
-                            println!("setting interface");
-                            self.request_set_interface(
-                                slot,
-                                interface_desc.interface_number(),
-                                interface_desc.alt_setting(),
-                            )
-                            .await?;
-                            println!("setting protocol");
-                            self.request_set_protocol(
-                                slot,
-                                interface_desc.interface_number(),
-                                0, /* Boot Protocol */
-                            )
-                            .await?;
-                            let mut bytes = [0; 8];
-                            loop {
-                                let buf = Pin::new(&mut bytes);
-                                self.request_report_bytes(slot, buf).await?;
-                                println!("{bytes:?}");
+                match d {
+                    UsbDescriptor::Config(e) => last_config = Some(*e),
+                    UsbDescriptor::Interface(interface_desc) => {
+                        match interface_desc.triple() {
+                            (3, 1, 1) => {
+                                println!("!!!!! USB KBD");
+                                println!("setting config");
+                                self.request_set_config(
+                                    slot,
+                                    last_config.expect("no config").config_value(),
+                                )
+                                .await?;
+                                println!("setting interface");
+                                self.request_set_interface(
+                                    slot,
+                                    interface_desc.interface_number(),
+                                    interface_desc.alt_setting(),
+                                )
+                                .await?;
+                                println!("setting protocol");
+                                self.request_set_protocol(
+                                    slot,
+                                    interface_desc.interface_number(),
+                                    0, /* Boot Protocol */
+                                )
+                                .await?;
+                                let mut bytes = Box::pin([0; 8]);
+                                loop {
+                                    let mut buf = Pin::new(&mut bytes);
+                                    self.request_report_bytes(slot, unsafe {
+                                        buf.as_mut().get_unchecked_mut().as_mut()
+                                    })
+                                    .await?;
+                                    if bytes[2] != 0 {
+                                        println!("{bytes:?}");
+                                    }
+                                }
                             }
+                            (3, 1, 2) => println!("!!!!! USB MOUSE"),
+                            (3, subclass, protocol) => println!(
+                                "Unknown HID Device (subclass = {subclass}, protocol = {protocol})"
+                            ),
+                            _ => {}
                         }
-                        (3, 1, 2) => println!("!!!!! USB MOUSE"),
-                        (3, subclass, protocol) => println!(
-                            "Unknown HID Device (subclass = {subclass}, protocol = {protocol})"
-                        ),
-                        _ => {}
+                    }
+                    e => {
+                        println!("{:?}", e)
                     }
                 }
             }

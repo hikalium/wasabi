@@ -2,7 +2,6 @@ extern crate alloc;
 
 use crate::error::Result;
 use crate::error::WasabiError;
-use crate::println;
 use crate::util::PAGE_SIZE;
 use alloc::boxed::Box;
 use core::arch::asm;
@@ -98,7 +97,6 @@ pub fn disable_cache<T: Sized>(io_box: &IoBox<T>) {
                 .expect("Failed to create mapping")
         })
     }
-    println!("Disabled CPU Caches for {:#018X} - {:#018X}", vstart, vend);
 }
 
 pub fn read_cr3() -> *mut PML4 {
