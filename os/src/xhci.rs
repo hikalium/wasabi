@@ -10,6 +10,7 @@ use crate::error::WasabiError;
 use crate::executor::yield_execution;
 use crate::executor::Executor;
 use crate::executor::Task;
+use crate::hpet::Hpet;
 use crate::pci::BarMem64;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
@@ -79,6 +80,7 @@ enum TrbType {
 #[derive(PartialEq, Eq)]
 enum CompletionCode {
     Success = 1,
+    UsbTransactionError = 4,
     ShortPacket = 13,
     EventRingFullError = 21,
 }
@@ -86,6 +88,7 @@ impl CompletionCode {
     fn parse(code: u32) -> &'static str {
         match code {
             code if code == CompletionCode::Success as u32 => "Success",
+            code if code == CompletionCode::UsbTransactionError as u32 => "UsbTransactionError",
             code if code == CompletionCode::ShortPacket as u32 => "ShortPacket",
             code if code == CompletionCode::EventRingFullError as u32 => "EventRingFullError",
             _ => "?",
@@ -500,9 +503,9 @@ impl EventRing {
     fn has_next_event(&self) -> bool {
         self.ring.as_ref().current().cycle_state() == self.cycle_state_ours
     }
-    fn pop(&mut self) -> Result<GenericTrbEntry> {
+    fn pop(&mut self) -> Option<GenericTrbEntry> {
         if !self.has_next_event() {
-            return Err(WasabiError::Failed("EventRingIsEmpty"));
+            return None;
         }
         let e = self.ring.as_ref().current();
         let eptr = self.ring.as_ref().current_ptr() as u64;
@@ -514,34 +517,44 @@ impl EventRing {
         if self.ring.as_ref().current_index() == 0 {
             self.cycle_state_ours = !self.cycle_state_ours;
         }
-        Ok(e)
+        Some(e)
     }
 }
 
 struct EventFuture<'a, const E: TrbType> {
     event_ring: &'a mut EventRing,
     target_command_trb_addr: u64,
+    time_out: u64,
     _pinned: PhantomPinned,
 }
 impl<'a, const E: TrbType> EventFuture<'a, E> {
     fn new(event_ring: &'a mut EventRing, target_command_trb_addr: u64) -> Self {
+        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 10;
         Self {
             event_ring,
             target_command_trb_addr,
+            time_out,
             _pinned: PhantomPinned,
         }
     }
 }
 impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
-    type Output = GenericTrbEntry;
-    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<GenericTrbEntry> {
+    type Output = Result<GenericTrbEntry>;
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<GenericTrbEntry>> {
+        let time_out = self.time_out;
         let mut_self = unsafe { self.get_unchecked_mut() };
         match mut_self.event_ring.pop() {
-            Err(_) => Poll::Pending,
-            Ok(trb) => {
+            None => {
+                if time_out < Hpet::take().main_counter() {
+                    Poll::Ready(Err(WasabiError::Failed("Timeout")))
+                } else {
+                    Poll::Pending
+                }
+            }
+            Some(trb) => {
                 if trb.trb_type() == E as u32 && trb.data.read() == mut_self.target_command_trb_addr
                 {
-                    Poll::Ready(trb)
+                    Poll::Ready(Ok(trb))
                 } else {
                     println!("Ignoring event: {:?}", trb);
                     Poll::Pending
@@ -1325,7 +1338,7 @@ impl Xhci {
     async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.push(cmd)?;
         self.notify_xhc();
-        Ok(CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr).await)
+        CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr).await
     }
     async fn request_device_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
         let setup_stage = SetupStageTrb::new(
@@ -1346,7 +1359,7 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(data_stage.into())?;
         ctrl_ep_ring.push(status_stage.into())?;
         self.notify_ep(slot, 1);
-        Ok(TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting).await)
+        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting).await
     }
     async fn request_set_config(&mut self, slot: u8, config_value: u8) -> Result<()> {
         let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
@@ -1363,7 +1376,7 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
-            .await
+            .await?
             .completed()
     }
     async fn request_set_interface(
@@ -1386,7 +1399,7 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
-            .await
+            .await?
             .completed()
     }
     async fn request_set_protocol(
@@ -1412,7 +1425,7 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
-            .await
+            .await?
             .completed()
     }
     async fn request_report_bytes(&mut self, slot: u8, buf: Pin<&mut [u8]>) -> Result<()> {
@@ -1434,7 +1447,7 @@ impl Xhci {
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
-            .await
+            .await?
             .completed()
     }
     async fn request_config_descriptor_bytes(
@@ -1457,7 +1470,7 @@ impl Xhci {
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
-            .await
+            .await?
             .completed()
     }
     async fn request_config_descriptor_and_rest(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {

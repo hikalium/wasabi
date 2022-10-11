@@ -57,7 +57,6 @@ const _: () = assert!(size_of::<Registers>() == 0x500);
 pub struct Hpet {
     registers: &'static mut Registers,
     #[allow(unused)]
-    fs_per_count: u64,
     num_of_timers: usize,
     freq: u64,
 }
@@ -86,7 +85,6 @@ impl Hpet {
 
         let mut hpet = Self {
             registers,
-            fs_per_count,
             num_of_timers,
             freq,
         };
@@ -152,6 +150,10 @@ impl Hpet {
     pub fn main_counter(&self) -> u64 {
         // This is safe as far as self is properly constructed.
         unsafe { read_volatile(&self.registers.main_counter_value) }
+    }
+    pub fn freq(&self) -> u64 {
+        // This is safe as far as self is properly constructed.
+        self.freq
     }
     pub fn notify_end_of_interrupt(&mut self) {
         self.registers.interrupt_status.store(0, Ordering::Relaxed);
