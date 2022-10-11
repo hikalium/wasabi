@@ -71,27 +71,22 @@ impl<'a> Iterator for DescriptorIterator<'a> {
 #[allow(unused)]
 #[repr(packed)]
 pub struct DeviceDescriptor {
-    desc_length: u8,
-    desc_type: u8,
-    version: u16,
-    device_class: u8,
-    device_subclass: u8,
-    device_protocol: u8,
-    max_packet_size: u8,
-    vendor_id: u16,
-    product_id: u16,
-    device_version: u16,
-    manufacturer_idx: u8,
-    product_idx: u8,
-    serial_idx: u8,
-    num_of_config: u8,
+    pub desc_length: u8,
+    pub desc_type: u8,
+    pub version: u16,
+    pub device_class: u8,
+    pub device_subclass: u8,
+    pub device_protocol: u8,
+    pub max_packet_size: u8,
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub device_version: u16,
+    pub manufacturer_idx: u8,
+    pub product_idx: u8,
+    pub serial_idx: u8,
+    pub num_of_config: u8,
 }
 const _: () = assert!(size_of::<DeviceDescriptor>() == 18);
-impl DeviceDescriptor {
-    pub fn device_class(&self) -> u8 {
-        self.device_class
-    }
-}
 
 /// # Safety
 /// Implementing this trait is safe only when the target type can be constructed from any byte

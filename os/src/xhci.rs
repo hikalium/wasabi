@@ -23,6 +23,8 @@ use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorIterator;
 use crate::usb::DescriptorType;
 use crate::usb::DeviceDescriptor;
+use crate::usb::EndpointDescriptor;
+use crate::usb::InterfaceDescriptor;
 use crate::usb::IntoPinnedMutableSlice;
 use crate::usb::UsbDescriptor;
 use crate::util::extract_bits;
@@ -35,6 +37,7 @@ use alloc::fmt::Display;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::cell::SyncUnsafeCell;
 use core::convert::AsRef;
@@ -81,6 +84,7 @@ enum TrbType {
 enum CompletionCode {
     Success = 1,
     UsbTransactionError = 4,
+    StallError = 6,
     ShortPacket = 13,
     EventRingFullError = 21,
 }
@@ -89,6 +93,7 @@ impl CompletionCode {
         match code {
             code if code == CompletionCode::Success as u32 => "Success",
             code if code == CompletionCode::UsbTransactionError as u32 => "UsbTransactionError",
+            code if code == CompletionCode::StallError as u32 => "StallError",
             code if code == CompletionCode::ShortPacket as u32 => "ShortPacket",
             code if code == CompletionCode::EventRingFullError as u32 => "EventRingFullError",
             _ => "?",
@@ -1450,9 +1455,11 @@ impl Xhci {
             .await?
             .completed()
     }
-    async fn request_config_descriptor_bytes(
+    async fn request_descriptor(
         &mut self,
         slot: u8,
+        desc_type: DescriptorType,
+        desc_index: u8,
         buf: Pin<&mut [u8]>,
     ) -> Result<()> {
         let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
@@ -1460,7 +1467,7 @@ impl Xhci {
             SetupStageTrb::new(
                 SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
                 SetupStageTrb::REQ_GET_DESCRIPTOR,
-                (DescriptorType::Config as u16) << 8,
+                (desc_type as u16) << 8 | (desc_index as u16),
                 0,
                 buf.len() as u16,
             )
@@ -1475,16 +1482,37 @@ impl Xhci {
     }
     async fn request_config_descriptor_and_rest(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {
         let mut config_descriptor = Box::pin(ConfigDescriptor::default());
-        self.request_config_descriptor_bytes(slot, config_descriptor.as_mut().as_mut_slice())
-            .await?;
+        self.request_descriptor(
+            slot,
+            DescriptorType::Config,
+            0,
+            config_descriptor.as_mut().as_mut_slice(),
+        )
+        .await?;
         let mut buf = Vec::<u8>::new();
         buf.resize(config_descriptor.total_length(), 0);
         let mut buf = Box::into_pin(buf.into_boxed_slice());
-        self.request_config_descriptor_bytes(slot, buf.as_mut())
+        self.request_descriptor(slot, DescriptorType::Config, 0, buf.as_mut())
             .await?;
         let iter = DescriptorIterator::new(&buf);
         let descriptors: Vec<UsbDescriptor> = iter.collect();
         Ok(descriptors)
+    }
+    async fn request_string_descriptor_zero(&mut self, slot: u8) -> Result<Pin<Box<[u8]>>> {
+        let mut buf = Vec::<u8>::new();
+        buf.resize(128, 0);
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        self.request_descriptor(slot, DescriptorType::String, 0, buf.as_mut())
+            .await?;
+        Ok(buf)
+    }
+    async fn request_string_descriptor(&mut self, slot: u8, index: u8) -> Result<String> {
+        let mut buf = Vec::<u8>::new();
+        buf.resize(128, 0);
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        self.request_descriptor(slot, DescriptorType::String, index, buf.as_mut())
+            .await?;
+        Ok(String::from_utf8_lossy(&buf[2..]).to_string())
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
         for i in 0..100 {
@@ -1528,59 +1556,74 @@ impl Xhci {
         self.send_command(cmd).await?.completed()?;
         self.request_device_descriptor(slot).await?.completed()?;
         let descriptors = self.request_config_descriptor_and_rest(slot).await?;
-        let device_descriptor = self.slot_context[slot as usize].device_descriptor();
+        let device_descriptor = *self.slot_context[slot as usize].device_descriptor();
         println!("{:?}", device_descriptor);
+        let lang_id_table = self.request_string_descriptor_zero(slot).await?;
+        println!("{:?}", lang_id_table);
+        let vendor_name = self
+            .request_string_descriptor(slot, device_descriptor.manufacturer_idx)
+            .await?;
+        let product_name = self
+            .request_string_descriptor(slot, device_descriptor.product_idx)
+            .await?;
+        println!("{} {}", vendor_name, product_name);
         let mut last_config: Option<ConfigDescriptor> = None;
-        if device_descriptor.device_class() == 0 {
+        let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
+        let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
+        if device_descriptor.device_class == 0 {
             // Device class is derived from Interface Descriptor
             for d in &descriptors {
+                println!("{:?}", d);
+            }
+            for d in &descriptors {
                 match d {
-                    UsbDescriptor::Config(e) => last_config = Some(*e),
-                    UsbDescriptor::Interface(interface_desc) => {
-                        match interface_desc.triple() {
-                            (3, 1, 1) => {
-                                println!("!!!!! USB KBD");
-                                println!("setting config");
-                                self.request_set_config(
-                                    slot,
-                                    last_config.expect("no config").config_value(),
-                                )
-                                .await?;
-                                println!("setting interface");
-                                self.request_set_interface(
-                                    slot,
-                                    interface_desc.interface_number(),
-                                    interface_desc.alt_setting(),
-                                )
-                                .await?;
-                                println!("setting protocol");
-                                self.request_set_protocol(
-                                    slot,
-                                    interface_desc.interface_number(),
-                                    0, /* Boot Protocol */
-                                )
-                                .await?;
-                                let mut bytes = Box::pin([0; 8]);
-                                loop {
-                                    let mut buf = Pin::new(&mut bytes);
-                                    self.request_report_bytes(slot, unsafe {
-                                        buf.as_mut().get_unchecked_mut().as_mut()
-                                    })
-                                    .await?;
-                                    if bytes[2] != 0 {
-                                        println!("{bytes:?}");
-                                    }
-                                }
-                            }
-                            (3, 1, 2) => println!("!!!!! USB MOUSE"),
-                            (3, subclass, protocol) => println!(
-                                "Unknown HID Device (subclass = {subclass}, protocol = {protocol})"
-                            ),
-                            _ => {}
+                    UsbDescriptor::Config(e) => {
+                        if boot_keyboard_interface.is_some() {
+                            break;
+                        }
+                        last_config = Some(*e);
+                        ep_desc_list.clear();
+                    }
+                    UsbDescriptor::Interface(e) => {
+                        if let (3, 1, 1) = e.triple() {
+                            boot_keyboard_interface = Some(*e)
                         }
                     }
-                    e => {
-                        println!("{:?}", e)
+                    UsbDescriptor::Endpoint(e) => {
+                        ep_desc_list.push(*e);
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(interface_desc) = boot_keyboard_interface {
+                println!("!!!!! USB KBD Found!");
+                println!("{:?}", ep_desc_list);
+                println!("setting config");
+                self.request_set_config(slot, last_config.expect("no config").config_value())
+                    .await?;
+                println!("setting interface");
+                self.request_set_interface(
+                    slot,
+                    interface_desc.interface_number(),
+                    interface_desc.alt_setting(),
+                )
+                .await?;
+                println!("setting protocol");
+                self.request_set_protocol(
+                    slot,
+                    interface_desc.interface_number(),
+                    0, /* Boot Protocol */
+                )
+                .await?;
+                let mut bytes = Box::pin([0; 8]);
+                loop {
+                    let mut buf = Pin::new(&mut bytes);
+                    self.request_report_bytes(slot, unsafe {
+                        buf.as_mut().get_unchecked_mut().as_mut()
+                    })
+                    .await?;
+                    if bytes[2] != 0 {
+                        println!("{bytes:?}");
                     }
                 }
             }
