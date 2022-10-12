@@ -177,7 +177,14 @@ impl InterfaceDescriptor {
 pub struct EndpointDescriptor {
     desc_length: u8,
     desc_type: u8,
+
+    // endpoint_address:
+    //   - bit[0..=3]: endpoint number
+    //   - bit[7]: direction(0: out, 1: in)
     endpoint_address: u8,
+
+    // attributes:
+    //   - bit[0..=1]: transfer type(0: Control, 1: Isochronous, 2: Bulk, 3: Interrupt)
     attributes: u8,
     max_packet_size: u16,
     interval_ms: u8,

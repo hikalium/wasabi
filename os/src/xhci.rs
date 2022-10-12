@@ -46,6 +46,7 @@ use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::mem::transmute;
 use core::mem::MaybeUninit;
+use core::pin::pin;
 use core::pin::Pin;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
@@ -1004,15 +1005,21 @@ mod regs {
 #[allow(unused)]
 #[derive(PartialEq, Eq)]
 enum EndpointType {
-    BulkOut = 2,
     Control = 4,
-    BulkIn = 6,
+    InterruptIn = 7,
 }
 
 #[repr(C, align(32))]
 #[derive(Default)]
 struct EndpointContext {
+    // data[0]:
+    //   - bit[16..=23]: Interval (Table 6-12: Endpoint Type vs. Interval Calculation)
+    // data[1]:
+    //   - bit[1..=2]: Error Count (CErr)
+    //   - bit[3..=5]: EndpointType (EPType)
+    //   - bit[16..=31]: Max Packet Size (taken from EndpointDescriptor)
     data: [u32; 2],
+
     tr_dequeue_ptr: u64,
     _reserved: [u32; 4],
 }
@@ -1615,13 +1622,9 @@ impl Xhci {
                     0, /* Boot Protocol */
                 )
                 .await?;
-                let mut bytes = Box::pin([0; 8]);
+                let mut bytes = pin!([0; 8]);
                 loop {
-                    let mut buf = Pin::new(&mut bytes);
-                    self.request_report_bytes(slot, unsafe {
-                        buf.as_mut().get_unchecked_mut().as_mut()
-                    })
-                    .await?;
+                    self.request_report_bytes(slot, bytes.as_mut()).await?;
                     if bytes[2] != 0 {
                         println!("{bytes:?}");
                     }
