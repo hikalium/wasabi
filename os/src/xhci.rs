@@ -33,7 +33,6 @@ use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::fmt;
 use alloc::fmt::Debug;
-use alloc::fmt::Display;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -815,8 +814,8 @@ mod regs {
     use super::BarMem64;
     use super::CapabilityRegisters;
     use super::Debug;
-    use super::Display;
     use super::Result;
+    use super::UsbMode;
     use super::WasabiError;
 
     #[repr(u32)]
@@ -899,23 +898,26 @@ mod regs {
             // PP - Port Power - RWS
             self.value() & Self::BIT_PORT_POWER != 0
         }
-        pub fn port_speed(&self) -> usize {
+        pub fn port_speed(&self) -> UsbMode {
             // Port Speed - ROS
             // Returns Protocol Speed ID (PSI). See 7.2.1 of xhci spec.
-            extract_bits(self.value(), 10, 4) as usize
+            // Default mapping is in Table 7-13: Default USB Speed ID Mapping.
+            match extract_bits(self.value(), 10, 4) {
+                1 => UsbMode::FullSpeed,
+                2 => UsbMode::LowSpeed,
+                3 => UsbMode::HighSpeed,
+                4 => UsbMode::SuperSpeed,
+                v => UsbMode::Unknown(v),
+            }
         }
         pub fn max_packet_size(&self) -> Result<u16> {
-            const ID_FS: usize = 1;
-            const ID_LS: usize = 2;
-            const ID_HS: usize = 3;
-            const ID_SS: usize = 4;
             match self.port_speed() {
-                ID_FS | ID_LS => Ok(8),
-                ID_HS => Ok(64),
-                ID_SS => Ok(512),
-                psi => Err(WasabiError::FailedString(format!(
-                    "Unknown Protocol Speeed ID: {}",
-                    psi
+                UsbMode::FullSpeed | UsbMode::LowSpeed => Ok(8),
+                UsbMode::HighSpeed => Ok(64),
+                UsbMode::SuperSpeed => Ok(512),
+                speed => Err(WasabiError::FailedString(format!(
+                    "Unknown Protocol Speeed ID: {:?}",
+                    speed
                 ))),
             }
         }
@@ -934,11 +936,11 @@ mod regs {
             }
         }
     }
-    impl Display for PortScWrapper {
+    impl Debug for PortScWrapper {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(
                 f,
-                "PORTSC: value={:#010X}, state={:?}, link_state={:?}, speed={}",
+                "PORTSC: value={:#010X}, state={:?}, link_state={:?}, mode={:?}",
                 self.value(),
                 self.state(),
                 self.pls(),
@@ -1000,13 +1002,52 @@ mod regs {
 
 // EndpointType: 0-7
 #[derive(Debug, Copy, Clone)]
-#[repr(u32)]
-#[non_exhaustive]
+#[repr(u8)]
 #[allow(unused)]
 #[derive(PartialEq, Eq)]
 enum EndpointType {
+    IsochOut = 1,
+    BulkOut = 2,
+    InterruptOut = 3,
     Control = 4,
+    IsochIn = 5,
+    BulkIn = 6,
     InterruptIn = 7,
+}
+impl From<&EndpointDescriptor> for EndpointType {
+    fn from(ep_desc: &EndpointDescriptor) -> Self {
+        match (ep_desc.endpoint_address >> 7, ep_desc.attributes & 2) {
+            (0, 1) => Self::IsochOut,
+            (0, 2) => Self::BulkOut,
+            (0, 3) => Self::InterruptOut,
+            (_, 0) => Self::Control,
+            (1, 1) => Self::IsochIn,
+            (1, 2) => Self::BulkIn,
+            (1, 3) => Self::InterruptIn,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[allow(unused)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+pub enum UsbMode {
+    Unknown(u32),
+    FullSpeed,
+    LowSpeed,
+    HighSpeed,
+    SuperSpeed,
+}
+impl UsbMode {
+    fn psi(&self) -> u32 {
+        match *self {
+            Self::FullSpeed => 1,
+            Self::LowSpeed => 2,
+            Self::HighSpeed => 3,
+            Self::SuperSpeed => 4,
+            Self::Unknown(psi) => psi,
+        }
+    }
 }
 
 #[repr(C, align(32))]
@@ -1025,6 +1066,47 @@ struct EndpointContext {
 }
 const _: () = assert!(size_of::<EndpointContext>() == 0x20);
 impl EndpointContext {
+    unsafe fn new() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+    fn new_interrupt_in_endpoint(
+        max_packet_size: u16,
+        tr_dequeue_ptr: u64,
+        mode: UsbMode,
+        interval_from_ep_desc: u8,
+    ) -> Result<Self> {
+        // See [xhci] Table 6-12
+        let interval = match mode {
+            UsbMode::LowSpeed | UsbMode::FullSpeed => {
+                // interval_ms == 2^interval / 8 == interval_from_ep_desc
+                interval_from_ep_desc.ilog2() as u8 + 3
+            }
+            UsbMode::HighSpeed | UsbMode::SuperSpeed => interval_from_ep_desc - 1,
+            mode => {
+                return Err(WasabiError::FailedString(format!(
+                    "Failed to calc interval for {:?}",
+                    mode
+                )))
+            }
+        };
+        let mut ep = unsafe { Self::new() };
+        ep.set_ep_type(EndpointType::InterruptIn)?;
+        ep.set_dequeue_cycle_state(1)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.data[0] = (interval as u32) << 16;
+        Ok(ep)
+    }
+    fn new_control_endpoint(max_packet_size: u16, tr_dequeue_ptr: u64) -> Result<Self> {
+        let mut ep = unsafe { Self::new() };
+        ep.set_ep_type(EndpointType::Control)?;
+        ep.set_dequeue_cycle_state(1)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        Ok(ep)
+    }
     fn set_ep_type(&mut self, ep_type: EndpointType) -> Result<()> {
         let raw_ep_type = ep_type as u32;
         if raw_ep_type < 8 {
@@ -1097,10 +1179,10 @@ impl DeviceContext {
             Err(WasabiError::Failed("num_ep_ctx out of range"))
         }
     }
-    fn set_port_speed(&mut self, psi: usize) -> Result<()> {
-        if psi < 16 {
+    fn set_port_speed(&mut self, mode: UsbMode) -> Result<()> {
+        if mode.psi() < 16u32 {
             self.slot_ctx[0] &= !(0xF << 20);
-            self.slot_ctx[0] |= (psi as u32) << 20;
+            self.slot_ctx[0] |= (mode.psi()) << 20;
             Ok(())
         } else {
             Err(WasabiError::Failed("psi out of range"))
@@ -1152,24 +1234,15 @@ impl InputContext {
             .device_ctx
             .set_num_of_ep_contexts(num_ep_ctx)
     }
-    fn set_port_speed(self: &mut Pin<&mut Self>, psi: usize) -> Result<()> {
+    fn set_port_speed(self: &mut Pin<&mut Self>, psi: UsbMode) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
             .set_port_speed(psi)
     }
-    fn init_ctrl_ep(
-        self: &mut Pin<&mut Self>,
-        ctrl_ep_ring_phys_addr: u64,
-        portsc: regs::PortScWrapper,
-    ) -> Result<()> {
-        let ep0 = &mut unsafe { self.as_mut().get_unchecked_mut() }
-            .device_ctx
-            .ep_ctx[0];
-        ep0.set_ep_type(EndpointType::Control)?;
-        ep0.set_ring_dequeue_pointer(ctrl_ep_ring_phys_addr)?;
-        ep0.set_dequeue_cycle_state(1)?;
-        ep0.set_error_count(3)?;
-        ep0.set_max_packet_size(portsc.max_packet_size()?);
+    /// # Arguments
+    /// * `dci` - destination device context index. [slot_ctx, ctrl_ep, ep1_out, ep1_in, ...]
+    fn set_ep_ctx(self: &mut Pin<&mut Self>, dci: usize, ep_ctx: EndpointContext) -> Result<()> {
+        unsafe { self.as_mut().get_unchecked_mut().device_ctx.ep_ctx[dci - 1] = ep_ctx }
         Ok(())
     }
 }
@@ -1557,7 +1630,13 @@ impl Xhci {
         let portsc = self.portsc.get(port)?;
         input_context.set_port_speed(portsc.port_speed())?;
         let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring.ring_phys_addr();
-        input_context.init_ctrl_ep(ctrl_ep_ring_phys_addr, portsc)?;
+        input_context.set_ep_ctx(
+            1,
+            EndpointContext::new_control_endpoint(
+                portsc.max_packet_size()?,
+                ctrl_ep_ring_phys_addr,
+            )?,
+        )?;
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
@@ -1604,7 +1683,28 @@ impl Xhci {
             }
             if let Some(interface_desc) = boot_keyboard_interface {
                 println!("!!!!! USB KBD Found!");
-                println!("{:?}", ep_desc_list);
+                println!("Configuring Endpoints");
+                let slot_context = &mut self.slot_context[slot as usize];
+                let input_context = &mut slot_context.input_context.as_mut();
+                for ep_desc in ep_desc_list {
+                    match EndpointType::from(&ep_desc) {
+                        EndpointType::InterruptIn => {
+                            println!("Initializing {:?}", ep_desc);
+                            input_context.set_ep_ctx(
+                                ep_desc.dci(),
+                                EndpointContext::new_interrupt_in_endpoint(
+                                    portsc.max_packet_size()?,
+                                    ctrl_ep_ring_phys_addr,
+                                    portsc.port_speed(),
+                                    ep_desc.interval,
+                                )?,
+                            )?;
+                        }
+                        _ => {
+                            println!("Ignoring {:?}", ep_desc);
+                        }
+                    }
+                }
                 println!("setting config");
                 self.request_set_config(slot, last_config.expect("no config").config_value())
                     .await?;
@@ -1641,10 +1741,11 @@ impl Xhci {
                     if let regs::PortState::Disabled = state {
                         // Reset port to Enable the port (via Reset state)
                         println!(
-                            "Resetting port: prev state: portsc[port = {}] = {:#10X} {:?}",
+                            "Resetting port: prev state: portsc[port = {}] = {:#10X} {:?} {:?}",
                             port,
                             portsc.value(),
-                            portsc.state()
+                            portsc.state(),
+                            portsc
                         );
                         portsc.reset();
                         self.poll_status = PollStatus::EnablingPort { port };

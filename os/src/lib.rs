@@ -17,6 +17,7 @@
 #![deny(clippy::wildcard_imports)]
 #![deny(clippy::enum_glob_use)]
 #![feature(associated_type_bounds)]
+#![feature(int_log)]
 
 pub mod acpi;
 pub mod allocator;

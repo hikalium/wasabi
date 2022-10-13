@@ -175,18 +175,28 @@ impl InterfaceDescriptor {
 #[allow(unused)]
 #[repr(packed)]
 pub struct EndpointDescriptor {
-    desc_length: u8,
-    desc_type: u8,
+    pub desc_length: u8,
+    pub desc_type: u8,
 
     // endpoint_address:
     //   - bit[0..=3]: endpoint number
     //   - bit[7]: direction(0: out, 1: in)
-    endpoint_address: u8,
+    pub endpoint_address: u8,
 
     // attributes:
     //   - bit[0..=1]: transfer type(0: Control, 1: Isochronous, 2: Bulk, 3: Interrupt)
-    attributes: u8,
-    max_packet_size: u16,
-    interval_ms: u8,
+    pub attributes: u8,
+    pub max_packet_size: u16,
+    // interval:
+    // [xhci] Table 6-12
+    // interval_ms = interval (For FS/LS Interrupt)
+    // interval_ms = 2^(interval-1) (For FS Isoch)
+    // interval_ms = 2^(interval-1) (For SSP/SS/HS)
+    pub interval: u8,
+}
+impl EndpointDescriptor {
+    pub fn dci(&self) -> usize {
+        ((self.endpoint_address & 0xF) * 2 + (self.endpoint_address >> 7)) as usize
+    }
 }
 const _: () = assert!(size_of::<EndpointDescriptor>() == 7);
