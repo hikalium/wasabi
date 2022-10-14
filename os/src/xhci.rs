@@ -47,6 +47,7 @@ use core::mem::transmute;
 use core::mem::MaybeUninit;
 use core::pin::pin;
 use core::pin::Pin;
+use core::ptr::null_mut;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::slice;
@@ -62,12 +63,14 @@ use regs::PortState;
 #[allow(unused)]
 #[derive(PartialEq, Eq)]
 enum TrbType {
+    Normal = 1,
     SetupStage = 2,
     DataStage = 3,
     StatusStage = 4,
     Link = 6,
     EnableSlotCommand = 9,
     AddressDeviceCommand = 11,
+    ConfigureEndpointCommand = 12,
     NoOpCommand = 23,
     TransferEvent = 32,
     CommandCompletionEvent = 33,
@@ -84,8 +87,10 @@ enum TrbType {
 enum CompletionCode {
     Success = 1,
     UsbTransactionError = 4,
+    TrbError = 5,
     StallError = 6,
     ShortPacket = 13,
+    ParameterError = 17,
     EventRingFullError = 21,
 }
 impl CompletionCode {
@@ -93,8 +98,10 @@ impl CompletionCode {
         match code {
             code if code == CompletionCode::Success as u32 => "Success",
             code if code == CompletionCode::UsbTransactionError as u32 => "UsbTransactionError",
+            code if code == CompletionCode::TrbError as u32 => "TrbError",
             code if code == CompletionCode::StallError as u32 => "StallError",
             code if code == CompletionCode::ShortPacket as u32 => "ShortPacket",
+            code if code == CompletionCode::ParameterError as u32 => "ParameterError",
             code if code == CompletionCode::EventRingFullError as u32 => "EventRingFullError",
             _ => "?",
         }
@@ -179,6 +186,14 @@ impl GenericTrbEntry {
         trb.set_slot_id(slot_id);
         trb
     }
+    fn cmd_configure_endpoint(input_context: Pin<&InputContext>, slot_id: u8) -> Self {
+        let mut trb = Self::default();
+        trb.data
+            .write(input_context.get_ref() as *const InputContext as u64);
+        trb.set_control(TrbType::ConfigureEndpointCommand, TrbControl::None);
+        trb.set_slot_id(slot_id);
+        trb
+    }
     fn slot_id(&self) -> u8 {
         extract_bits(self.control.read(), 24, 8)
             .try_into()
@@ -242,6 +257,33 @@ impl From<DataStageTrb> for GenericTrbEntry {
 impl From<StatusStageTrb> for GenericTrbEntry {
     fn from(trb: StatusStageTrb) -> GenericTrbEntry {
         unsafe { transmute(trb) }
+    }
+}
+impl From<NormalTrb> for GenericTrbEntry {
+    fn from(trb: NormalTrb) -> GenericTrbEntry {
+        unsafe { transmute(trb) }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C, align(16))]
+struct NormalTrb {
+    buf: u64,
+    option: u32,
+    control: u32,
+}
+const _: () = assert!(size_of::<DataStageTrb>() == 16);
+impl NormalTrb {
+    const CONTROL_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
+    const CONTROL_INTERRUPT_ON_SHORT_PACKET: u32 = 1 << 2;
+    fn new(buf: *mut u8, size: u16) -> Self {
+        Self {
+            buf: buf as u64,
+            option: size as u32,
+            control: (TrbType::Normal as u32) << 10
+                | Self::CONTROL_INTERRUPT_ON_COMPLETION
+                | Self::CONTROL_INTERRUPT_ON_SHORT_PACKET,
+        }
     }
 }
 
@@ -379,7 +421,7 @@ fn error_stringify<T: Debug>(x: T) -> String {
 #[derive(Debug)]
 #[repr(C, align(4096))]
 struct TrbRing {
-    trb: [GenericTrbEntry; 32],
+    trb: [GenericTrbEntry; Self::NUM_TRB],
     current_index: usize,
     _pinned: PhantomPinned,
 }
@@ -387,14 +429,15 @@ struct TrbRing {
 // to avoid crossing 64KiB boundaries. See Table 6-1 of xhci spec.
 const _: () = assert!(size_of::<TrbRing>() <= 4096);
 impl TrbRing {
+    const NUM_TRB: usize = 32;
     fn new() -> IoBox<Self> {
         IoBox::new()
     }
     fn phys_addr(&self) -> u64 {
         &self.trb[0] as *const GenericTrbEntry as u64
     }
-    fn num_trbs(&self) -> usize {
-        self.trb.len()
+    const fn num_trbs(&self) -> usize {
+        Self::NUM_TRB
     }
     fn advance_index(&mut self, cycle_ours: bool) {
         let cycle_theirs = !cycle_ours;
@@ -442,9 +485,8 @@ impl Default for CommandRing {
         let mut link_trb = GenericTrbEntry::default();
         link_trb.data.write(trb_head_paddr);
         link_trb.set_control(TrbType::Link, TrbControl::ToggleCycle);
-        let num_trbs = ring.as_ref().num_trbs();
         unsafe { ring.get_unchecked_mut() }
-            .write(num_trbs - 1, link_trb)
+            .write(TrbRing::NUM_TRB - 1, link_trb)
             .expect("failed to write a link trb");
         Self {
             ring,
@@ -474,6 +516,51 @@ impl CommandRing {
         }
         // The returned ptr will be used for waiting on command completion events.
         Ok(dst_ptr as u64)
+    }
+}
+
+struct TransferRing {
+    ring: IoBox<TrbRing>,
+    buffers: [*mut u8; TrbRing::NUM_TRB - 1],
+    cycle_state_ours: bool,
+}
+impl TransferRing {
+    const BUF_SIZE: usize = 4096;
+    const BUF_ALIGN: usize = 4096;
+    fn new() -> Result<Self> {
+        let mut ring = TrbRing::new();
+        let num_trbs = ring.as_ref().num_trbs();
+        let trb_head_paddr = ring.as_ref().phys_addr() as u64;
+        let mut link_trb = GenericTrbEntry::default();
+        link_trb.data.write(trb_head_paddr);
+        link_trb.set_control(TrbType::Link, TrbControl::ToggleCycle);
+        let mut_ring = unsafe { ring.get_unchecked_mut() };
+        mut_ring
+            .write(num_trbs - 1, link_trb)
+            .expect("failed to write a link trb");
+        let mut buffers = [null_mut(); TrbRing::NUM_TRB - 1];
+        for (i, v) in buffers.iter_mut().enumerate() {
+            *v = ALLOCATOR.alloc_with_options(
+                Layout::from_size_align(Self::BUF_SIZE, Self::BUF_ALIGN)
+                    .map_err(error_stringify)?,
+            );
+            mut_ring
+                .write(i, NormalTrb::new(*v, Self::BUF_SIZE as u16).into())
+                .expect("failed to write a link trb");
+        }
+        /*
+        for _ in 0..num_trbs {
+            mut_ring.advance_index(false);
+        }
+        */
+        Ok(Self {
+            ring,
+            buffers,
+            cycle_state_ours: true,
+        })
+    }
+    fn ring_phys_addr(&self) -> u64 {
+        self.ring.as_ref() as *const TrbRing as u64
     }
 }
 
@@ -1016,7 +1103,7 @@ enum EndpointType {
 }
 impl From<&EndpointDescriptor> for EndpointType {
     fn from(ep_desc: &EndpointDescriptor) -> Self {
-        match (ep_desc.endpoint_address >> 7, ep_desc.attributes & 2) {
+        match (ep_desc.endpoint_address >> 7, ep_desc.attributes & 3) {
             (0, 1) => Self::IsochOut,
             (0, 2) => Self::BulkOut,
             (0, 3) => Self::InterruptOut,
@@ -1051,7 +1138,7 @@ impl UsbMode {
 }
 
 #[repr(C, align(32))]
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct EndpointContext {
     // data[0]:
     //   - bit[16..=23]: Interval (Table 6-12: Endpoint Type vs. Interval Calculation)
@@ -1062,7 +1149,13 @@ struct EndpointContext {
     data: [u32; 2],
 
     tr_dequeue_ptr: u64,
-    _reserved: [u32; 4],
+
+    // 4.14.1.1 (should be non-zero)
+    average_trb_length: u16,
+
+    // 4.14.2
+    max_esit_payload_low: u16,
+    _reserved: [u32; 3],
 }
 const _: () = assert!(size_of::<EndpointContext>() == 0x20);
 impl EndpointContext {
@@ -1074,6 +1167,7 @@ impl EndpointContext {
         tr_dequeue_ptr: u64,
         mode: UsbMode,
         interval_from_ep_desc: u8,
+        average_trb_length: u16,
     ) -> Result<Self> {
         // See [xhci] Table 6-12
         let interval = match mode {
@@ -1096,6 +1190,9 @@ impl EndpointContext {
         ep.set_max_packet_size(max_packet_size);
         ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
         ep.data[0] = (interval as u32) << 16;
+        ep.average_trb_length = average_trb_length;
+        ep.max_esit_payload_low = max_packet_size; // 4.14.2
+        println!("{:?}", ep);
         Ok(ep)
     }
     fn new_control_endpoint(max_packet_size: u16, tr_dequeue_ptr: u64) -> Result<Self> {
@@ -1105,6 +1202,7 @@ impl EndpointContext {
         ep.set_error_count(3)?;
         ep.set_max_packet_size(max_packet_size);
         ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.average_trb_length = 8; // 6.2.3: Software shall set Average TRB Length to ‘8’ for control endpoints.
         Ok(ep)
     }
     fn set_ep_type(&mut self, ep_type: EndpointType) -> Result<()> {
@@ -1219,11 +1317,6 @@ struct InputContext {
 }
 const _: () = assert!(size_of::<InputContext>() <= 4096);
 impl InputContext {
-    fn add_context(self: &mut Pin<&mut Self>, ici: usize) -> Result<()> {
-        unsafe { self.as_mut().get_unchecked_mut() }
-            .input_ctrl_ctx
-            .add_context(ici)
-    }
     fn set_root_hub_port_number(self: &mut Pin<&mut Self>, port: usize) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
@@ -1243,6 +1336,13 @@ impl InputContext {
     /// * `dci` - destination device context index. [slot_ctx, ctrl_ep, ep1_out, ep1_in, ...]
     fn set_ep_ctx(self: &mut Pin<&mut Self>, dci: usize, ep_ctx: EndpointContext) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut().device_ctx.ep_ctx[dci - 1] = ep_ctx }
+        Ok(())
+    }
+    fn set_input_ctrl_ctx(
+        self: &mut Pin<&mut Self>,
+        input_ctrl_ctx: InputControlContext,
+    ) -> Result<()> {
+        unsafe { self.as_mut().get_unchecked_mut().input_ctrl_ctx = input_ctrl_ctx }
         Ok(())
     }
 }
@@ -1619,9 +1719,11 @@ impl Xhci {
         let slot_context = &mut self.slot_context[slot as usize];
         self.device_context_base_array
             .set_output_context(slot, slot_context.output_context());
+        let mut input_ctrl_ctx = InputControlContext::default();
+        input_ctrl_ctx.add_context(0)?;
+        input_ctrl_ctx.add_context(1)?;
         let input_context = &mut slot_context.input_context.as_mut();
-        input_context.add_context(0)?;
-        input_context.add_context(1)?;
+        input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
         // 3. Initialize the Input Slot Context data structure (6.2.2)
         input_context.set_root_hub_port_number(port)?;
         input_context.set_num_of_ep_contexts(1)?;
@@ -1686,25 +1788,36 @@ impl Xhci {
                 println!("Configuring Endpoints");
                 let slot_context = &mut self.slot_context[slot as usize];
                 let input_context = &mut slot_context.input_context.as_mut();
+                let mut input_ctrl_ctx = InputControlContext::default();
+                input_ctrl_ctx.add_context(0)?;
+                let mut interrupt_in_transfer_rings = Vec::new();
                 for ep_desc in ep_desc_list {
                     match EndpointType::from(&ep_desc) {
                         EndpointType::InterruptIn => {
                             println!("Initializing {:?}", ep_desc);
+                            interrupt_in_transfer_rings.push(TransferRing::new()?);
+                            let tring = &interrupt_in_transfer_rings.last().unwrap();
+                            input_ctrl_ctx.add_context(ep_desc.dci())?;
                             input_context.set_ep_ctx(
                                 ep_desc.dci(),
                                 EndpointContext::new_interrupt_in_endpoint(
                                     portsc.max_packet_size()?,
-                                    ctrl_ep_ring_phys_addr,
+                                    tring.ring_phys_addr(),
                                     portsc.port_speed(),
                                     ep_desc.interval,
+                                    8,
                                 )?,
                             )?;
+                            break;
                         }
                         _ => {
                             println!("Ignoring {:?}", ep_desc);
                         }
                     }
                 }
+                input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
+                let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
+                self.send_command(cmd).await?.completed()?;
                 println!("setting config");
                 self.request_set_config(slot, last_config.expect("no config").config_value())
                     .await?;
@@ -1722,11 +1835,11 @@ impl Xhci {
                     0, /* Boot Protocol */
                 )
                 .await?;
-                let mut bytes = pin!([0; 8]);
                 loop {
-                    self.request_report_bytes(slot, bytes.as_mut()).await?;
-                    if bytes[2] != 0 {
-                        println!("{bytes:?}");
+                    if let Ok(f) = TransferEventFuture::new(&mut self.primary_event_ring, 0).await {
+                        if f.completed().is_ok() {
+                            println!("done!!!");
+                        }
                     }
                 }
             }
