@@ -572,6 +572,16 @@ impl TransferRing {
         if mut_ring.current_ptr() != trb_ptr {
             return Err(WasabiError::Failed("unexpected trb ptr"));
         }
+        if mut_ring.current().cycle_state() != self.cycle_state_ours {
+            return Err(WasabiError::Failed("cycle state mismatch"));
+        }
+        // Reset the TRB
+        let current_index = mut_ring.current_index();
+        let mut trb: GenericTrbEntry = NormalTrb::new(self._buffers[current_index], 8).into();
+        trb.set_cycle_state(self.cycle_state_ours);
+        mut_ring
+            .write(current_index, trb)
+            .expect("failed to write a link trb");
         mut_ring.advance_index(self.cycle_state_ours);
         if mut_ring.current_index() == num_trbs - 1 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
@@ -1919,6 +1929,7 @@ impl Xhci {
                         };
                         println!("recv: {:?}", report.as_ref());
                         if let Some(ref mut tring) = ep_rings[trb.dci()] {
+                            println!("releasing: {:#018X}", transfer_trb_ptr);
                             tring.release_trb(transfer_trb_ptr)?;
                             self.notify_ep(slot, trb.dci());
                         }
