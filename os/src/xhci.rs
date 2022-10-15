@@ -46,7 +46,6 @@ use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::mem::transmute;
 use core::mem::MaybeUninit;
-use core::pin::pin;
 use core::pin::Pin;
 use core::ptr::null_mut;
 use core::ptr::read_volatile;
@@ -199,6 +198,11 @@ impl GenericTrbEntry {
         extract_bits(self.control.read(), 24, 8)
             .try_into()
             .expect("Invalid slot id")
+    }
+    fn dci(&self) -> usize {
+        extract_bits(self.control.read(), 16, 5)
+            .try_into()
+            .expect("Invalid ep dci")
     }
     fn set_slot_id(&mut self, slot: u8) {
         self.control
@@ -522,8 +526,8 @@ impl CommandRing {
 
 struct TransferRing {
     ring: IoBox<TrbRing>,
-    buffers: [*mut u8; TrbRing::NUM_TRB - 1],
     cycle_state_ours: bool,
+    _buffers: [*mut u8; TrbRing::NUM_TRB - 1],
 }
 impl TransferRing {
     const BUF_SIZE: usize = 4096;
@@ -551,16 +555,30 @@ impl TransferRing {
         }
         Ok(Self {
             ring,
-            buffers,
-            cycle_state_ours: true,
+            cycle_state_ours: false,
+            _buffers: buffers,
         })
     }
-    fn fill_ring(&mut self) {
+    fn fill_ring(&mut self) -> Result<()> {
+        let num_trbs = self.ring.as_ref().num_trbs();
+        for _ in 0..num_trbs - 1 {
+            self.release_trb(self.ring.as_ref().current_ptr())?;
+        }
+        Ok(())
+    }
+    fn release_trb(&mut self, trb_ptr: usize) -> Result<()> {
         let num_trbs = self.ring.as_ref().num_trbs();
         let mut_ring = unsafe { self.ring.get_unchecked_mut() };
-        for _ in 0..num_trbs {
-            mut_ring.advance_index(false);
+        if mut_ring.current_ptr() != trb_ptr {
+            return Err(WasabiError::Failed("unexpected trb ptr"));
         }
+        mut_ring.advance_index(self.cycle_state_ours);
+        if mut_ring.current_index() == num_trbs - 1 {
+            // Reached to Link TRB. Let's skip it and toggle the cycle.
+            mut_ring.advance_index(self.cycle_state_ours);
+            self.cycle_state_ours = !self.cycle_state_ours;
+        }
+        Ok(())
     }
     fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
@@ -616,18 +634,32 @@ impl EventRing {
     }
 }
 
+enum EventFutureWaitType {
+    TrbAddr(u64),
+    Slot(u8),
+}
+
 struct EventFuture<'a, const E: TrbType> {
     event_ring: &'a mut EventRing,
-    target_command_trb_addr: u64,
+    wait_on: EventFutureWaitType,
     time_out: u64,
     _pinned: PhantomPinned,
 }
 impl<'a, const E: TrbType> EventFuture<'a, E> {
-    fn new(event_ring: &'a mut EventRing, target_command_trb_addr: u64) -> Self {
+    fn new(event_ring: &'a mut EventRing, trb_addr: u64) -> Self {
         let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 10;
         Self {
             event_ring,
-            target_command_trb_addr,
+            wait_on: EventFutureWaitType::TrbAddr(trb_addr),
+            time_out,
+            _pinned: PhantomPinned,
+        }
+    }
+    fn new_on_slot(event_ring: &'a mut EventRing, slot: u8) -> Self {
+        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 10;
+        Self {
+            event_ring,
+            wait_on: EventFutureWaitType::Slot(slot),
             time_out,
             _pinned: PhantomPinned,
         }
@@ -647,12 +679,21 @@ impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
                 }
             }
             Some(trb) => {
-                if trb.trb_type() == E as u32 && trb.data.read() == mut_self.target_command_trb_addr
-                {
-                    Poll::Ready(Ok(trb))
-                } else {
-                    println!("Ignoring event: {:?}", trb);
-                    Poll::Pending
+                if trb.trb_type() != E as u32 {
+                    println!("Ignoring event (!= type): {:?}", trb);
+                    return Poll::Pending;
+                }
+                match mut_self.wait_on {
+                    EventFutureWaitType::TrbAddr(trb_addr) if trb_addr == trb.data.read() => {
+                        Poll::Ready(Ok(trb))
+                    }
+                    EventFutureWaitType::Slot(slot) if trb.slot_id() == slot => {
+                        Poll::Ready(Ok(trb))
+                    }
+                    _ => {
+                        println!("Ignoring event (!= wait_on): {:?}", trb);
+                        Poll::Pending
+                    }
                 }
             }
         }
@@ -1802,9 +1843,9 @@ impl Xhci {
                 let input_context = &mut slot_context.input_context.as_mut();
                 let mut input_ctrl_ctx = InputControlContext::default();
                 input_ctrl_ctx.add_context(0)?;
-                let mut interrupt_in_transfer_rings = Vec::new();
+                const EP_RING_NONE: Option<TransferRing> = None;
+                let mut ep_rings = [EP_RING_NONE; 32];
                 let mut last_dci = 1;
-                let mut ep_dci_list = Vec::new();
                 for ep_desc in ep_desc_list {
                     match EndpointType::from(&ep_desc) {
                         EndpointType::InterruptIn => {
@@ -1821,9 +1862,8 @@ impl Xhci {
                                     8,
                                 )?,
                             )?;
-                            ep_dci_list.push(ep_desc.dci());
-                            interrupt_in_transfer_rings.push(tring);
                             last_dci = max(last_dci, ep_desc.dci());
+                            ep_rings[ep_desc.dci()] = Some(tring);
                         }
                         _ => {
                             println!("Ignoring {:?}", ep_desc);
@@ -1857,18 +1897,30 @@ impl Xhci {
                 // Configure Endpoint Command and a successful USB SET_CONFIGURATION
                 // request may software schedule data transfers through a newly enabled endpoint
                 // or Stream Transfer Ring of the Device Slot.
-                for (dci, tring) in ep_dci_list
-                    .iter()
-                    .zip(interrupt_in_transfer_rings.iter_mut())
-                {
-                    tring.fill_ring();
-                    self.notify_ep(slot, *dci);
+                for (dci, tring) in ep_rings.iter_mut().enumerate() {
+                    match tring {
+                        Some(tring) => {
+                            tring.fill_ring()?;
+                            self.notify_ep(slot, dci);
+                        }
+                        None => {}
+                    }
                 }
                 println!("USB KBD init done!");
                 loop {
-                    if let Ok(f) = TransferEventFuture::new(&mut self.primary_event_ring, 0).await {
-                        if f.completed().is_ok() {
-                            println!("done!!!");
+                    if let Ok(trb) =
+                        TransferEventFuture::new_on_slot(&mut self.primary_event_ring, slot).await
+                    {
+                        let transfer_trb_ptr = trb.data.read() as usize;
+                        let report = unsafe {
+                            Mmio::<[u8; 8]>::from_raw(
+                                *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
+                            )
+                        };
+                        println!("recv: {:?}", report.as_ref());
+                        if let Some(ref mut tring) = ep_rings[trb.dci()] {
+                            tring.release_trb(transfer_trb_ptr)?;
+                            self.notify_ep(slot, trb.dci());
                         }
                     }
                 }
