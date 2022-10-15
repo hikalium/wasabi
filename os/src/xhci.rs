@@ -444,15 +444,20 @@ impl TrbRing {
     const fn num_trbs(&self) -> usize {
         Self::NUM_TRB
     }
-    fn advance_index(&mut self, cycle_ours: bool) {
-        let cycle_theirs = !cycle_ours;
-        let current_index = self.current_index;
-        let next_index = (current_index + 1) % self.trb.len();
-        self.trb[current_index].set_cycle_state(cycle_theirs);
-        self.current_index = next_index;
-    }
-    fn advance_index_notoggle(&mut self) {
+    fn advance_index(&mut self, cycle_ours: bool) -> Result<()> {
+        if self.current().cycle_state() != cycle_ours {
+            return Err(WasabiError::Failed("cycle state mismatch"));
+        }
+        self.trb[self.current_index].set_cycle_state(!cycle_ours);
         self.current_index = (self.current_index + 1) % self.trb.len();
+        Ok(())
+    }
+    fn advance_index_notoggle(&mut self, cycle_ours: bool) -> Result<()> {
+        if self.current().cycle_state() != cycle_ours {
+            return Err(WasabiError::Failed("cycle state mismatch"));
+        }
+        self.current_index = (self.current_index + 1) % self.trb.len();
+        Ok(())
     }
     fn current(&self) -> GenericTrbEntry {
         self.trb[self.current_index]
@@ -510,13 +515,13 @@ impl CommandRing {
         if ring.current().cycle_state() != self.cycle_state_ours {
             return Err(WasabiError::Failed("Command Ring is Full"));
         }
-        src.set_cycle_state(!self.cycle_state_ours);
+        src.set_cycle_state(self.cycle_state_ours);
         let dst_ptr = ring.current_ptr();
         ring.write_current(src);
-        ring.advance_index(self.cycle_state_ours);
-        if ring.current_index() == ring.num_trbs() - 1 {
+        ring.advance_index(self.cycle_state_ours)?;
+        if ring.current().trb_type() == TrbType::Link as u32 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
-            ring.advance_index(self.cycle_state_ours);
+            ring.advance_index(self.cycle_state_ours)?;
             self.cycle_state_ours = !self.cycle_state_ours;
         }
         // The returned ptr will be used for waiting on command completion events.
@@ -567,13 +572,9 @@ impl TransferRing {
         Ok(())
     }
     fn release_trb(&mut self, trb_ptr: usize) -> Result<()> {
-        let num_trbs = self.ring.as_ref().num_trbs();
         let mut_ring = unsafe { self.ring.get_unchecked_mut() };
         if mut_ring.current_ptr() != trb_ptr {
             return Err(WasabiError::Failed("unexpected trb ptr"));
-        }
-        if mut_ring.current().cycle_state() != self.cycle_state_ours {
-            return Err(WasabiError::Failed("cycle state mismatch"));
         }
         // Reset the TRB
         let current_index = mut_ring.current_index();
@@ -582,10 +583,10 @@ impl TransferRing {
         mut_ring
             .write(current_index, trb)
             .expect("failed to write a link trb");
-        mut_ring.advance_index(self.cycle_state_ours);
-        if mut_ring.current_index() == num_trbs - 1 {
+        mut_ring.advance_index(self.cycle_state_ours)?;
+        if mut_ring.current().trb_type() == TrbType::Link as u32 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
-            mut_ring.advance_index(self.cycle_state_ours);
+            mut_ring.advance_index(self.cycle_state_ours)?;
             self.cycle_state_ours = !self.cycle_state_ours;
         }
         Ok(())
@@ -626,13 +627,13 @@ impl EventRing {
     fn has_next_event(&self) -> bool {
         self.ring.as_ref().current().cycle_state() == self.cycle_state_ours
     }
-    fn pop(&mut self) -> Option<GenericTrbEntry> {
+    fn pop(&mut self) -> Result<Option<GenericTrbEntry>> {
         if !self.has_next_event() {
-            return None;
+            return Ok(None);
         }
         let e = self.ring.as_ref().current();
         let eptr = self.ring.as_ref().current_ptr() as u64;
-        unsafe { self.ring.get_unchecked_mut() }.advance_index_notoggle();
+        unsafe { self.ring.get_unchecked_mut() }.advance_index_notoggle(self.cycle_state_ours)?;
         unsafe {
             let erdp = self.erdp.expect("erdp is not set");
             write_volatile(erdp, eptr | (*erdp & 0b1111));
@@ -640,7 +641,7 @@ impl EventRing {
         if self.ring.as_ref().current_index() == 0 {
             self.cycle_state_ours = !self.cycle_state_ours;
         }
-        Some(e)
+        Ok(Some(e))
     }
 }
 
@@ -681,14 +682,15 @@ impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
         let time_out = self.time_out;
         let mut_self = unsafe { self.get_unchecked_mut() };
         match mut_self.event_ring.pop() {
-            None => {
+            Err(e) => Poll::Ready(Err(e)),
+            Ok(None) => {
                 if time_out < Hpet::take().main_counter() {
                     Poll::Ready(Err(WasabiError::Failed("Timeout")))
                 } else {
                     Poll::Pending
                 }
             }
-            Some(trb) => {
+            Ok(Some(trb)) => {
                 if trb.trb_type() != E as u32 {
                     println!("Ignoring event (!= type): {:?}", trb);
                     return Poll::Pending;
