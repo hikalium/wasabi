@@ -39,6 +39,7 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::cell::SyncUnsafeCell;
+use core::cmp::max;
 use core::convert::AsRef;
 use core::future::Future;
 use core::marker::PhantomPinned;
@@ -545,19 +546,21 @@ impl TransferRing {
                     .map_err(error_stringify)?,
             );
             mut_ring
-                .write(i, NormalTrb::new(*v, Self::BUF_SIZE as u16).into())
+                .write(i, NormalTrb::new(*v, 8).into())
                 .expect("failed to write a link trb");
         }
-        /*
-        for _ in 0..num_trbs {
-            mut_ring.advance_index(false);
-        }
-        */
         Ok(Self {
             ring,
             buffers,
             cycle_state_ours: true,
         })
+    }
+    fn fill_ring(&mut self) {
+        let num_trbs = self.ring.as_ref().num_trbs();
+        let mut_ring = unsafe { self.ring.get_unchecked_mut() };
+        for _ in 0..num_trbs {
+            mut_ring.advance_index(false);
+        }
     }
     fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
@@ -1268,10 +1271,19 @@ impl DeviceContext {
             Err(WasabiError::Failed("port out of range"))
         }
     }
-    fn set_num_of_ep_contexts(&mut self, num_ep_ctx: usize) -> Result<()> {
-        if num_ep_ctx <= 31 {
+    fn set_last_valid_dci(&mut self, dci: usize) -> Result<()> {
+        // - 6.2.2:
+        // ...the index (dci) of the last valid Endpoint Context
+        // This field indicates the size of the Device Context structure.
+        // For example, ((Context Entries+1) * 32 bytes) = Total bytes for this structure.
+        // - 6.2.2.2:
+        // A 'valid' Input Slot Context for a Configure Endpoint Command
+        // requires the Context Entries field to be initialized to
+        // the index of the last valid Endpoint Context that is
+        // defined by the target configuration
+        if dci <= 31 {
             self.slot_ctx[0] &= !(0b11111 << 27);
-            self.slot_ctx[0] |= (num_ep_ctx as u32) << 27;
+            self.slot_ctx[0] |= (dci as u32) << 27;
             Ok(())
         } else {
             Err(WasabiError::Failed("num_ep_ctx out of range"))
@@ -1322,10 +1334,10 @@ impl InputContext {
             .device_ctx
             .set_root_hub_port_number(port)
     }
-    fn set_num_of_ep_contexts(self: &mut Pin<&mut Self>, num_ep_ctx: usize) -> Result<()> {
+    fn set_last_valid_dci(self: &mut Pin<&mut Self>, dci: usize) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
-            .set_num_of_ep_contexts(num_ep_ctx)
+            .set_last_valid_dci(dci)
     }
     fn set_port_speed(self: &mut Pin<&mut Self>, psi: UsbMode) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
@@ -1613,7 +1625,7 @@ impl Xhci {
             .await?
             .completed()
     }
-    async fn request_report_bytes(&mut self, slot: u8, buf: Pin<&mut [u8]>) -> Result<()> {
+    pub async fn request_report_bytes(&mut self, slot: u8, buf: Pin<&mut [u8]>) -> Result<()> {
         // [HID] 7.2.1 Get_Report Request
         let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
         ctrl_ep_ring.push(
@@ -1726,7 +1738,7 @@ impl Xhci {
         input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
         // 3. Initialize the Input Slot Context data structure (6.2.2)
         input_context.set_root_hub_port_number(port)?;
-        input_context.set_num_of_ep_contexts(1)?;
+        input_context.set_last_valid_dci(1)?;
         // 4. Initialize the Transfer Ring for the Default Control Endpoint
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
         let portsc = self.portsc.get(port)?;
@@ -1791,12 +1803,13 @@ impl Xhci {
                 let mut input_ctrl_ctx = InputControlContext::default();
                 input_ctrl_ctx.add_context(0)?;
                 let mut interrupt_in_transfer_rings = Vec::new();
+                let mut last_dci = 1;
+                let mut ep_dci_list = Vec::new();
                 for ep_desc in ep_desc_list {
                     match EndpointType::from(&ep_desc) {
                         EndpointType::InterruptIn => {
                             println!("Initializing {:?}", ep_desc);
-                            interrupt_in_transfer_rings.push(TransferRing::new()?);
-                            let tring = &interrupt_in_transfer_rings.last().unwrap();
+                            let tring = TransferRing::new()?;
                             input_ctrl_ctx.add_context(ep_desc.dci())?;
                             input_context.set_ep_ctx(
                                 ep_desc.dci(),
@@ -1808,13 +1821,16 @@ impl Xhci {
                                     8,
                                 )?,
                             )?;
-                            break;
+                            ep_dci_list.push(ep_desc.dci());
+                            interrupt_in_transfer_rings.push(tring);
+                            last_dci = max(last_dci, ep_desc.dci());
                         }
                         _ => {
                             println!("Ignoring {:?}", ep_desc);
                         }
                     }
                 }
+                input_context.set_last_valid_dci(last_dci)?;
                 input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
                 let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
                 self.send_command(cmd).await?.completed()?;
@@ -1835,6 +1851,20 @@ impl Xhci {
                     0, /* Boot Protocol */
                 )
                 .await?;
+                println!("notify_ep");
+                // 4.6.6 Configure Endpoint
+                // When configuring or deconfiguring a device, only after completing a successful
+                // Configure Endpoint Command and a successful USB SET_CONFIGURATION
+                // request may software schedule data transfers through a newly enabled endpoint
+                // or Stream Transfer Ring of the Device Slot.
+                for (dci, tring) in ep_dci_list
+                    .iter()
+                    .zip(interrupt_in_transfer_rings.iter_mut())
+                {
+                    tring.fill_ring();
+                    self.notify_ep(slot, *dci);
+                }
+                println!("USB KBD init done!");
                 loop {
                     if let Ok(f) = TransferEventFuture::new(&mut self.primary_event_ring, 0).await {
                         if f.completed().is_ok() {
