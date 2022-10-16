@@ -436,11 +436,11 @@ impl TrbRing {
     const fn num_trbs(&self) -> usize {
         Self::NUM_TRB
     }
-    fn advance_index(&mut self, cycle_ours: bool) -> Result<()> {
-        if self.current().cycle_state() != cycle_ours {
-            return Err(WasabiError::Failed("cycle state mismatch"));
+    fn advance_index(&mut self, new_cycle: bool) -> Result<()> {
+        if self.current().cycle_state() == new_cycle {
+            return Err(WasabiError::Failed("cycle state does not change"));
         }
-        self.trb[self.current_index].set_cycle_state(!cycle_ours);
+        self.trb[self.current_index].set_cycle_state(new_cycle);
         self.current_index = (self.current_index + 1) % self.trb.len();
         Ok(())
     }
@@ -452,13 +452,19 @@ impl TrbRing {
         Ok(())
     }
     fn current(&self) -> GenericTrbEntry {
-        unsafe { read_volatile(&self.trb[self.current_index]) }
+        self.trb(self.current_index)
     }
     fn current_index(&self) -> usize {
         self.current_index
     }
     fn current_ptr(&self) -> usize {
         &self.trb[self.current_index] as *const GenericTrbEntry as usize
+    }
+    fn trb(&self, index: usize) -> GenericTrbEntry {
+        unsafe { read_volatile(&self.trb[index]) }
+    }
+    fn trb_ptr(&self, index: usize) -> usize {
+        &self.trb[index] as *const GenericTrbEntry as usize
     }
     fn write(&mut self, index: usize, trb: GenericTrbEntry) -> Result<()> {
         if index < self.trb.len() {
@@ -508,10 +514,10 @@ impl CommandRing {
         src.set_cycle_state(self.cycle_state_ours);
         let dst_ptr = ring.current_ptr();
         ring.write_current(src);
-        ring.advance_index(self.cycle_state_ours)?;
+        ring.advance_index(!self.cycle_state_ours)?;
         if ring.current().trb_type() == TrbType::Link as u32 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
-            ring.advance_index(self.cycle_state_ours)?;
+            ring.advance_index(!self.cycle_state_ours)?;
             self.cycle_state_ours = !self.cycle_state_ours;
         }
         // The returned ptr will be used for waiting on command completion events.
@@ -519,10 +525,13 @@ impl CommandRing {
     }
 }
 
+// Producer: Software
+// Consumer: xHC
+// Producer is responsible to flip the cycle bits
 struct TransferRing {
     ring: IoBox<TrbRing>,
     cycle_state_ours: bool,
-    enqeue_index: usize,
+    // enqeue_index: usize, // will be maintained by .ring
     dequeue_index: usize,
     buffers: [*mut u8; TrbRing::NUM_TRB - 1],
 }
@@ -533,10 +542,10 @@ impl TransferRing {
         let mut this = Self {
             ring: TrbRing::new(),
             cycle_state_ours: false,
-            enqeue_index: 0,
             dequeue_index: 0,
             buffers: [null_mut(); TrbRing::NUM_TRB - 1],
         };
+        // Fill all TRBs but keep them owned by us
         let link_trb = GenericTrbEntry::trb_link(this.ring.as_ref());
         let num_trbs = this.ring.as_ref().num_trbs();
         let mut_ring = unsafe { this.ring.get_unchecked_mut() };
@@ -555,33 +564,37 @@ impl TransferRing {
         Ok(this)
     }
     fn fill_ring(&mut self) -> Result<()> {
-        let num_trbs = self.ring.as_ref().num_trbs();
-        for _ in 0..num_trbs - 1 {
-            self.release_trb(self.ring.as_ref().current_ptr())?;
+        // 4.9.2.2 Pointer Advancement
+        // To prevent overruns, software shall determine when the Ring is full. The ring is
+        // defined as “full” if advancing the Enqueue Pointer will make it equal to the
+        // Dequeue Pointer.
+        loop {
+            // Wrap with num_trbs() - 1 to ignore LinkTrb
+            let next_enqueue_index =
+                (self.ring.as_ref().current_index() + 1) % (self.ring.as_ref().num_trbs() - 1);
+            if next_enqueue_index == self.dequeue_index {
+                // Ring is full. stop filling.
+                break;
+            }
+            let mut_ring = unsafe { self.ring.get_unchecked_mut() };
+            mut_ring.advance_index(!self.cycle_state_ours)?;
         }
         Ok(())
     }
-    fn release_trb(&mut self, trb_ptr: usize) -> Result<()> {
+    fn dequeue_trb(&mut self, trb_ptr: usize) -> Result<()> {
         println!("releasing TRB @ {:#018X}", trb_ptr);
-        let mut_ring = unsafe { self.ring.get_unchecked_mut() };
-        if mut_ring.current_ptr() != trb_ptr {
+        // Update dequeue_index
+        if self.ring.as_ref().trb_ptr(self.dequeue_index) != trb_ptr {
             return Err(WasabiError::Failed("unexpected trb ptr"));
         }
-        if mut_ring.current().cycle_state() != self.cycle_state_ours {
-            return Err(WasabiError::Failed("unexpected cycle state"));
-        }
-        // Reset the TRB
-        let current_index = mut_ring.current_index();
-        let mut trb: GenericTrbEntry = NormalTrb::new(self.buffers[current_index], 8).into();
-        trb.set_cycle_state(self.cycle_state_ours);
-        mut_ring.write_current(trb);
-        mut_ring.advance_index(self.cycle_state_ours)?;
+        // Wrap with num_trbs() - 1 to ignore LinkTrb
+        self.dequeue_index = (self.dequeue_index + 1) % (self.ring.as_ref().num_trbs() - 1);
+        // Update enqeue_index
+        let mut_ring = unsafe { self.ring.get_unchecked_mut() };
+        mut_ring.advance_index(!self.cycle_state_ours)?;
         if mut_ring.current().trb_type() == TrbType::Link as u32 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
-            let mut link_trb = GenericTrbEntry::trb_link(mut_ring);
-            link_trb.set_cycle_state(self.cycle_state_ours);
-            mut_ring.write_current(link_trb);
-            mut_ring.advance_index(self.cycle_state_ours)?;
+            mut_ring.advance_index(!self.cycle_state_ours)?;
             self.cycle_state_ours = !self.cycle_state_ours;
         }
         Ok(())
@@ -1926,7 +1939,7 @@ impl Xhci {
                             };
                             println!("recv: {:?}", report.as_ref());
                             if let Some(ref mut tring) = ep_rings[trb.dci()] {
-                                tring.release_trb(transfer_trb_ptr)?;
+                                tring.dequeue_trb(transfer_trb_ptr)?;
                                 self.notify_ep(slot, trb.dci());
                             }
                         }
