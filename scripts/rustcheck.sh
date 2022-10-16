@@ -36,5 +36,23 @@ else
 	exit 1
 fi
 
+set +e
+FILES=`git ls-files *.rs`
+LIST=`wc -l ${FILES} | sort -n | grep '.rs$' | awk '$1>1000' | grep '.rs$'`
+RESULT_STATUS=$?
+set -e
+if test $RESULT_STATUS -eq 0; then
+	echo "----"
+	echo "${LIST}"
+	echo "----"
+	echo "FAIL: Please reduce the number of lines in the files listed above"
+	exit 1
+elif test $RESULT_STATUS -eq 1; then
+	echo "PASS: No toooooo long files were found"
+else
+	echo "FAIL: something went wrong"
+	exit 1
+fi
+
 echo "PASS: rustcheck done"
 exit 0
