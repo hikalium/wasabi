@@ -265,3 +265,41 @@ impl Default for SlotContext {
         }
     }
 }
+
+#[repr(C, align(64))]
+pub struct RawDeviceContextBaseAddressArray {
+    context: [u64; 256],
+    _pinned: PhantomPinned,
+}
+const _: () = assert!(size_of::<RawDeviceContextBaseAddressArray>() == 2048);
+impl RawDeviceContextBaseAddressArray {
+    fn new() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+}
+
+pub struct DeviceContextBaseAddressArray {
+    inner: Pin<Box<RawDeviceContextBaseAddressArray>>,
+    _scratchpad_buffers: Pin<Box<[*mut u8]>>,
+}
+impl DeviceContextBaseAddressArray {
+    pub fn new(scratchpad_buffers: Pin<Box<[*mut u8]>>) -> Self {
+        let mut inner = RawDeviceContextBaseAddressArray::new();
+        inner.context[0] = scratchpad_buffers.as_ptr() as u64;
+        Self {
+            inner: Box::pin(inner),
+            _scratchpad_buffers: scratchpad_buffers,
+        }
+    }
+    /// # Safety
+    /// This should only be called from set_dcbaa_ptr during the initialization
+    pub unsafe fn inner_mut_ptr(&mut self) -> *mut RawDeviceContextBaseAddressArray {
+        self.inner.as_mut().get_unchecked_mut() as *mut RawDeviceContextBaseAddressArray
+    }
+    pub fn set_output_context(&mut self, slot: u8, output_context: Pin<&mut OutputContext>) {
+        unsafe {
+            self.inner.as_mut().get_unchecked_mut().context[slot as usize] =
+                output_context.as_ref().get_ref() as *const OutputContext as u64
+        }
+    }
+}

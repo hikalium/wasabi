@@ -47,7 +47,6 @@ use core::future::Future;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::mem::transmute;
-use core::mem::MaybeUninit;
 use core::pin::Pin;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
@@ -55,9 +54,10 @@ use core::slice;
 use core::task::Context;
 use core::task::Poll;
 
+use context::DeviceContextBaseAddressArray;
 use context::EndpointContext;
 use context::InputControlContext;
-use context::OutputContext;
+use context::RawDeviceContextBaseAddressArray;
 use context::SlotContext;
 use registers::CapabilityRegisters;
 use registers::OperationalRegisters;
@@ -146,42 +146,6 @@ impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
 }
 type CommandCompletionEventFuture<'a> = EventFuture<'a, { TrbType::CommandCompletionEvent }>;
 type TransferEventFuture<'a> = EventFuture<'a, { TrbType::TransferEvent }>;
-
-#[repr(C, align(64))]
-struct RawDeviceContextBaseAddressArray {
-    context: [u64; 256],
-    _pinned: PhantomPinned,
-}
-const _: () = assert!(size_of::<RawDeviceContextBaseAddressArray>() == 2048);
-impl RawDeviceContextBaseAddressArray {
-    fn new() -> Self {
-        unsafe { MaybeUninit::zeroed().assume_init() }
-    }
-}
-
-pub struct DeviceContextBaseAddressArray {
-    inner: Pin<Box<RawDeviceContextBaseAddressArray>>,
-    _scratchpad_buffers: Pin<Box<[*mut u8]>>,
-}
-impl DeviceContextBaseAddressArray {
-    fn new(scratchpad_buffers: Pin<Box<[*mut u8]>>) -> Self {
-        let mut inner = RawDeviceContextBaseAddressArray::new();
-        inner.context[0] = scratchpad_buffers.as_ptr() as u64;
-        Self {
-            inner: Box::pin(inner),
-            _scratchpad_buffers: scratchpad_buffers,
-        }
-    }
-    unsafe fn inner_mut_ptr(&mut self) -> *mut RawDeviceContextBaseAddressArray {
-        self.inner.as_mut().get_unchecked_mut() as *mut RawDeviceContextBaseAddressArray
-    }
-    fn set_output_context(&mut self, slot: u8, output_context: Pin<&mut OutputContext>) {
-        unsafe {
-            self.inner.as_mut().get_unchecked_mut().context[slot as usize] =
-                output_context.as_ref().get_ref() as *const OutputContext as u64
-        }
-    }
-}
 
 #[repr(C, align(4096))]
 struct EventRingSegmentTableEntry {
