@@ -2,7 +2,6 @@ extern crate alloc;
 
 use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::busy_loop_hint;
-use crate::arch::x86_64::clflush;
 use crate::arch::x86_64::paging::disable_cache;
 use crate::arch::x86_64::paging::IoBox;
 use crate::arch::x86_64::paging::Mmio;
@@ -61,7 +60,6 @@ use regs::PortState;
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 #[non_exhaustive]
-#[allow(unused)]
 #[derive(PartialEq, Eq)]
 enum TrbType {
     Normal = 1,
@@ -83,7 +81,6 @@ enum TrbType {
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 #[non_exhaustive]
-#[allow(unused)]
 #[derive(PartialEq, Eq)]
 enum CompletionCode {
     Success = 1,
@@ -471,7 +468,6 @@ impl TrbRing {
             unsafe {
                 write_volatile(&mut self.trb[index], trb);
             }
-            clflush(&self.trb[index] as *const GenericTrbEntry as usize);
             Ok(())
         } else {
             Err(WasabiError::Failed("TrbRing Out of Range"))
@@ -585,7 +581,6 @@ impl TransferRing {
         Ok(())
     }
     fn dequeue_trb(&mut self, trb_ptr: usize) -> Result<()> {
-        println!("releasing TRB @ {:#018X}", trb_ptr);
         // Update dequeue_index
         if self.ring.as_ref().trb_ptr(self.dequeue_index) != trb_ptr {
             return Err(WasabiError::Failed("unexpected trb ptr"));
@@ -1157,7 +1152,6 @@ mod regs {
 // EndpointType: 0-7
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
-#[allow(unused)]
 #[derive(PartialEq, Eq)]
 enum EndpointType {
     IsochOut = 1,
@@ -1183,7 +1177,6 @@ impl From<&EndpointDescriptor> for EndpointType {
     }
 }
 
-#[allow(unused)]
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum UsbMode {
     Unknown(u32),
@@ -1259,7 +1252,6 @@ impl EndpointContext {
         ep.data[0] = (interval as u32) << 16;
         ep.average_trb_length = average_trb_length;
         ep.max_esit_payload_low = max_packet_size; // 4.14.2
-        println!("{:?}", ep);
         Ok(ep)
     }
     fn new_control_endpoint(max_packet_size: u16, tr_dequeue_ptr: u64) -> Result<Self> {
@@ -1578,7 +1570,6 @@ impl Xhci {
         }
     }
     fn notify_ep(&mut self, slot: u8, dci: usize) {
-        println!("!!!!!!!! notify slot {} dci {:#10X}", slot, dci);
         unsafe {
             write_volatile(
                 &mut self.doorbell_regs.get_unchecked_mut()[slot as usize],
@@ -1753,14 +1744,6 @@ impl Xhci {
         let descriptors: Vec<UsbDescriptor> = iter.collect();
         Ok(descriptors)
     }
-    async fn request_string_descriptor_zero(&mut self, slot: u8) -> Result<Pin<Box<[u8]>>> {
-        let mut buf = Vec::<u8>::new();
-        buf.resize(128, 0);
-        let mut buf = Box::into_pin(buf.into_boxed_slice());
-        self.request_descriptor(slot, DescriptorType::String, 0, buf.as_mut())
-            .await?;
-        Ok(buf)
-    }
     async fn request_string_descriptor(&mut self, slot: u8, index: u8) -> Result<String> {
         let mut buf = Vec::<u8>::new();
         buf.resize(128, 0);
@@ -1770,8 +1753,7 @@ impl Xhci {
         Ok(String::from_utf8_lossy(&buf[2..]).to_string())
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
-        for i in 0..100 {
-            println!("nop #{}", i);
+        for _ in 0..TrbRing::NUM_TRB * 2 + 1 {
             self.send_command(GenericTrbEntry::cmd_no_op())
                 .await?
                 .completed()?;
@@ -1821,8 +1803,6 @@ impl Xhci {
         let descriptors = self.request_config_descriptor_and_rest(slot).await?;
         let device_descriptor = *self.slot_context[slot as usize].device_descriptor();
         println!("{:?}", device_descriptor);
-        let lang_id_table = self.request_string_descriptor_zero(slot).await?;
-        println!("{:?}", lang_id_table);
         let vendor_name = self
             .request_string_descriptor(slot, device_descriptor.manufacturer_idx)
             .await?;
@@ -1860,7 +1840,6 @@ impl Xhci {
             }
             if let Some(interface_desc) = boot_keyboard_interface {
                 println!("!!!!! USB KBD Found!");
-                println!("Configuring Endpoints");
                 let slot_context = &mut self.slot_context[slot as usize];
                 let input_context = &mut slot_context.input_context.as_mut();
                 let mut input_ctrl_ctx = InputControlContext::default();
@@ -1871,7 +1850,6 @@ impl Xhci {
                 for ep_desc in ep_desc_list {
                     match EndpointType::from(&ep_desc) {
                         EndpointType::InterruptIn => {
-                            println!("Initializing {:?}", ep_desc);
                             let tring = TransferRing::new()?;
                             input_ctrl_ctx.add_context(ep_desc.dci())?;
                             input_context.set_ep_ctx(
@@ -1913,7 +1891,6 @@ impl Xhci {
                     0, /* Boot Protocol */
                 )
                 .await?;
-                println!("notify_ep");
                 // 4.6.6 Configure Endpoint
                 // When configuring or deconfiguring a device, only after completing a successful
                 // Configure Endpoint Command and a successful USB SET_CONFIGURATION
