@@ -775,7 +775,6 @@ impl EventRingSegmentTableEntry {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct CapabilityRegisters {
@@ -807,7 +806,6 @@ impl CapabilityRegisters {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 struct OperationalRegisters {
@@ -894,7 +892,6 @@ impl OperationalRegisters {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 struct InterrupterRegisterSet {
@@ -906,7 +903,7 @@ struct InterrupterRegisterSet {
     erdp: u64,
 }
 const _: () = assert!(size_of::<InterrupterRegisterSet>() == 0x20);
-#[allow(dead_code)]
+
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 struct RuntimeRegisters {
@@ -1445,8 +1442,7 @@ impl Default for SlotContext {
 }
 
 pub struct Xhci {
-    #[allow(dead_code)]
-    bdf: BusDeviceFunction,
+    _bdf: BusDeviceFunction,
     cap_regs: Mmio<CapabilityRegisters>,
     op_regs: Mmio<OperationalRegisters>,
     rt_regs: Mmio<RuntimeRegisters>,
@@ -1500,7 +1496,7 @@ impl Xhci {
         )?;
         let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
         let mut xhc = Xhci {
-            bdf,
+            _bdf: bdf,
             cap_regs,
             op_regs,
             rt_regs,
