@@ -522,6 +522,8 @@ impl CommandRing {
 struct TransferRing {
     ring: IoBox<TrbRing>,
     cycle_state_ours: bool,
+    enqeue_index: usize,
+    dequeue_index: usize,
     buffers: [*mut u8; TrbRing::NUM_TRB - 1],
 }
 impl TransferRing {
@@ -531,6 +533,8 @@ impl TransferRing {
         let mut this = Self {
             ring: TrbRing::new(),
             cycle_state_ours: false,
+            enqeue_index: 0,
+            dequeue_index: 0,
             buffers: [null_mut(); TrbRing::NUM_TRB - 1],
         };
         let link_trb = GenericTrbEntry::trb_link(this.ring.as_ref());
@@ -572,9 +576,7 @@ impl TransferRing {
         trb.set_cycle_state(self.cycle_state_ours);
         mut_ring.write_current(trb);
         mut_ring.advance_index(self.cycle_state_ours)?;
-        println!("Next type: {}", mut_ring.current().trb_type());
         if mut_ring.current().trb_type() == TrbType::Link as u32 {
-            println!("Link TRB! ptr = {:#018X}", mut_ring.current().data.read());
             // Reached to Link TRB. Let's skip it and toggle the cycle.
             let mut link_trb = GenericTrbEntry::trb_link(mut_ring);
             link_trb.set_cycle_state(self.cycle_state_ours);
@@ -1197,7 +1199,7 @@ struct EndpointContext {
     //   - bit[16..=31]: Max Packet Size (taken from EndpointDescriptor)
     data: [u32; 2],
 
-    tr_dequeue_ptr: u64,
+    tr_dequeue_ptr: Volatile<u64>,
 
     // 4.14.1.1 (should be non-zero)
     average_trb_length: u16,
@@ -1234,7 +1236,7 @@ impl EndpointContext {
         };
         let mut ep = unsafe { Self::new() };
         ep.set_ep_type(EndpointType::InterruptIn)?;
-        ep.set_dequeue_cycle_state(1)?;
+        ep.set_dequeue_cycle_state(true)?;
         ep.set_error_count(3)?;
         ep.set_max_packet_size(max_packet_size);
         ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
@@ -1247,7 +1249,7 @@ impl EndpointContext {
     fn new_control_endpoint(max_packet_size: u16, tr_dequeue_ptr: u64) -> Result<Self> {
         let mut ep = unsafe { Self::new() };
         ep.set_ep_type(EndpointType::Control)?;
-        ep.set_dequeue_cycle_state(1)?;
+        ep.set_dequeue_cycle_state(true)?;
         ep.set_error_count(3)?;
         ep.set_max_packet_size(max_packet_size);
         ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
@@ -1268,21 +1270,10 @@ impl EndpointContext {
         }
     }
     fn set_ring_dequeue_pointer(&mut self, tr_dequeue_ptr: u64) -> Result<()> {
-        if tr_dequeue_ptr & 0xF == 0 {
-            self.tr_dequeue_ptr = tr_dequeue_ptr | (self.tr_dequeue_ptr & 1);
-            Ok(())
-        } else {
-            Err(WasabiError::Failed("tr_dequeue_ptr is not 16-byte aligned"))
-        }
+        self.tr_dequeue_ptr.write_bits(4, 60, tr_dequeue_ptr >> 4)
     }
-    fn set_dequeue_cycle_state(&mut self, dcs: u64) -> Result<()> {
-        if dcs & !0b1 == 0 {
-            self.tr_dequeue_ptr &= !1;
-            self.tr_dequeue_ptr |= dcs;
-            Ok(())
-        } else {
-            Err(WasabiError::Failed("invalid dcs"))
-        }
+    fn set_dequeue_cycle_state(&mut self, dcs: bool) -> Result<()> {
+        self.tr_dequeue_ptr.write_bits(0, 1, dcs.into())
     }
     fn set_error_count(&mut self, error_count: u32) -> Result<()> {
         if error_count & !0b11 == 0 {
