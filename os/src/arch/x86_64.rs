@@ -20,6 +20,13 @@ pub fn read_rsp() -> u64 {
     value
 }
 
+pub fn clflush(ptr: usize) {
+    unsafe {
+        asm!("clflush [rax]",
+            in("rax") ptr,)
+    }
+}
+
 /// # Safety
 /// Switching rsp to another value can break execution.
 /// Programmer should provide valid rsp value as new_rsp.

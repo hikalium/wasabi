@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::busy_loop_hint;
+use crate::arch::x86_64::clflush;
 use crate::arch::x86_64::paging::disable_cache;
 use crate::arch::x86_64::paging::IoBox;
 use crate::arch::x86_64::paging::Mmio;
@@ -117,21 +118,38 @@ struct GenericTrbEntry {
 }
 const _: () = assert!(size_of::<GenericTrbEntry>() == 16);
 impl GenericTrbEntry {
-    const CTRL_BIT_CYCLE: u32 = 1 << 0;
-    const CTRL_BIT_TOGGLE_CYCLE: u32 = 1 << 1;
     const CTRL_BIT_INTERRUPT_ON_SHORT_PACKET: u32 = 1 << 2;
     const CTRL_BIT_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
     const CTRL_BIT_IMMEDIATE_DATA: u32 = 1 << 6;
     const CTRL_BIT_DATA_DIR_IN: u32 = 1 << 16;
-    fn set_control(&mut self, trb_type: TrbType, trb_control: u32) {
-        self.control
-            .write((trb_type as u32) << 10 | trb_control as u32);
+    fn cycle_state(&self) -> bool {
+        self.control.read_bits(0, 1) != 0
+    }
+    fn set_cycle_state(&mut self, cycle: bool) {
+        self.control.write_bits(0, 1, cycle.into()).unwrap()
+    }
+    fn set_toggle_cycle(&mut self, value: bool) {
+        self.control.write_bits(1, 1, value.into()).unwrap()
     }
     fn trb_type(&self) -> u32 {
-        extract_bits(self.control.read(), 10, 6)
+        self.control.read_bits(10, 6)
+    }
+    fn set_trb_type(&mut self, trb_type: TrbType) {
+        self.control.write_bits(10, 6, trb_type as u32).unwrap()
+    }
+    fn dci(&self) -> usize {
+        extract_bits(self.control.read(), 16, 5)
+            .try_into()
+            .expect("Invalid ep dci")
     }
     fn completion_code(&self) -> u32 {
-        extract_bits(self.option.read(), 24, 8)
+        self.option.read_bits(24, 8)
+    }
+    fn slot_id(&self) -> u8 {
+        self.control.read_bits(24, 8).try_into().unwrap()
+    }
+    fn set_slot_id(&mut self, slot: u8) {
+        self.control.write_bits(24, 8, slot as u32).unwrap()
     }
     fn completed(&self) -> Result<()> {
         if self.trb_type() != TrbType::CommandCompletionEvent as u32
@@ -153,57 +171,38 @@ impl GenericTrbEntry {
             Ok(())
         }
     }
-    fn cycle_state(&self) -> bool {
-        self.control.read() & GenericTrbEntry::CTRL_BIT_CYCLE != 0
-    }
-    fn set_cycle_state(&mut self, cycle: bool) {
-        if cycle {
-            self.control
-                .write(self.control.read() | GenericTrbEntry::CTRL_BIT_CYCLE);
-        } else {
-            self.control
-                .write(self.control.read() & !GenericTrbEntry::CTRL_BIT_CYCLE);
-        }
-    }
     fn cmd_no_op() -> Self {
         let mut trb = Self::default();
-        trb.set_control(TrbType::NoOpCommand, 0);
+        trb.set_trb_type(TrbType::NoOpCommand);
         trb
     }
     fn cmd_enable_slot() -> Self {
         let mut trb = Self::default();
-        trb.set_control(TrbType::EnableSlotCommand, 0);
+        trb.set_trb_type(TrbType::EnableSlotCommand);
         trb
     }
     fn cmd_address_device(input_context: Pin<&InputContext>, slot_id: u8) -> Self {
         let mut trb = Self::default();
+        trb.set_trb_type(TrbType::AddressDeviceCommand);
         trb.data
             .write(input_context.get_ref() as *const InputContext as u64);
-        trb.set_control(TrbType::AddressDeviceCommand, 0);
         trb.set_slot_id(slot_id);
         trb
     }
     fn cmd_configure_endpoint(input_context: Pin<&InputContext>, slot_id: u8) -> Self {
         let mut trb = Self::default();
+        trb.set_trb_type(TrbType::ConfigureEndpointCommand);
         trb.data
             .write(input_context.get_ref() as *const InputContext as u64);
-        trb.set_control(TrbType::ConfigureEndpointCommand, 0);
         trb.set_slot_id(slot_id);
         trb
     }
-    fn slot_id(&self) -> u8 {
-        extract_bits(self.control.read(), 24, 8)
-            .try_into()
-            .expect("Invalid slot id")
-    }
-    fn dci(&self) -> usize {
-        extract_bits(self.control.read(), 16, 5)
-            .try_into()
-            .expect("Invalid ep dci")
-    }
-    fn set_slot_id(&mut self, slot: u8) {
-        self.control
-            .write((self.control.read() & !(0xFF << 24)) | (slot as u32) << 24);
+    fn trb_link(ring: &TrbRing) -> Self {
+        let mut trb = GenericTrbEntry::default();
+        trb.set_trb_type(TrbType::Link);
+        trb.data.write(ring.phys_addr());
+        trb.set_toggle_cycle(true);
+        trb
     }
 }
 impl Debug for GenericTrbEntry {
@@ -221,10 +220,12 @@ impl Debug for GenericTrbEntry {
             e if e == (TrbType::TransferEvent as u32) => {
                 write!(
                     f,
-                    "TransferEvent CompletionCode = {} ({}) for {:#018X}",
+                    "TransferEvent CompletionCode = {} ({}), data = {:#018X}, slot = {}, dci = {}",
                     self.completion_code(),
                     CompletionCode::parse(self.completion_code()),
-                    self.data.read()
+                    self.data.read(),
+                    self.slot_id(),
+                    self.dci()
                 )
             }
             e if e == (TrbType::HostControllerEvent as u32) => {
@@ -391,9 +392,6 @@ struct StatusStageTrb {
 }
 const _: () = assert!(size_of::<StatusStageTrb>() == 16);
 impl StatusStageTrb {
-    const CONTROL_DATA_DIR_IN: u32 = 1 << 16;
-    const CONTROL_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
-    const CONTROL_INTERRUPT_ON_SHORT_PACKET: u32 = 1 << 2;
     fn new_out() -> Self {
         Self {
             reserved: 0,
@@ -406,9 +404,9 @@ impl StatusStageTrb {
             reserved: 0,
             option: 0,
             control: (TrbType::StatusStage as u32) << 10
-                | Self::CONTROL_DATA_DIR_IN
-                | Self::CONTROL_INTERRUPT_ON_COMPLETION
-                | Self::CONTROL_INTERRUPT_ON_SHORT_PACKET,
+                | GenericTrbEntry::CTRL_BIT_DATA_DIR_IN
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_SHORT_PACKET,
         }
     }
 }
@@ -454,7 +452,7 @@ impl TrbRing {
         Ok(())
     }
     fn current(&self) -> GenericTrbEntry {
-        self.trb[self.current_index]
+        unsafe { read_volatile(&self.trb[self.current_index]) }
     }
     fn current_index(&self) -> usize {
         self.current_index
@@ -467,6 +465,7 @@ impl TrbRing {
             unsafe {
                 write_volatile(&mut self.trb[index], trb);
             }
+            clflush(&self.trb[index] as *const GenericTrbEntry as usize);
             Ok(())
         } else {
             Err(WasabiError::Failed("TrbRing Out of Range"))
@@ -484,18 +483,15 @@ struct CommandRing {
 }
 impl Default for CommandRing {
     fn default() -> Self {
-        let mut ring = TrbRing::new();
-        let trb_head_paddr = ring.as_ref().phys_addr() as u64;
-        let mut link_trb = GenericTrbEntry::default();
-        link_trb.data.write(trb_head_paddr);
-        link_trb.set_control(TrbType::Link, GenericTrbEntry::CTRL_BIT_TOGGLE_CYCLE);
-        unsafe { ring.get_unchecked_mut() }
+        let mut this = Self {
+            ring: TrbRing::new(),
+            cycle_state_ours: false,
+        };
+        let link_trb = GenericTrbEntry::trb_link(this.ring.as_ref());
+        unsafe { this.ring.get_unchecked_mut() }
             .write(TrbRing::NUM_TRB - 1, link_trb)
             .expect("failed to write a link trb");
-        Self {
-            ring,
-            cycle_state_ours: false,
-        }
+        this
     }
 }
 impl CommandRing {
@@ -526,24 +522,24 @@ impl CommandRing {
 struct TransferRing {
     ring: IoBox<TrbRing>,
     cycle_state_ours: bool,
-    _buffers: [*mut u8; TrbRing::NUM_TRB - 1],
+    buffers: [*mut u8; TrbRing::NUM_TRB - 1],
 }
 impl TransferRing {
     const BUF_SIZE: usize = 4096;
     const BUF_ALIGN: usize = 4096;
     fn new() -> Result<Self> {
-        let mut ring = TrbRing::new();
-        let num_trbs = ring.as_ref().num_trbs();
-        let trb_head_paddr = ring.as_ref().phys_addr() as u64;
-        let mut link_trb = GenericTrbEntry::default();
-        link_trb.data.write(trb_head_paddr);
-        link_trb.set_control(TrbType::Link, GenericTrbEntry::CTRL_BIT_TOGGLE_CYCLE);
-        let mut_ring = unsafe { ring.get_unchecked_mut() };
+        let mut this = Self {
+            ring: TrbRing::new(),
+            cycle_state_ours: false,
+            buffers: [null_mut(); TrbRing::NUM_TRB - 1],
+        };
+        let link_trb = GenericTrbEntry::trb_link(this.ring.as_ref());
+        let num_trbs = this.ring.as_ref().num_trbs();
+        let mut_ring = unsafe { this.ring.get_unchecked_mut() };
         mut_ring
             .write(num_trbs - 1, link_trb)
             .expect("failed to write a link trb");
-        let mut buffers = [null_mut(); TrbRing::NUM_TRB - 1];
-        for (i, v) in buffers.iter_mut().enumerate() {
+        for (i, v) in this.buffers.iter_mut().enumerate() {
             *v = ALLOCATOR.alloc_with_options(
                 Layout::from_size_align(Self::BUF_SIZE, Self::BUF_ALIGN)
                     .map_err(error_stringify)?,
@@ -552,11 +548,7 @@ impl TransferRing {
                 .write(i, NormalTrb::new(*v, 8).into())
                 .expect("failed to write a link trb");
         }
-        Ok(Self {
-            ring,
-            cycle_state_ours: false,
-            _buffers: buffers,
-        })
+        Ok(this)
     }
     fn fill_ring(&mut self) -> Result<()> {
         let num_trbs = self.ring.as_ref().num_trbs();
@@ -566,6 +558,7 @@ impl TransferRing {
         Ok(())
     }
     fn release_trb(&mut self, trb_ptr: usize) -> Result<()> {
+        println!("releasing TRB @ {:#018X}", trb_ptr);
         let mut_ring = unsafe { self.ring.get_unchecked_mut() };
         if mut_ring.current_ptr() != trb_ptr {
             return Err(WasabiError::Failed("unexpected trb ptr"));
@@ -575,15 +568,17 @@ impl TransferRing {
         }
         // Reset the TRB
         let current_index = mut_ring.current_index();
-        let mut trb: GenericTrbEntry = NormalTrb::new(self._buffers[current_index], 8).into();
+        let mut trb: GenericTrbEntry = NormalTrb::new(self.buffers[current_index], 8).into();
         trb.set_cycle_state(self.cycle_state_ours);
-        mut_ring
-            .write(current_index, trb)
-            .expect("failed to write a link trb");
+        mut_ring.write_current(trb);
         mut_ring.advance_index(self.cycle_state_ours)?;
+        println!("Next type: {}", mut_ring.current().trb_type());
         if mut_ring.current().trb_type() == TrbType::Link as u32 {
             println!("Link TRB! ptr = {:#018X}", mut_ring.current().data.read());
             // Reached to Link TRB. Let's skip it and toggle the cycle.
+            let mut link_trb = GenericTrbEntry::trb_link(mut_ring);
+            link_trb.set_cycle_state(self.cycle_state_ours);
+            mut_ring.write_current(link_trb);
             mut_ring.advance_index(self.cycle_state_ours)?;
             self.cycle_state_ours = !self.cycle_state_ours;
         }
@@ -675,15 +670,15 @@ impl<'a, const E: TrbType> EventFuture<'a, E> {
     }
 }
 impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
-    type Output = Result<GenericTrbEntry>;
-    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<GenericTrbEntry>> {
+    type Output = Result<Option<GenericTrbEntry>>;
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<Option<GenericTrbEntry>>> {
         let time_out = self.time_out;
         let mut_self = unsafe { self.get_unchecked_mut() };
         match mut_self.event_ring.pop() {
             Err(e) => Poll::Ready(Err(e)),
             Ok(None) => {
                 if time_out < Hpet::take().main_counter() {
-                    Poll::Ready(Err(WasabiError::Failed("Timeout")))
+                    Poll::Ready(Ok(None))
                 } else {
                     Poll::Pending
                 }
@@ -695,10 +690,10 @@ impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
                 }
                 match mut_self.wait_on {
                     EventFutureWaitType::TrbAddr(trb_addr) if trb_addr == trb.data.read() => {
-                        Poll::Ready(Ok(trb))
+                        Poll::Ready(Ok(Some(trb)))
                     }
                     EventFutureWaitType::Slot(slot) if trb.slot_id() == slot => {
-                        Poll::Ready(Ok(trb))
+                        Poll::Ready(Ok(Some(trb)))
                     }
                     _ => {
                         println!("Ignoring event (!= wait_on): {:?}", trb);
@@ -1587,7 +1582,9 @@ impl Xhci {
     async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.push(cmd)?;
         self.notify_xhc();
-        CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr).await
+        CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr)
+            .await?
+            .ok_or(WasabiError::Failed("Timed out"))
     }
     async fn request_device_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
         let setup_stage = SetupStageTrb::new(
@@ -1608,7 +1605,9 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(data_stage.into())?;
         ctrl_ep_ring.push(status_stage.into())?;
         self.notify_ep(slot, 1);
-        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting).await
+        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+            .await?
+            .ok_or(WasabiError::Failed("Timed out"))
     }
     async fn request_set_config(&mut self, slot: u8, config_value: u8) -> Result<()> {
         let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring;
@@ -1626,6 +1625,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .ok_or(WasabiError::Failed("Timed out"))?
             .completed()
     }
     async fn request_set_interface(
@@ -1649,6 +1649,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .ok_or(WasabiError::Failed("Timed out"))?
             .completed()
     }
     async fn request_set_protocol(
@@ -1675,6 +1676,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .ok_or(WasabiError::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_report_bytes(&mut self, slot: u8, buf: Pin<&mut [u8]>) -> Result<()> {
@@ -1697,6 +1699,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .ok_or(WasabiError::Failed("Timed out"))?
             .completed()
     }
     async fn request_descriptor(
@@ -1722,6 +1725,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .ok_or(WasabiError::Failed("Timed out"))?
             .completed()
     }
     async fn request_config_descriptor_and_rest(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {
@@ -1922,7 +1926,7 @@ impl Xhci {
                     let event_trb =
                         TransferEventFuture::new_on_slot(&mut self.primary_event_ring, slot).await;
                     match event_trb {
-                        Ok(trb) => {
+                        Ok(Some(trb)) => {
                             let transfer_trb_ptr = trb.data.read() as usize;
                             let report = unsafe {
                                 Mmio::<[u8; 8]>::from_raw(
@@ -1931,10 +1935,12 @@ impl Xhci {
                             };
                             println!("recv: {:?}", report.as_ref());
                             if let Some(ref mut tring) = ep_rings[trb.dci()] {
-                                println!("releasing: {:#018X}", transfer_trb_ptr);
                                 tring.release_trb(transfer_trb_ptr)?;
                                 self.notify_ep(slot, trb.dci());
                             }
+                        }
+                        Ok(None) => {
+                            // Timed out. Do nothing.
                         }
                         Err(e) => {
                             println!("e: {:?}", e);

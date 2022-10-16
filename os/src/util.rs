@@ -18,6 +18,7 @@ where
     let value = (Saturating(value) >> shift).0 & mask;
     TryInto::try_into(value).unwrap_or_else(|_| T::from(0u8))
 }
+
 #[test_case]
 fn extract_bits_tests() {
     assert_eq!(extract_bits(0x123u64, 0, 12), 0x123u64);
