@@ -568,6 +568,9 @@ impl TransferRing {
         // To prevent overruns, software shall determine when the Ring is full. The ring is
         // defined as “full” if advancing the Enqueue Pointer will make it equal to the
         // Dequeue Pointer.
+        //
+        // Note: without taking care of this, QEMU will work without errors but not on the real
+        // hardwares...
         loop {
             // Wrap with num_trbs() - 1 to ignore LinkTrb
             let next_enqueue_index =
