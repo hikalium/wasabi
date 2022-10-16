@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::error::WasabiError;
 use crate::util::extract_bits;
 use crate::volatile::Volatile;
-use crate::xhci::InputContext;
+use crate::xhci::context::InputContext;
 use crate::xhci::TrbRing;
 use alloc::fmt;
 use alloc::fmt::Debug;
