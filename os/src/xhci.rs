@@ -447,12 +447,6 @@ impl UsbMode {
     }
 }
 
-enum PollStatus {
-    WaitingSomething,
-    EnablingPort { port: usize },
-    USB3Attached { port: usize },
-}
-
 pub struct Xhci {
     _bdf: BusDeviceFunction,
     cap_regs: Mmio<CapabilityRegisters>,
@@ -463,7 +457,6 @@ pub struct Xhci {
     command_ring: CommandRing,
     primary_event_ring: EventRing,
     device_context_base_array: DeviceContextBaseAddressArray,
-    poll_status: PollStatus,
     // slot_context is indexed by slot_id (1-255)
     slot_context: [SlotContext; 256],
 }
@@ -503,7 +496,6 @@ impl Xhci {
             command_ring: CommandRing::default(),
             primary_event_ring: EventRing::new()?,
             device_context_base_array,
-            poll_status: PollStatus::WaitingSomething,
             slot_context: [(); 256].map(|_| SlotContext::default()),
         };
         xhc.init_primary_event_ring()?;
@@ -927,43 +919,38 @@ impl Xhci {
         Ok(())
     }
     async fn poll(&mut self) -> Result<()> {
-        match self.poll_status {
-            PollStatus::WaitingSomething => {
-                for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
-                    let state = portsc.state();
-                    if let regs::PortState::Disabled = state {
-                        // Reset port to Enable the port (via Reset state)
-                        println!(
-                            "Resetting port: prev state: portsc[port = {}] = {:#10X} {:?} {:?}",
-                            port,
-                            portsc.value(),
-                            portsc.state(),
-                            portsc
-                        );
-                        portsc.reset();
-                        self.poll_status = PollStatus::EnablingPort { port };
-                        break;
-                    }
-                }
+        let mut port_to_enable: Option<regs::PortScIteratorItem> = None;
+        for regs::PortScIteratorItem { port, portsc } in self.portsc.iter() {
+            let state = portsc.state();
+            if let regs::PortState::Disabled = state {
+                // Reset port to Enable the port (via Reset state)
+                port_to_enable = Some(regs::PortScIteratorItem { port, portsc });
             }
-            PollStatus::EnablingPort { port } => {
-                println!("Enabling Port {}...", port);
+        }
+        if let Some(regs::PortScIteratorItem { port, portsc }) = port_to_enable {
+            println!(
+                "Resetting port: prev state: portsc[port = {}] = {:#10X} {:?} {:?}",
+                port,
+                portsc.value(),
+                portsc.state(),
+                portsc
+            );
+            portsc.reset();
+            println!("Enabling Port {}...", port);
+            loop {
                 let portsc = self.portsc.get(port)?;
                 if let PortState::Enabled = portsc.state() {
                     if let PortLinkState::U0 = portsc.pls() {
                         // Attached USB3 device
-                        self.poll_status = PollStatus::USB3Attached { port };
+                        if let Err(e) = self.attach_device(port).await {
+                            println!(
+                                "Failed to initialize an USB device on port {}: {:?}",
+                                port, e
+                            );
+                        }
+                        break;
                     }
                 }
-            }
-            PollStatus::USB3Attached { port } => {
-                if let Err(e) = self.attach_device(port).await {
-                    println!(
-                        "Failed to initialize an USB device on port {}: {:?}",
-                        port, e
-                    );
-                }
-                self.poll_status = PollStatus::WaitingSomething;
             }
         }
         Ok(())
