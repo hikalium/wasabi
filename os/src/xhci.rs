@@ -519,47 +519,8 @@ impl Xhci {
         }
         Ok(())
     }
-    async fn enable_slot_usb3(&mut self, port: usize) -> Result<()> {
-        let e = self
-            .send_command(GenericTrbEntry::cmd_enable_slot())
-            .await?;
-        let slot = e.slot_id();
-        println!(
-            "USB3 Device Detected, slot = {}, port {}",
-            e.slot_id(),
-            port
-        );
-
-        // Setup an input context and send AddressDevice command.
-        // 4.3.3 Device Slot Initialization
-        let slot_context = &mut self.slot_context[slot as usize];
-        self.device_context_base_array
-            .set_output_context(slot, slot_context.output_context());
-        let mut input_ctrl_ctx = InputControlContext::default();
-        input_ctrl_ctx.add_context(0)?;
-        input_ctrl_ctx.add_context(1)?;
-        let mut input_context = slot_context.input_context();
-        input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
-        // 3. Initialize the Input Slot Context data structure (6.2.2)
-        input_context.set_root_hub_port_number(port)?;
-        input_context.set_last_valid_dci(1)?;
-        // 4. Initialize the Transfer Ring for the Default Control Endpoint
-        // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
+    async fn device_ready(&mut self, port: usize, slot: u8) -> Result<()> {
         let portsc = self.portsc.get(port)?;
-        let mut input_context = slot_context.input_context();
-        input_context.set_port_speed(portsc.port_speed())?;
-        let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring().ring_phys_addr();
-        let mut input_context = slot_context.input_context();
-        input_context.set_ep_ctx(
-            1,
-            EndpointContext::new_control_endpoint(
-                portsc.max_packet_size()?,
-                ctrl_ep_ring_phys_addr,
-            )?,
-        )?;
-        // 8. Issue an Address Device Command for the Device Slot
-        let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
-        self.send_command(cmd).await?.completed()?;
         self.request_device_descriptor(slot).await?.completed()?;
         let descriptors = self.request_config_descriptor_and_rest(slot).await?;
         let device_descriptor = *self.slot_context[slot as usize].device_descriptor();
@@ -696,6 +657,47 @@ impl Xhci {
         }
         Ok(())
     }
+    async fn address_device(&mut self, port: usize, slot: u8) -> Result<()> {
+        // Setup an input context and send AddressDevice command.
+        // 4.3.3 Device Slot Initialization
+        let slot_context = &mut self.slot_context[slot as usize];
+        self.device_context_base_array
+            .set_output_context(slot, slot_context.output_context());
+        let mut input_ctrl_ctx = InputControlContext::default();
+        input_ctrl_ctx.add_context(0)?;
+        input_ctrl_ctx.add_context(1)?;
+        let mut input_context = slot_context.input_context();
+        input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
+        // 3. Initialize the Input Slot Context data structure (6.2.2)
+        input_context.set_root_hub_port_number(port)?;
+        input_context.set_last_valid_dci(1)?;
+        // 4. Initialize the Transfer Ring for the Default Control Endpoint
+        // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
+        let portsc = self.portsc.get(port)?;
+        let mut input_context = slot_context.input_context();
+        input_context.set_port_speed(portsc.port_speed())?;
+        let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring().ring_phys_addr();
+        let mut input_context = slot_context.input_context();
+        input_context.set_ep_ctx(
+            1,
+            EndpointContext::new_control_endpoint(
+                portsc.max_packet_size()?,
+                ctrl_ep_ring_phys_addr,
+            )?,
+        )?;
+        // 8. Issue an Address Device Command for the Device Slot
+        let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
+        self.send_command(cmd).await?.completed()?;
+        self.device_ready(port, slot).await
+    }
+    async fn enable_slot(&mut self, port: usize) -> Result<()> {
+        let slot = self
+            .send_command(GenericTrbEntry::cmd_enable_slot())
+            .await?
+            .slot_id();
+        println!("USB Device Detected, port = {}, slot {}", port, slot);
+        self.address_device(port, slot).await
+    }
     async fn reset_port(&mut self, port: usize) -> Result<()> {
         let portsc = self.portsc.get(port)?;
         println!(
@@ -719,7 +721,7 @@ impl Xhci {
             }
             yield_execution().await;
         }
-        self.enable_slot_usb3(port).await
+        self.enable_slot(port).await
     }
     async fn poll(&mut self) -> Result<()> {
         let port = self
