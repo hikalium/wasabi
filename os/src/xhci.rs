@@ -519,7 +519,7 @@ impl Xhci {
         }
         Ok(())
     }
-    async fn attach_device(&mut self, port: usize) -> Result<()> {
+    async fn enable_slot_usb3(&mut self, port: usize) -> Result<()> {
         let e = self
             .send_command(GenericTrbEntry::cmd_enable_slot())
             .await?;
@@ -696,40 +696,51 @@ impl Xhci {
         }
         Ok(())
     }
-    async fn poll(&mut self) -> Result<()> {
-        let mut port_to_enable: Option<PortScIteratorItem> = None;
-        for PortScIteratorItem { port, portsc } in self.portsc.iter() {
-            let state = portsc.state();
-            if let PortState::Disabled = state {
-                // Reset port to Enable the port (via Reset state)
-                port_to_enable = Some(PortScIteratorItem { port, portsc });
-            }
-        }
-        if let Some(PortScIteratorItem { port, portsc }) = port_to_enable {
-            println!(
-                "Resetting port: prev state: portsc[port = {}] = {:#10X} {:?} {:?}",
-                port,
-                portsc.value(),
-                portsc.state(),
-                portsc
-            );
-            portsc.reset();
-            println!("Enabling Port {}...", port);
-            loop {
-                let portsc = self.portsc.get(port)?;
-                if let PortState::Enabled = portsc.state() {
-                    if let PortLinkState::U0 = portsc.pls() {
-                        // Attached USB3 device
-                        if let Err(e) = self.attach_device(port).await {
-                            println!(
-                                "Failed to initialize an USB device on port {}: {:?}",
-                                port, e
-                            );
-                        }
-                        break;
+    async fn reset_port(&mut self, port: usize) -> Result<()> {
+        let portsc = self.portsc.get(port)?;
+        println!(
+            "Resetting port: prev state: portsc[port = {}] = {:#10X} {:?} {:?}",
+            port,
+            portsc.value(),
+            portsc.state(),
+            portsc
+        );
+        portsc.reset();
+        Ok(())
+    }
+    async fn enable_port(&mut self, port: usize) -> Result<()> {
+        println!("Enabling Port {}...", port);
+        // Reset port to Enable the port (via Reset state)
+        self.reset_port(port).await?;
+        loop {
+            let portsc = self.portsc.get(port)?;
+            if let PortState::Enabled = portsc.state() {
+                if let PortLinkState::U0 = portsc.pls() {
+                    if let Err(e) = self.enable_slot_usb3(port).await {
+                        println!(
+                            "Failed to initialize an USB device on port {}: {:?}",
+                            port, e
+                        );
                     }
+                    break;
                 }
             }
+        }
+        Ok(())
+    }
+    async fn poll(&mut self) -> Result<()> {
+        let port = self
+            .portsc
+            .iter()
+            .find_map(|PortScIteratorItem { port, portsc }| {
+                if portsc.state() == PortState::Disabled {
+                    Some(port)
+                } else {
+                    None
+                }
+            });
+        if let Some(port) = port {
+            self.enable_port(port).await?;
         }
         Ok(())
     }

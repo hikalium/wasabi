@@ -63,7 +63,7 @@ pub enum PortLinkState {
 pub struct PortScWrapper {
     ptr: *mut u32,
 }
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum PortState {
     // Figure 4-25: USB2 Root Hub Port State Machine
     PoweredOff,
