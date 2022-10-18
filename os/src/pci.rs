@@ -5,7 +5,6 @@ use crate::arch::x86_64::paging::with_current_page_table;
 use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Result;
 use crate::error::WasabiError;
-use crate::executor::Executor;
 use crate::print::hexdump;
 use crate::println;
 use crate::rtl8139::Rtl8139Driver;
@@ -16,7 +15,6 @@ use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
-use core::cell::SyncUnsafeCell;
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::size_of;
@@ -149,11 +147,7 @@ impl<'a> Iterator for CapabilityIterator<'a> {
 
 pub trait PciDeviceDriver {
     fn supports(&self, vp: VendorDeviceId) -> bool;
-    fn attach(
-        &self,
-        bdf: BusDeviceFunction,
-        executor: Rc<SyncUnsafeCell<Executor>>,
-    ) -> Result<Box<dyn PciDeviceDriverInstance>>;
+    fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>>;
     fn name(&self) -> &str;
 }
 impl fmt::Debug for dyn PciDeviceDriver {
@@ -350,7 +344,7 @@ impl Pci {
             Some(VendorDeviceId { vendor, device })
         }
     }
-    pub fn probe_devices(&self, executor: Rc<SyncUnsafeCell<Executor>>) -> Result<()> {
+    pub fn probe_devices(&self) -> Result<()> {
         println!("Probing PCI devices...");
         for bdf in BusDeviceFunction::iter() {
             if let Some(vd) = self.read_vendor_id_and_device_id(bdf) {
@@ -360,7 +354,7 @@ impl Pci {
                 }
                 for d in &self.drivers {
                     if d.supports(vd) {
-                        match d.attach(bdf, executor.clone()) {
+                        match d.attach(bdf) {
                             Ok(di) => {
                                 println!("{:?} driver is loaded for {:?}", di, bdf);
                                 self.devices.borrow_mut().insert(bdf, Rc::new(di));

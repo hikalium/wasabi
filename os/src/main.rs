@@ -8,8 +8,6 @@
 
 extern crate alloc;
 
-use alloc::rc::Rc;
-use core::cell::SyncUnsafeCell;
 use os::arch;
 use os::arch::x86_64;
 use os::arch::x86_64::read_rsp;
@@ -20,6 +18,7 @@ use os::executor::delay;
 use os::executor::yield_execution;
 use os::executor::Executor;
 use os::executor::Task;
+use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
 use os::init;
@@ -103,11 +102,14 @@ fn run_tasks() -> Result<()> {
             yield_execution().await;
         }
     };
-    let executor = Rc::new(SyncUnsafeCell::new(Executor::default()));
-    unsafe { &mut *executor.get() }.spawn(Task::new(task0));
-    unsafe { &mut *executor.get() }.spawn(Task::new(task1));
-    init_pci(executor.clone());
-    Executor::run(executor);
+    // This is safe since GlobalAllocator is already initialized.
+    {
+        let mut executor = ROOT_EXECUTOR.lock();
+        executor.spawn(Task::new(task0));
+        executor.spawn(Task::new(task1));
+    }
+    init_pci();
+    Executor::run(&ROOT_EXECUTOR);
     Ok(())
 }
 

@@ -242,11 +242,10 @@ impl BootInfo {
     pub fn kernel_stack(&self) -> &'static [u8] {
         self.kernel_stack
     }
-    /// # Safety
-    ///
-    /// Taking static immutable reference here is safe because BOOT_INFO is only set once and no
-    /// one will take a mutable reference to it.
     pub fn take() -> &'static BootInfo {
+        // SAFETY: Taking static immutable reference here is
+        // safe because BOOT_INFO is only set once and
+        // no one will take a mutable reference to it.
         unsafe { BOOT_INFO.as_ref().expect("BOOT_INFO not initialized yet") }
     }
     /// # Safety

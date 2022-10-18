@@ -11,8 +11,8 @@ use crate::arch::x86_64::paging::Mmio;
 use crate::error::Result;
 use crate::error::WasabiError;
 use crate::executor::yield_execution;
-use crate::executor::Executor;
 use crate::executor::Task;
+use crate::executor::ROOT_EXECUTOR;
 use crate::hpet::Hpet;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
@@ -32,11 +32,9 @@ use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::fmt::Debug;
 use alloc::format;
-use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
-use core::cell::SyncUnsafeCell;
 use core::cmp::max;
 use core::convert::AsRef;
 use core::future::Future;
@@ -186,12 +184,8 @@ impl PciDeviceDriver for XhciDriver {
         ];
         VDI_LIST.contains(&vp)
     }
-    fn attach(
-        &self,
-        bdf: BusDeviceFunction,
-        executor: Rc<SyncUnsafeCell<Executor>>,
-    ) -> Result<Box<dyn PciDeviceDriverInstance>> {
-        Ok(Box::new(XhciDriverInstance::new(bdf, executor)?) as Box<dyn PciDeviceDriverInstance>)
+    fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>> {
+        Ok(Box::new(XhciDriverInstance::new(bdf)?) as Box<dyn PciDeviceDriverInstance>)
     }
     fn name(&self) -> &str {
         "XhciDriver"
@@ -748,8 +742,8 @@ impl Xhci {
 
 struct XhciDriverInstance {}
 impl XhciDriverInstance {
-    fn new(bdf: BusDeviceFunction, executor: Rc<SyncUnsafeCell<Executor>>) -> Result<Self> {
-        unsafe { &mut *executor.get() }.spawn(Task::new(async move {
+    fn new(bdf: BusDeviceFunction) -> Result<Self> {
+        (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
             let mut xhc = Xhci::new(bdf)?;
             xhc.ensure_ring_is_working().await?;
             loop {

@@ -6,7 +6,6 @@ use crate::boot_info::BootInfo;
 use crate::boot_info::File;
 use crate::efi;
 use crate::error;
-use crate::executor::Executor;
 use crate::graphics::BitmapImageBuffer;
 use crate::hpet;
 use crate::memory_map_holder;
@@ -20,7 +19,6 @@ use crate::util::size_in_pages_from_bytes;
 use crate::vram;
 use crate::vram::VRAMBufferInfo;
 use alloc::boxed::Box;
-use alloc::rc::Rc;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
 use arch::x86_64::gdt::GDT;
@@ -28,7 +26,6 @@ use arch::x86_64::paging::write_cr3;
 use arch::x86_64::paging::PageAttr;
 use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
-use core::cell::SyncUnsafeCell;
 use core::cmp::max;
 use core::slice;
 use efi::EfiMemoryType::CONVENTIONAL_MEMORY;
@@ -296,7 +293,7 @@ pub fn init_timer() {
     }
 }
 
-pub fn init_pci(executor: Rc<SyncUnsafeCell<Executor>>) {
+pub fn init_pci() {
     println!("init_pci()");
     let acpi = BootInfo::take().acpi();
     let mcfg = acpi.mcfg();
@@ -304,7 +301,7 @@ pub fn init_pci(executor: Rc<SyncUnsafeCell<Executor>>) {
     // This is safe since it is only called once
     unsafe { Pci::set(pci) };
     Pci::take()
-        .probe_devices(executor)
+        .probe_devices()
         .expect("Failed to probe devices");
     Pci::take().list_devices();
     Pci::take().list_drivers();

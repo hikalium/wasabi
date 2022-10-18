@@ -20,6 +20,7 @@ pub enum WasabiError {
     PciBarInvalid,
     PciEcmOutOfRange,
     TryFromIntError,
+    LockFailed,
 }
 impl From<GraphicsError> for WasabiError {
     fn from(e: GraphicsError) -> Self {
