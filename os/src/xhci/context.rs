@@ -248,13 +248,13 @@ impl RawDeviceContextBaseAddressArray {
 
 pub struct DeviceContextBaseAddressArray {
     inner: Pin<Box<RawDeviceContextBaseAddressArray>>,
-    context: [Option<Pin<Box<OutputContext>>>; 256],
+    context: [Option<Pin<Box<OutputContext>>>; 255],
     _scratchpad_buffers: Pin<Box<[*mut u8]>>,
 }
 impl DeviceContextBaseAddressArray {
     pub fn new(scratchpad_buffers: Pin<Box<[*mut u8]>>) -> Self {
         let mut inner = RawDeviceContextBaseAddressArray::new();
-        inner.context[0] = scratchpad_buffers.as_ptr() as u64;
+        inner.scratchpad_buffers = scratchpad_buffers.as_ptr() as u64;
         Self {
             inner: Box::pin(inner),
             context: unsafe { MaybeUninit::zeroed().assume_init() },

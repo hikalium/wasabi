@@ -335,7 +335,7 @@ impl Xhci {
     async fn request_device_descriptor(
         &mut self,
         slot: u8,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
     ) -> Result<DeviceDescriptor> {
         let mut desc = Box::pin(DeviceDescriptor::default());
         self.request_descriptor(
@@ -351,7 +351,7 @@ impl Xhci {
     async fn request_set_config(
         &mut self,
         slot: u8,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
         config_value: u8,
     ) -> Result<()> {
         ctrl_ep_ring.push(
@@ -374,7 +374,7 @@ impl Xhci {
     async fn request_set_interface(
         &mut self,
         slot: u8,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
         interface_number: u8,
         alt_setting: u8,
     ) -> Result<()> {
@@ -398,7 +398,7 @@ impl Xhci {
     async fn request_set_protocol(
         &mut self,
         slot: u8,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
         interface_number: u8,
         protocol: u8,
     ) -> Result<()> {
@@ -425,7 +425,7 @@ impl Xhci {
     pub async fn request_report_bytes(
         &mut self,
         slot: u8,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
         buf: Pin<&mut [u8]>,
     ) -> Result<()> {
         // [HID] 7.2.1 Get_Report Request
@@ -452,7 +452,7 @@ impl Xhci {
     async fn request_descriptor(
         &mut self,
         slot: u8,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
         desc_type: DescriptorType,
         desc_index: u8,
         buf: Pin<&mut [u8]>,
@@ -478,7 +478,7 @@ impl Xhci {
     async fn request_config_descriptor_and_rest(
         &mut self,
         slot: u8,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
     ) -> Result<Vec<UsbDescriptor>> {
         let mut config_descriptor = Box::pin(ConfigDescriptor::default());
         self.request_descriptor(
@@ -501,7 +501,7 @@ impl Xhci {
     async fn request_string_descriptor(
         &mut self,
         slot: u8,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
 
         index: u8,
     ) -> Result<String> {
@@ -531,7 +531,7 @@ impl Xhci {
         port: usize,
         slot: u8,
         input_context: &mut Pin<&mut InputContext>,
-        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        ctrl_ep_ring: &mut CommandRing,
     ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
         let device_descriptor = self.request_device_descriptor(slot, ctrl_ep_ring).await?;
