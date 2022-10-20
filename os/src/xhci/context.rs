@@ -5,7 +5,6 @@ use crate::error::WasabiError;
 use crate::volatile::Volatile;
 use crate::xhci::registers::UsbMode;
 use crate::xhci::CommandRing;
-use crate::xhci::DeviceDescriptor;
 use crate::xhci::EndpointType;
 use alloc::boxed::Box;
 use alloc::fmt::Debug;
@@ -238,7 +237,6 @@ const _: () = assert!(size_of::<OutputContext>() <= 4096);
 pub struct SlotContext {
     input_context: Pin<Box<InputContext>>,
     output_context: Pin<Box<OutputContext>>,
-    device_descriptor: Pin<Box<DeviceDescriptor>>,
     ctrl_ep_ring: CommandRing,
 }
 impl SlotContext {
@@ -247,9 +245,6 @@ impl SlotContext {
     }
     pub fn output_context(&mut self) -> Pin<&mut OutputContext> {
         self.output_context.as_mut()
-    }
-    pub fn device_descriptor(&mut self) -> Pin<&mut DeviceDescriptor> {
-        self.device_descriptor.as_mut()
     }
     pub fn ctrl_ep_ring(&mut self) -> &mut CommandRing {
         &mut self.ctrl_ep_ring
@@ -260,7 +255,6 @@ impl Default for SlotContext {
         Self {
             input_context: Box::pin(InputContext::default()),
             output_context: Box::pin(OutputContext::default()),
-            device_descriptor: Box::pin(DeviceDescriptor::default()),
             ctrl_ep_ring: CommandRing::default(),
         }
     }

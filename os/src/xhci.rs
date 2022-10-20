@@ -14,7 +14,6 @@ use crate::executor::yield_execution;
 use crate::executor::Task;
 use crate::executor::ROOT_EXECUTOR;
 use crate::hpet::Hpet;
-use crate::mutex::Mutex;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
@@ -347,7 +346,7 @@ impl Xhci {
             desc.as_mut().as_mut_slice(),
         )
         .await?;
-        Ok((*desc).clone())
+        Ok(*desc)
     }
     async fn request_set_config(&mut self, slot: u8, config_value: u8) -> Result<()> {
         let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring();
