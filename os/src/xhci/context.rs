@@ -235,13 +235,9 @@ pub struct OutputContext {
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
 
 pub struct SlotContext {
-    output_context: Pin<Box<OutputContext>>,
     ctrl_ep_ring: CommandRing,
 }
 impl SlotContext {
-    pub fn output_context(&mut self) -> Pin<&mut OutputContext> {
-        self.output_context.as_mut()
-    }
     pub fn ctrl_ep_ring(&mut self) -> &mut CommandRing {
         &mut self.ctrl_ep_ring
     }
@@ -249,7 +245,6 @@ impl SlotContext {
 impl Default for SlotContext {
     fn default() -> Self {
         Self {
-            output_context: Box::pin(OutputContext::default()),
             ctrl_ep_ring: CommandRing::default(),
         }
     }
@@ -257,7 +252,8 @@ impl Default for SlotContext {
 
 #[repr(C, align(64))]
 pub struct RawDeviceContextBaseAddressArray {
-    context: [u64; 256],
+    scratchpad_buffers: u64,
+    context: [u64; 255],
     _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<RawDeviceContextBaseAddressArray>() == 2048);
@@ -269,6 +265,7 @@ impl RawDeviceContextBaseAddressArray {
 
 pub struct DeviceContextBaseAddressArray {
     inner: Pin<Box<RawDeviceContextBaseAddressArray>>,
+    context: [Option<Pin<Box<OutputContext>>>; 256],
     _scratchpad_buffers: Pin<Box<[*mut u8]>>,
 }
 impl DeviceContextBaseAddressArray {
@@ -277,6 +274,7 @@ impl DeviceContextBaseAddressArray {
         inner.context[0] = scratchpad_buffers.as_ptr() as u64;
         Self {
             inner: Box::pin(inner),
+            context: unsafe { MaybeUninit::zeroed().assume_init() },
             _scratchpad_buffers: scratchpad_buffers,
         }
     }
@@ -285,10 +283,18 @@ impl DeviceContextBaseAddressArray {
     pub unsafe fn inner_mut_ptr(&mut self) -> *mut RawDeviceContextBaseAddressArray {
         self.inner.as_mut().get_unchecked_mut() as *mut RawDeviceContextBaseAddressArray
     }
-    pub fn set_output_context(&mut self, slot: u8, output_context: Pin<&mut OutputContext>) {
+    pub fn set_output_context(&mut self, slot: u8, output_context: Pin<Box<OutputContext>>) {
+        // Own the output context here
+        let idx = (slot - 1) as usize;
+        self.context[idx] = Some(output_context);
+        // ...and set it in the actual pointer array
         unsafe {
-            self.inner.as_mut().get_unchecked_mut().context[slot as usize] =
-                output_context.as_ref().get_ref() as *const OutputContext as u64
+            self.inner.as_mut().get_unchecked_mut().context[idx] =
+                self.context[idx]
+                    .as_ref()
+                    .expect("Output Context was None")
+                    .as_ref()
+                    .get_ref() as *const OutputContext as u64;
         }
     }
 }

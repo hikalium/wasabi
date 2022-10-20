@@ -28,6 +28,7 @@ use crate::usb::EndpointDescriptor;
 use crate::usb::InterfaceDescriptor;
 use crate::usb::IntoPinnedMutableSlice;
 use crate::usb::UsbDescriptor;
+use crate::util::PAGE_SIZE;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::fmt::Debug;
@@ -50,6 +51,7 @@ use context::DeviceContextBaseAddressArray;
 use context::EndpointContext;
 use context::InputContext;
 use context::InputControlContext;
+use context::OutputContext;
 use context::RawDeviceContextBaseAddressArray;
 use context::SlotContext;
 use registers::CapabilityRegisters;
@@ -250,14 +252,13 @@ impl Xhci {
         let rt_regs = unsafe {
             Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().rtsoff()) as *mut RuntimeRegisters)
         };
+        op_regs.as_ref().assert_params()?;
         let doorbell_regs = unsafe {
             Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().dboff()) as *mut [u32; 256])
         };
         let portsc = PortSc::new(&bar0, cap_regs.as_ref());
-        let scratchpad_buffers = Self::alloc_scratch_pad_buffers(
-            op_regs.as_ref().page_size()?,
-            cap_regs.as_ref().num_scratch_pad_bufs(),
-        )?;
+        let scratchpad_buffers =
+            Self::alloc_scratch_pad_buffers(cap_regs.as_ref().num_scratch_pad_bufs())?;
         let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
         let mut xhc = Xhci {
             _bdf: bdf,
@@ -294,17 +295,14 @@ impl Xhci {
         unsafe { self.op_regs.get_unchecked_mut() }.set_cmd_ring_ctrl(&self.command_ring);
         Ok(())
     }
-    fn alloc_scratch_pad_buffers(
-        page_size: usize,
-        num_scratch_pad_bufs: usize,
-    ) -> Result<Pin<Box<[*mut u8]>>> {
+    fn alloc_scratch_pad_buffers(num_scratch_pad_bufs: usize) -> Result<Pin<Box<[*mut u8]>>> {
         // 4.20 Scratchpad Buffers
         // This should be done before xHC starts.
         // device_contexts.context[0] points Scratchpad Buffer Arrary.
         // The array contains pointers to a memory region which is sized PAGESIZE and aligned on
         // PAGESIZE. (PAGESIZE can be retrieved from op_regs.PAGESIZE)
         let scratchpad_buffers = ALLOCATOR.alloc_with_options(
-            Layout::from_size_align(size_of::<usize>() * num_scratch_pad_bufs, page_size)
+            Layout::from_size_align(size_of::<usize>() * num_scratch_pad_bufs, PAGE_SIZE)
                 .map_err(error_stringify)?,
         );
         let scratchpad_buffers = unsafe {
@@ -313,7 +311,7 @@ impl Xhci {
         let mut scratchpad_buffers = Pin::new(Box::<[*mut u8]>::from(scratchpad_buffers));
         for sb in scratchpad_buffers.iter_mut() {
             *sb = ALLOCATOR.alloc_with_options(
-                Layout::from_size_align(page_size, page_size).map_err(error_stringify)?,
+                Layout::from_size_align(PAGE_SIZE, PAGE_SIZE).map_err(error_stringify)?,
             );
         }
         Ok(scratchpad_buffers)
@@ -646,8 +644,9 @@ impl Xhci {
         // Setup an input context and send AddressDevice command.
         // 4.3.3 Device Slot Initialization
         let slot_context = &mut self.slot_context[slot as usize];
+        let output_context = Box::pin(OutputContext::default());
         self.device_context_base_array
-            .set_output_context(slot, slot_context.output_context());
+            .set_output_context(slot, output_context);
         let mut input_ctrl_ctx = InputControlContext::default();
         input_ctrl_ctx.add_context(0)?;
         input_ctrl_ctx.add_context(1)?;

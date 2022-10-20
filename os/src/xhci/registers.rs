@@ -7,6 +7,7 @@ use crate::pci::BarMem64;
 use crate::print;
 use crate::println;
 use crate::util::extract_bits;
+use crate::util::PAGE_SIZE;
 use crate::volatile::Volatile;
 use crate::xhci::ring::CommandRing;
 use crate::xhci::ring::EventRing;
@@ -336,6 +337,10 @@ impl OperationalRegisters {
     }
     pub fn set_cmd_ring_ctrl(&mut self, ring: &CommandRing) {
         self.cmd_ring_ctrl = ring.ring_phys_addr() | 1 /* Consumer Ring Cycle State */
+    }
+    pub fn assert_params(&self) -> Result<()> {
+        assert_eq!(self.page_size()?, PAGE_SIZE);
+        Ok(())
     }
     pub fn reset_xhc(&mut self) {
         print!("[xHC] Resetting the controller...");
