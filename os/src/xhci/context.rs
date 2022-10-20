@@ -235,14 +235,10 @@ pub struct OutputContext {
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
 
 pub struct SlotContext {
-    input_context: Pin<Box<InputContext>>,
     output_context: Pin<Box<OutputContext>>,
     ctrl_ep_ring: CommandRing,
 }
 impl SlotContext {
-    pub fn input_context(&mut self) -> Pin<&mut InputContext> {
-        self.input_context.as_mut()
-    }
     pub fn output_context(&mut self) -> Pin<&mut OutputContext> {
         self.output_context.as_mut()
     }
@@ -253,7 +249,6 @@ impl SlotContext {
 impl Default for SlotContext {
     fn default() -> Self {
         Self {
-            input_context: Box::pin(InputContext::default()),
             output_context: Box::pin(OutputContext::default()),
             ctrl_ep_ring: CommandRing::default(),
         }

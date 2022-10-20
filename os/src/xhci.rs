@@ -48,6 +48,7 @@ use core::task::Poll;
 
 use context::DeviceContextBaseAddressArray;
 use context::EndpointContext;
+use context::InputContext;
 use context::InputControlContext;
 use context::RawDeviceContextBaseAddressArray;
 use context::SlotContext;
@@ -501,7 +502,12 @@ impl Xhci {
         }
         Ok(())
     }
-    async fn device_ready(&mut self, port: usize, slot: u8) -> Result<()> {
+    async fn device_ready(
+        &mut self,
+        port: usize,
+        slot: u8,
+        input_context: &mut Pin<&mut InputContext>,
+    ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
         let device_descriptor = self.request_device_descriptor(slot).await?;
         let descriptors = self.request_config_descriptor_and_rest(slot).await?;
@@ -543,8 +549,6 @@ impl Xhci {
             }
             if let Some(interface_desc) = boot_keyboard_interface {
                 println!("!!!!! USB KBD Found!");
-                let slot_context = &mut self.slot_context[slot as usize];
-                let mut input_context = slot_context.input_context();
                 let mut input_ctrl_ctx = InputControlContext::default();
                 input_ctrl_ctx.add_context(0)?;
                 const EP_RING_NONE: Option<TransferRing> = None;
@@ -647,7 +651,8 @@ impl Xhci {
         let mut input_ctrl_ctx = InputControlContext::default();
         input_ctrl_ctx.add_context(0)?;
         input_ctrl_ctx.add_context(1)?;
-        let mut input_context = slot_context.input_context();
+        let mut input_context = Box::pin(InputContext::default());
+        let mut input_context = input_context.as_mut();
         input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
         // 3. Initialize the Input Slot Context data structure (6.2.2)
         input_context.set_root_hub_port_number(port)?;
@@ -655,10 +660,8 @@ impl Xhci {
         // 4. Initialize the Transfer Ring for the Default Control Endpoint
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
         let portsc = self.portsc.get(port)?;
-        let mut input_context = slot_context.input_context();
         input_context.set_port_speed(portsc.port_speed())?;
         let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring().ring_phys_addr();
-        let mut input_context = slot_context.input_context();
         input_context.set_ep_ctx(
             1,
             EndpointContext::new_control_endpoint(
@@ -669,7 +672,7 @@ impl Xhci {
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
-        self.device_ready(port, slot).await
+        self.device_ready(port, slot, &mut input_context).await
     }
     async fn enable_slot(&mut self, port: usize) -> Result<()> {
         let slot = self
