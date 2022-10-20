@@ -338,28 +338,16 @@ impl Xhci {
             .await?
             .ok_or(WasabiError::Failed("Timed out"))
     }
-    async fn request_device_descriptor(&mut self, slot: u8) -> Result<GenericTrbEntry> {
-        let setup_stage = SetupStageTrb::new(
-            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
-            SetupStageTrb::REQ_GET_DESCRIPTOR,
-            (DescriptorType::Device as u16) << 8,
+    async fn request_device_descriptor(&mut self, slot: u8) -> Result<DeviceDescriptor> {
+        let mut desc = Box::pin(DeviceDescriptor::default());
+        self.request_descriptor(
+            slot,
+            DescriptorType::Device,
             0,
-            size_of::<DeviceDescriptor>() as u16,
-        );
-        let data_stage = DataStageTrb::new_in(
-            self.slot_context[slot as usize]
-                .device_descriptor()
-                .as_mut_slice(),
-        );
-        let status_stage = StatusStageTrb::new_out();
-        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring();
-        ctrl_ep_ring.push(setup_stage.into())?;
-        let trb_ptr_waiting = ctrl_ep_ring.push(data_stage.into())?;
-        ctrl_ep_ring.push(status_stage.into())?;
-        self.notify_ep(slot, 1);
-        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .ok_or(WasabiError::Failed("Timed out"))
+            desc.as_mut().as_mut_slice(),
+        )
+        .await?;
+        Ok((*desc).clone())
     }
     async fn request_set_config(&mut self, slot: u8, config_value: u8) -> Result<()> {
         let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring();
@@ -516,9 +504,8 @@ impl Xhci {
     }
     async fn device_ready(&mut self, port: usize, slot: u8) -> Result<()> {
         let portsc = self.portsc.get(port)?;
-        self.request_device_descriptor(slot).await?.completed()?;
+        let device_descriptor = self.request_device_descriptor(slot).await?;
         let descriptors = self.request_config_descriptor_and_rest(slot).await?;
-        let device_descriptor = *self.slot_context[slot as usize].device_descriptor();
         println!("{:?}", device_descriptor);
         let vendor_name = self
             .request_string_descriptor(slot, device_descriptor.manufacturer_idx)
