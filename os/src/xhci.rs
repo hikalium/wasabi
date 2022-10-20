@@ -14,6 +14,7 @@ use crate::executor::yield_execution;
 use crate::executor::Task;
 use crate::executor::ROOT_EXECUTOR;
 use crate::hpet::Hpet;
+use crate::mutex::Mutex;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
