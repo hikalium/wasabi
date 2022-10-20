@@ -4,7 +4,6 @@ use crate::error::Result;
 use crate::error::WasabiError;
 use crate::volatile::Volatile;
 use crate::xhci::registers::UsbMode;
-use crate::xhci::CommandRing;
 use crate::xhci::EndpointType;
 use alloc::boxed::Box;
 use alloc::fmt::Debug;
@@ -233,22 +232,6 @@ pub struct OutputContext {
     _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
-
-pub struct SlotContext {
-    ctrl_ep_ring: CommandRing,
-}
-impl SlotContext {
-    pub fn ctrl_ep_ring(&mut self) -> &mut CommandRing {
-        &mut self.ctrl_ep_ring
-    }
-}
-impl Default for SlotContext {
-    fn default() -> Self {
-        Self {
-            ctrl_ep_ring: CommandRing::default(),
-        }
-    }
-}
 
 #[repr(C, align(64))]
 pub struct RawDeviceContextBaseAddressArray {

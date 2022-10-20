@@ -53,7 +53,6 @@ use context::InputContext;
 use context::InputControlContext;
 use context::OutputContext;
 use context::RawDeviceContextBaseAddressArray;
-use context::SlotContext;
 use registers::CapabilityRegisters;
 use registers::OperationalRegisters;
 use registers::PortLinkState;
@@ -232,8 +231,6 @@ pub struct Xhci {
     command_ring: CommandRing,
     primary_event_ring: EventRing,
     device_context_base_array: DeviceContextBaseAddressArray,
-    // slot_context is indexed by slot_id (1-255)
-    slot_context: [SlotContext; 256],
 }
 impl Xhci {
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
@@ -270,7 +267,6 @@ impl Xhci {
             command_ring: CommandRing::default(),
             primary_event_ring: EventRing::new()?,
             device_context_base_array,
-            slot_context: [(); 256].map(|_| SlotContext::default()),
         };
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
@@ -336,10 +332,15 @@ impl Xhci {
             .await?
             .ok_or(WasabiError::Failed("Timed out"))
     }
-    async fn request_device_descriptor(&mut self, slot: u8) -> Result<DeviceDescriptor> {
+    async fn request_device_descriptor(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+    ) -> Result<DeviceDescriptor> {
         let mut desc = Box::pin(DeviceDescriptor::default());
         self.request_descriptor(
             slot,
+            ctrl_ep_ring,
             DescriptorType::Device,
             0,
             desc.as_mut().as_mut_slice(),
@@ -347,8 +348,12 @@ impl Xhci {
         .await?;
         Ok(*desc)
     }
-    async fn request_set_config(&mut self, slot: u8, config_value: u8) -> Result<()> {
-        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring();
+    async fn request_set_config(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        config_value: u8,
+    ) -> Result<()> {
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 0,
@@ -369,10 +374,10 @@ impl Xhci {
     async fn request_set_interface(
         &mut self,
         slot: u8,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
         interface_number: u8,
         alt_setting: u8,
     ) -> Result<()> {
-        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring();
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 SetupStageTrb::REQ_TYPE_TO_INTERFACE,
@@ -393,13 +398,13 @@ impl Xhci {
     async fn request_set_protocol(
         &mut self,
         slot: u8,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
         interface_number: u8,
         protocol: u8,
     ) -> Result<()> {
         // protocol:
         // 0: Boot Protocol
         // 1: Report Protocol
-        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring();
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 SetupStageTrb::REQ_TYPE_TO_INTERFACE,
@@ -417,9 +422,13 @@ impl Xhci {
             .ok_or(WasabiError::Failed("Timed out"))?
             .completed()
     }
-    pub async fn request_report_bytes(&mut self, slot: u8, buf: Pin<&mut [u8]>) -> Result<()> {
+    pub async fn request_report_bytes(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+        buf: Pin<&mut [u8]>,
+    ) -> Result<()> {
         // [HID] 7.2.1 Get_Report Request
-        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring();
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
@@ -443,11 +452,11 @@ impl Xhci {
     async fn request_descriptor(
         &mut self,
         slot: u8,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
         desc_type: DescriptorType,
         desc_index: u8,
         buf: Pin<&mut [u8]>,
     ) -> Result<()> {
-        let ctrl_ep_ring = &mut self.slot_context[slot as usize].ctrl_ep_ring();
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
@@ -466,10 +475,15 @@ impl Xhci {
             .ok_or(WasabiError::Failed("Timed out"))?
             .completed()
     }
-    async fn request_config_descriptor_and_rest(&mut self, slot: u8) -> Result<Vec<UsbDescriptor>> {
+    async fn request_config_descriptor_and_rest(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+    ) -> Result<Vec<UsbDescriptor>> {
         let mut config_descriptor = Box::pin(ConfigDescriptor::default());
         self.request_descriptor(
             slot,
+            ctrl_ep_ring,
             DescriptorType::Config,
             0,
             config_descriptor.as_mut().as_mut_slice(),
@@ -478,18 +492,30 @@ impl Xhci {
         let mut buf = Vec::<u8>::new();
         buf.resize(config_descriptor.total_length(), 0);
         let mut buf = Box::into_pin(buf.into_boxed_slice());
-        self.request_descriptor(slot, DescriptorType::Config, 0, buf.as_mut())
+        self.request_descriptor(slot, ctrl_ep_ring, DescriptorType::Config, 0, buf.as_mut())
             .await?;
         let iter = DescriptorIterator::new(&buf);
         let descriptors: Vec<UsbDescriptor> = iter.collect();
         Ok(descriptors)
     }
-    async fn request_string_descriptor(&mut self, slot: u8, index: u8) -> Result<String> {
+    async fn request_string_descriptor(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
+
+        index: u8,
+    ) -> Result<String> {
         let mut buf = Vec::<u8>::new();
         buf.resize(128, 0);
         let mut buf = Box::into_pin(buf.into_boxed_slice());
-        self.request_descriptor(slot, DescriptorType::String, index, buf.as_mut())
-            .await?;
+        self.request_descriptor(
+            slot,
+            ctrl_ep_ring,
+            DescriptorType::String,
+            index,
+            buf.as_mut(),
+        )
+        .await?;
         Ok(String::from_utf8_lossy(&buf[2..]).to_string())
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
@@ -505,16 +531,19 @@ impl Xhci {
         port: usize,
         slot: u8,
         input_context: &mut Pin<&mut InputContext>,
+        ctrl_ep_ring: &mut Pin<&mut CommandRing>,
     ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
-        let device_descriptor = self.request_device_descriptor(slot).await?;
-        let descriptors = self.request_config_descriptor_and_rest(slot).await?;
+        let device_descriptor = self.request_device_descriptor(slot, ctrl_ep_ring).await?;
+        let descriptors = self
+            .request_config_descriptor_and_rest(slot, ctrl_ep_ring)
+            .await?;
         println!("{:?}", device_descriptor);
         let vendor_name = self
-            .request_string_descriptor(slot, device_descriptor.manufacturer_idx)
+            .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.manufacturer_idx)
             .await?;
         let product_name = self
-            .request_string_descriptor(slot, device_descriptor.product_idx)
+            .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.product_idx)
             .await?;
         println!("{} {}", vendor_name, product_name);
         let mut last_config: Option<ConfigDescriptor> = None;
@@ -580,11 +609,16 @@ impl Xhci {
                 let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
                 self.send_command(cmd).await?.completed()?;
                 println!("setting config");
-                self.request_set_config(slot, last_config.expect("no config").config_value())
-                    .await?;
+                self.request_set_config(
+                    slot,
+                    ctrl_ep_ring,
+                    last_config.expect("no config").config_value(),
+                )
+                .await?;
                 println!("setting interface");
                 self.request_set_interface(
                     slot,
+                    ctrl_ep_ring,
                     interface_desc.interface_number(),
                     interface_desc.alt_setting(),
                 )
@@ -592,6 +626,7 @@ impl Xhci {
                 println!("setting protocol");
                 self.request_set_protocol(
                     slot,
+                    ctrl_ep_ring,
                     interface_desc.interface_number(),
                     0, /* Boot Protocol */
                 )
@@ -643,7 +678,6 @@ impl Xhci {
     async fn address_device(&mut self, port: usize, slot: u8) -> Result<()> {
         // Setup an input context and send AddressDevice command.
         // 4.3.3 Device Slot Initialization
-        let slot_context = &mut self.slot_context[slot as usize];
         let output_context = Box::pin(OutputContext::default());
         self.device_context_base_array
             .set_output_context(slot, output_context);
@@ -660,18 +694,20 @@ impl Xhci {
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
         let portsc = self.portsc.get(port)?;
         input_context.set_port_speed(portsc.port_speed())?;
-        let ctrl_ep_ring_phys_addr = slot_context.ctrl_ep_ring().ring_phys_addr();
+        let mut ctrl_ep_ring = Box::pin(CommandRing::default());
+        let mut ctrl_ep_ring = ctrl_ep_ring.as_mut();
         input_context.set_ep_ctx(
             1,
             EndpointContext::new_control_endpoint(
                 portsc.max_packet_size()?,
-                ctrl_ep_ring_phys_addr,
+                ctrl_ep_ring.ring_phys_addr(),
             )?,
         )?;
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
-        self.device_ready(port, slot, &mut input_context).await
+        self.device_ready(port, slot, &mut input_context, &mut ctrl_ep_ring)
+            .await
     }
     async fn enable_slot(&mut self, port: usize) -> Result<()> {
         let slot = self
