@@ -75,8 +75,8 @@ impl<T: Sized> Mutex<T> {
     pub fn lock(&self) -> MutexGuard<T> {
         self.try_lock().expect("unimplemented!")
     }
-    pub fn under_locked<R>(&self, f: &dyn FnOnce(&mut T) -> Result<R>) -> Result<R> {
-        let locked = self.lock();
+    pub fn under_locked<R: Sized>(&self, f: &dyn Fn(&mut T) -> Result<R>) -> Result<R> {
+        let mut locked = self.lock();
         f(&mut *locked)
     }
 }
