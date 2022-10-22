@@ -57,6 +57,7 @@ use registers::PortSc;
 use registers::PortScIteratorItem;
 use registers::PortState;
 use registers::RuntimeRegisters;
+use registers::UsbMode;
 use ring::CommandRing;
 use ring::EventRing;
 use ring::TransferRing;
@@ -255,6 +256,22 @@ impl Xhci {
         CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr)
             .await?
             .ok_or(Error::Failed("Timed out"))
+    }
+    async fn request_initial_device_descriptor(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut CommandRing,
+    ) -> Result<DeviceDescriptor> {
+        let mut desc = Box::pin(DeviceDescriptor::default());
+        self.request_descriptor(
+            slot,
+            ctrl_ep_ring,
+            DescriptorType::Device,
+            0,
+            desc.as_mut().as_mut_slice_sized(8)?,
+        )
+        .await?;
+        Ok(*desc)
     }
     async fn request_device_descriptor(
         &mut self,
@@ -458,7 +475,35 @@ impl Xhci {
         ctrl_ep_ring: &mut CommandRing,
     ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
+        if portsc.port_speed() == UsbMode::FullSpeed {
+            // For full speed device, we should read the first 8 bytes of the device descriptor to
+            // get proper MaxPacketSize parameter.
+            let device_descriptor = self
+                .request_initial_device_descriptor(slot, ctrl_ep_ring)
+                .await?;
+            let max_packet_size = device_descriptor.max_packet_size;
+            println!(
+                "Updating MaxPacketSize to {} for FullSpeed device",
+                max_packet_size
+            );
+            let mut input_ctrl_ctx = InputControlContext::default();
+            input_ctrl_ctx.add_context(0)?;
+            input_ctrl_ctx.add_context(1)?;
+            input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
+            input_context.set_ep_ctx(
+                1,
+                EndpointContext::new_control_endpoint(
+                    max_packet_size as u16,
+                    ctrl_ep_ring.ring_phys_addr(),
+                )?,
+            )?;
+            let cmd = GenericTrbEntry::cmd_evaluate_context(input_context.as_ref(), slot);
+            self.send_command(cmd).await?.completed()?;
+            println!("Evaluated");
+            //ctrl_ep_ring.reset();
+        }
         let device_descriptor = self.request_device_descriptor(slot, ctrl_ep_ring).await?;
+
         let descriptors = self
             .request_config_descriptor_and_rest(slot, ctrl_ep_ring)
             .await?;

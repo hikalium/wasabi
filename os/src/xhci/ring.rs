@@ -31,6 +31,12 @@ impl TrbRing {
     fn new() -> IoBox<Self> {
         IoBox::new()
     }
+    fn reset(&mut self) {
+        self.current_index = 0;
+        for trb in self.trb.iter_mut() {
+            trb.set_cycle_state(false);
+        }
+    }
     pub fn phys_addr(&self) -> u64 {
         &self.trb[0] as *const GenericTrbEntry as u64
     }
@@ -101,6 +107,11 @@ impl Default for CommandRing {
     }
 }
 impl CommandRing {
+    pub fn reset(&mut self) {
+        self.cycle_state_ours = false;
+        let ring = unsafe { self.ring.get_unchecked_mut() };
+        ring.reset();
+    }
     pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }

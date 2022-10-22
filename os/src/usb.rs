@@ -1,5 +1,5 @@
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::pin::Pin;
@@ -101,6 +101,17 @@ pub unsafe trait IntoPinnedMutableSlice: Sized + Copy + Clone {
                 size_of::<Self>(),
             )
         })
+    }
+    fn as_mut_slice_sized(self: Pin<&mut Self>, size: usize) -> Result<Pin<&mut [u8]>> {
+        if size > size_of::<Self>() {
+            Err(Error::Failed(
+                "Cannot take mut slice longer than the object",
+            ))
+        } else {
+            Ok(Pin::new(unsafe {
+                slice::from_raw_parts_mut(self.get_unchecked_mut() as *mut Self as *mut u8, size)
+            }))
+        }
     }
     fn copy_from_slice(data: &[u8]) -> Result<Self> {
         if size_of::<Self>() > data.len() {

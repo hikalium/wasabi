@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::util::extract_bits;
 use crate::volatile::Volatile;
 use crate::xhci::context::InputContext;
@@ -26,6 +26,7 @@ pub enum TrbType {
     EnableSlotCommand = 9,
     AddressDeviceCommand = 11,
     ConfigureEndpointCommand = 12,
+    EvaluateContextCommand = 13,
     NoOpCommand = 23,
     TransferEvent = 32,
     CommandCompletionEvent = 33,
@@ -40,6 +41,7 @@ pub enum TrbType {
 #[derive(PartialEq, Eq)]
 pub enum CompletionCode {
     Success = 1,
+    BabbleDetectedError = 3,
     UsbTransactionError = 4,
     TrbError = 5,
     StallError = 6,
@@ -140,6 +142,14 @@ impl GenericTrbEntry {
     pub fn cmd_address_device(input_context: Pin<&InputContext>, slot_id: u8) -> Self {
         let mut trb = Self::default();
         trb.set_trb_type(TrbType::AddressDeviceCommand);
+        trb.data
+            .write(input_context.get_ref() as *const InputContext as u64);
+        trb.set_slot_id(slot_id);
+        trb
+    }
+    pub fn cmd_evaluate_context(input_context: Pin<&InputContext>, slot_id: u8) -> Self {
+        let mut trb = Self::default();
+        trb.set_trb_type(TrbType::EvaluateContextCommand);
         trb.data
             .write(input_context.get_ref() as *const InputContext as u64);
         trb.set_slot_id(slot_id);
