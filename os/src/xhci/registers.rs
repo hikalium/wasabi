@@ -2,7 +2,7 @@ extern crate alloc;
 
 use crate::arch::x86_64::busy_loop_hint;
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::pci::BarMem64;
 use crate::print;
 use crate::println;
@@ -138,7 +138,7 @@ impl PortScWrapper {
             UsbMode::FullSpeed | UsbMode::LowSpeed => Ok(8),
             UsbMode::HighSpeed => Ok(64),
             UsbMode::SuperSpeed => Ok(512),
-            speed => Err(WasabiError::FailedString(format!(
+            speed => Err(Error::FailedString(format!(
                 "Unknown Protocol Speeed ID: {:?}",
                 speed
             ))),
@@ -261,12 +261,12 @@ impl CapabilityRegisters {
     }
     pub fn assert_capabilities(&self) -> Result<()> {
         if self.hccparams1.read() & 1 == 0 {
-            return Err(WasabiError::Failed(
+            return Err(Error::Failed(
                 "HCCPARAMS1.AC64 was 0 (No 64-bit addressing capability)",
             ));
         }
         if self.hccparams1.read() & 4 != 0 {
-            return Err(WasabiError::Failed(
+            return Err(Error::Failed(
                 "HCCPARAMS1.CSZ was 1 (Context size is 64, not 32)",
             ));
         }
@@ -312,7 +312,7 @@ impl OperationalRegisters {
         let page_size_bits = unsafe { read_volatile(&self.page_size) } & 0xFFFF;
         // bit[n] of page_size_bits is set => PAGE_SIZE will be 2^(n+12).
         if page_size_bits.count_ones() != 1 {
-            return Err(WasabiError::Failed("PAGE_SIZE has multiple bits set"));
+            return Err(Error::Failed("PAGE_SIZE has multiple bits set"));
         }
         let page_size_shift = page_size_bits.trailing_zeros();
         Ok(1 << (page_size_shift + 12))
@@ -390,7 +390,7 @@ impl RuntimeRegisters {
         let irs = self
             .irs
             .get_mut(index)
-            .ok_or(WasabiError::Failed("Index out of range"))?;
+            .ok_or(Error::Failed("Index out of range"))?;
         irs.erst_size = 1;
         irs.erdp = ring.ring_phys_addr();
         irs.erst_base = ring.erst_phys_addr();

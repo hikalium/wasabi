@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::volatile::Volatile;
 use crate::xhci::registers::UsbMode;
 use crate::xhci::EndpointType;
@@ -53,7 +53,7 @@ impl EndpointContext {
             }
             UsbMode::HighSpeed | UsbMode::SuperSpeed => interval_from_ep_desc - 1,
             mode => {
-                return Err(WasabiError::FailedString(format!(
+                return Err(Error::FailedString(format!(
                     "Failed to calc interval for {:?}",
                     mode
                 )))
@@ -87,7 +87,7 @@ impl EndpointContext {
             self.data[1] |= raw_ep_type << 3;
             Ok(())
         } else {
-            Err(WasabiError::FailedString(format!(
+            Err(Error::FailedString(format!(
                 "Invalid ep_type = {}",
                 raw_ep_type
             )))
@@ -105,7 +105,7 @@ impl EndpointContext {
             self.data[1] |= error_count << 1;
             Ok(())
         } else {
-            Err(WasabiError::Failed("invalid error_count"))
+            Err(Error::Failed("invalid error_count"))
         }
     }
     fn set_max_packet_size(&mut self, max_packet_size: u16) {
@@ -129,7 +129,7 @@ impl DeviceContext {
             self.slot_ctx[1] |= (port as u32) << 16;
             Ok(())
         } else {
-            Err(WasabiError::Failed("port out of range"))
+            Err(Error::Failed("port out of range"))
         }
     }
     fn set_last_valid_dci(&mut self, dci: usize) -> Result<()> {
@@ -147,7 +147,7 @@ impl DeviceContext {
             self.slot_ctx[0] |= (dci as u32) << 27;
             Ok(())
         } else {
-            Err(WasabiError::Failed("num_ep_ctx out of range"))
+            Err(Error::Failed("num_ep_ctx out of range"))
         }
     }
     fn set_port_speed(&mut self, mode: UsbMode) -> Result<()> {
@@ -156,7 +156,7 @@ impl DeviceContext {
             self.slot_ctx[0] |= (mode.psi()) << 20;
             Ok(())
         } else {
-            Err(WasabiError::Failed("psi out of range"))
+            Err(Error::Failed("psi out of range"))
         }
     }
 }
@@ -175,7 +175,7 @@ impl InputControlContext {
             self.add_context_bitmap |= 1 << ici;
             Ok(())
         } else {
-            Err(WasabiError::Failed("add_context: ici out of range"))
+            Err(Error::Failed("add_context: ici out of range"))
         }
     }
 }

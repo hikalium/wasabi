@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::pin::Pin;
@@ -104,7 +104,7 @@ pub unsafe trait IntoPinnedMutableSlice: Sized + Copy + Clone {
     }
     fn copy_from_slice(data: &[u8]) -> Result<Self> {
         if size_of::<Self>() > data.len() {
-            Err(WasabiError::Failed("data is too short"))
+            Err(Error::Failed("data is too short"))
         } else {
             Ok(unsafe { *(data.as_ptr() as *const Self) })
         }

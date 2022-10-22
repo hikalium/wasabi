@@ -1,7 +1,7 @@
 use crate::arch::x86_64;
 use crate::arch::x86_64::CpuidRequest;
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::println;
 use core::ptr::write_volatile;
 
@@ -69,7 +69,7 @@ pub struct IoApic {}
 impl IoApic {
     fn read_register(index: usize) -> Result<u32> {
         if index >= 0x100 {
-            Err(WasabiError::ApicRegIndexOutOfRange)
+            Err(Error::ApicRegIndexOutOfRange)
         } else {
             // This is safe since the index is checked
             unsafe {
@@ -80,7 +80,7 @@ impl IoApic {
     }
     fn write_register(index: usize, data: u32) -> Result<()> {
         if index >= 0x100 {
-            Err(WasabiError::ApicRegIndexOutOfRange)
+            Err(Error::ApicRegIndexOutOfRange)
         } else {
             // This is safe since the index is checked
             unsafe {
@@ -103,7 +103,7 @@ impl IoApic {
                 return Ok((low as u64) | (high as u64) << 32);
             }
         }
-        Err(WasabiError::ApicRegIndexOutOfRange)
+        Err(Error::ApicRegIndexOutOfRange)
     }
     fn write_redirection_entry(irq: usize, entry: u64) -> Result<()> {
         Self::write_register(0x10 + irq * 2, entry as u32)?;

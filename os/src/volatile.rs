@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use core::ops::BitAnd;
 use core::ops::BitOr;
 use core::ops::Not;
@@ -37,7 +37,7 @@ impl<
     pub fn write_bits(&mut self, shift: usize, width: usize, value: T) -> Result<()> {
         let mask = (T::from(1) << width) - T::from(1);
         if mask & value != value {
-            return Err(WasabiError::Failed("Value out of range"));
+            return Err(Error::Failed("Value out of range"));
         }
         let mask = mask << shift;
         self.write((value << shift) | (self.read() & !mask));

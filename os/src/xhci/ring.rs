@@ -3,8 +3,8 @@ extern crate alloc;
 use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::paging::disable_cache;
 use crate::arch::x86_64::paging::IoBox;
+use crate::error::Error;
 use crate::error::Result;
-use crate::error::WasabiError;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
@@ -39,7 +39,7 @@ impl TrbRing {
     }
     fn advance_index(&mut self, new_cycle: bool) -> Result<()> {
         if self.current().cycle_state() == new_cycle {
-            return Err(WasabiError::Failed("cycle state does not change"));
+            return Err(Error::Failed("cycle state does not change"));
         }
         self.trb[self.current_index].set_cycle_state(new_cycle);
         self.current_index = (self.current_index + 1) % self.trb.len();
@@ -47,7 +47,7 @@ impl TrbRing {
     }
     fn advance_index_notoggle(&mut self, cycle_ours: bool) -> Result<()> {
         if self.current().cycle_state() != cycle_ours {
-            return Err(WasabiError::Failed("cycle state mismatch"));
+            return Err(Error::Failed("cycle state mismatch"));
         }
         self.current_index = (self.current_index + 1) % self.trb.len();
         Ok(())
@@ -74,7 +74,7 @@ impl TrbRing {
             }
             Ok(())
         } else {
-            Err(WasabiError::Failed("TrbRing Out of Range"))
+            Err(Error::Failed("TrbRing Out of Range"))
         }
     }
     fn write_current(&mut self, trb: GenericTrbEntry) {
@@ -109,7 +109,7 @@ impl CommandRing {
         // as far as this function does not move the ring out.
         let ring = unsafe { self.ring.get_unchecked_mut() };
         if ring.current().cycle_state() != self.cycle_state_ours {
-            return Err(WasabiError::Failed("Command Ring is Full"));
+            return Err(Error::Failed("Command Ring is Full"));
         }
         src.set_cycle_state(self.cycle_state_ours);
         let dst_ptr = ring.current_ptr();
@@ -155,7 +155,7 @@ impl TransferRing {
         for (i, v) in this.buffers.iter_mut().enumerate() {
             *v = ALLOCATOR.alloc_with_options(
                 Layout::from_size_align(Self::BUF_SIZE, Self::BUF_ALIGN)
-                    .map_err(|_| WasabiError::Failed("TransferRing buffer allocation failed"))?,
+                    .map_err(|_| Error::Failed("TransferRing buffer allocation failed"))?,
             );
             mut_ring
                 .write(i, NormalTrb::new(*v, 8).into())
@@ -187,7 +187,7 @@ impl TransferRing {
     pub fn dequeue_trb(&mut self, trb_ptr: usize) -> Result<()> {
         // Update dequeue_index
         if self.ring.as_ref().trb_ptr(self.dequeue_index) != trb_ptr {
-            return Err(WasabiError::Failed("unexpected trb ptr"));
+            return Err(Error::Failed("unexpected trb ptr"));
         }
         // Wrap with num_trbs() - 1 to ignore LinkTrb
         self.dequeue_index = (self.dequeue_index + 1) % (self.ring.as_ref().num_trbs() - 1);

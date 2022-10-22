@@ -4,7 +4,7 @@ use crate::acpi::Mcfg;
 use crate::arch::x86_64::paging::with_current_page_table;
 use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::print::hexdump;
 use crate::println;
 use crate::rtl8139::Rtl8139Driver;
@@ -60,7 +60,7 @@ const SHIFT_FUNCTION: usize = 0;
 impl BusDeviceFunction {
     pub fn new(bus: usize, device: usize, function: usize) -> Result<Self> {
         if !(0..256).contains(&bus) || !(0..32).contains(&device) || !(0..8).contains(&function) {
-            Err(WasabiError::PciBusDeviceFunctionOutOfRange)
+            Err(Error::PciBusDeviceFunctionOutOfRange)
         } else {
             Ok(Self {
                 id: ((bus << SHIFT_BUS) | (device << SHIFT_DEVICE) | (function << SHIFT_FUNCTION))
@@ -171,14 +171,14 @@ struct ConfigRegisters<T> {
 impl<T> ConfigRegisters<T> {
     fn read(ecm_base: *mut T, byte_offset: usize) -> Result<T> {
         if !(0..256).contains(&byte_offset) || byte_offset % size_of::<T>() != 0 {
-            Err(WasabiError::PciEcmOutOfRange)
+            Err(Error::PciEcmOutOfRange)
         } else {
             unsafe { Ok(read_volatile(ecm_base.add(byte_offset / size_of::<T>()))) }
         }
     }
     fn write(ecm_base: *mut T, byte_offset: usize, data: T) -> Result<()> {
         if !(0..256).contains(&byte_offset) || byte_offset % size_of::<T>() != 0 {
-            Err(WasabiError::PciEcmOutOfRange)
+            Err(Error::PciEcmOutOfRange)
         } else {
             unsafe { write_volatile(ecm_base.add(byte_offset / size_of::<T>()), data) }
             Ok(())
@@ -249,7 +249,7 @@ impl Pci {
         {
             Ok((bar0 ^ 1) as u16)
         } else {
-            Err(WasabiError::PciBarInvalid)
+            Err(Error::PciBarInvalid)
         }
     }
     pub fn try_bar0_mem64(&self, bdf: BusDeviceFunction) -> Result<BarMem64> {
@@ -267,7 +267,7 @@ impl Pci {
             self.write_register_u64(bdf, 0x10, bar0)?;
             Ok(BarMem64 { addr, size })
         } else {
-            Err(WasabiError::PciBarInvalid)
+            Err(Error::PciBarInvalid)
         }
     }
     pub fn ecm_base<T>(&self, id: BusDeviceFunction) -> *mut T {

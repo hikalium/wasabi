@@ -6,7 +6,7 @@ use alloc::string::String;
 use core::num::TryFromIntError;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum WasabiError {
+pub enum Error {
     EfiError(EfiStatus),
     Failed(&'static str),
     FailedString(String),
@@ -22,29 +22,29 @@ pub enum WasabiError {
     TryFromIntError,
     LockFailed,
 }
-impl From<GraphicsError> for WasabiError {
+impl From<GraphicsError> for Error {
     fn from(e: GraphicsError) -> Self {
-        WasabiError::GraphicsError(e)
+        Error::GraphicsError(e)
     }
 }
-impl From<EfiStatus> for WasabiError {
+impl From<EfiStatus> for Error {
     fn from(e: EfiStatus) -> Self {
-        WasabiError::EfiError(e)
+        Error::EfiError(e)
     }
 }
-impl From<&'static str> for WasabiError {
+impl From<&'static str> for Error {
     fn from(s: &'static str) -> Self {
-        WasabiError::Failed(s)
+        Error::Failed(s)
     }
 }
-impl From<String> for WasabiError {
+impl From<String> for Error {
     fn from(s: String) -> Self {
-        WasabiError::FailedString(s)
+        Error::FailedString(s)
     }
 }
-impl From<TryFromIntError> for WasabiError {
+impl From<TryFromIntError> for Error {
     fn from(_: TryFromIntError) -> Self {
-        WasabiError::TryFromIntError
+        Error::TryFromIntError
     }
 }
-pub type Result<T> = core::result::Result<T, WasabiError>;
+pub type Result<T> = core::result::Result<T, Error>;

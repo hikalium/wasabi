@@ -9,8 +9,8 @@ pub mod trb;
 use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::paging::IoBox;
 use crate::arch::x86_64::paging::Mmio;
+use crate::error::Error;
 use crate::error::Result;
-use crate::error::WasabiError;
 use crate::executor::yield_execution;
 use crate::executor::Task;
 use crate::executor::ROOT_EXECUTOR;
@@ -222,7 +222,7 @@ impl Xhci {
         // PAGESIZE. (PAGESIZE can be retrieved from op_regs.PAGESIZE)
         let scratchpad_buffers = ALLOCATOR.alloc_with_options(
             Layout::from_size_align(size_of::<usize>() * num_scratch_pad_bufs, PAGE_SIZE)
-                .map_err(|_| WasabiError::Failed("could not allocated scratchpad buffers"))?,
+                .map_err(|_| Error::Failed("could not allocated scratchpad buffers"))?,
         );
         let scratchpad_buffers = unsafe {
             slice::from_raw_parts(scratchpad_buffers as *mut *mut u8, num_scratch_pad_bufs)
@@ -231,7 +231,7 @@ impl Xhci {
         for sb in scratchpad_buffers.iter_mut() {
             *sb = ALLOCATOR.alloc_with_options(
                 Layout::from_size_align(PAGE_SIZE, PAGE_SIZE)
-                    .map_err(|_| WasabiError::Failed("could not allocated scratchpad buffers"))?,
+                    .map_err(|_| Error::Failed("could not allocated scratchpad buffers"))?,
             );
         }
         Ok(scratchpad_buffers)
@@ -254,7 +254,7 @@ impl Xhci {
         self.notify_xhc();
         CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr)
             .await?
-            .ok_or(WasabiError::Failed("Timed out"))
+            .ok_or(Error::Failed("Timed out"))
     }
     async fn request_device_descriptor(
         &mut self,
@@ -292,7 +292,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .ok_or(WasabiError::Failed("Timed out"))?
+            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     async fn request_set_interface(
@@ -316,7 +316,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .ok_or(WasabiError::Failed("Timed out"))?
+            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     async fn request_set_protocol(
@@ -343,7 +343,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .ok_or(WasabiError::Failed("Timed out"))?
+            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_report_bytes(
@@ -370,7 +370,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .ok_or(WasabiError::Failed("Timed out"))?
+            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     async fn request_descriptor(
@@ -396,7 +396,7 @@ impl Xhci {
         self.notify_ep(slot, 1);
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .ok_or(WasabiError::Failed("Timed out"))?
+            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     async fn request_config_descriptor_and_rest(

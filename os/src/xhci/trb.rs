@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::util::extract_bits;
 use crate::volatile::Volatile;
 use crate::xhci::context::InputContext;
@@ -111,14 +111,14 @@ impl GenericTrbEntry {
         if self.trb_type() != TrbType::CommandCompletionEvent as u32
             && self.trb_type() != TrbType::TransferEvent as u32
         {
-            Err(WasabiError::FailedString(format!(
+            Err(Error::FailedString(format!(
                 "Expected TrbType == CommandCompletionEvent or TransferEvent but got {}",
                 self.trb_type(),
             )))
         } else if self.completion_code() != CompletionCode::Success as u32
             && self.completion_code() != CompletionCode::ShortPacket as u32
         {
-            Err(WasabiError::FailedString(format!(
+            Err(Error::FailedString(format!(
                 "Expected CompletionCode == Success but got {} ({})",
                 self.completion_code() as u32,
                 CompletionCode::parse(self.completion_code())

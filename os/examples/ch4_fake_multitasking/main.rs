@@ -22,7 +22,7 @@ use os::vram;
 
 pub fn main_with_boot_services(
     efi_system_table: &EFISystemTable,
-) -> Result<WasabiBootInfo, WasabiError> {
+) -> Result<WasabiBootInfo, Error> {
     let mut efi_writer = EFISimpleTextOutputProtocolWriter {
         protocol: efi_system_table.con_out,
     };
@@ -66,7 +66,7 @@ pub fn main_with_boot_services(
     Ok(WasabiBootInfo { vram })
 }
 
-pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), WasabiError> {
+pub fn main(info: &WasabiBootInfo, memory_map: &MemoryMapHolder) -> Result<(), Error> {
     println!("hello from serial");
 
     let vram = info.vram;

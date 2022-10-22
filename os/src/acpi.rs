@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::hpet;
 use crate::println;
 use core::fmt;
@@ -214,7 +214,7 @@ impl GenericAddress {
         if self.address_space_id == 0 {
             Ok(self.address as usize)
         } else {
-            Err(WasabiError::Failed(
+            Err(Error::Failed(
                 "ACPI Generic Address is not in system memory space",
             ))
         }

@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::util::PAGE_SIZE;
 use alloc::boxed::Box;
 use core::arch::asm;
@@ -199,26 +199,26 @@ impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NE
         if self.is_present() {
             Ok(unsafe { &*((self.value & !ATTR_MASK) as *const NEXT) })
         } else {
-            Err(WasabiError::PageNotFound)
+            Err(Error::PageNotFound)
         }
     }
     fn table_mut(&mut self) -> Result<&mut NEXT> {
         if self.is_present() {
             Ok(unsafe { &mut *((self.value & !ATTR_MASK) as *mut NEXT) })
         } else {
-            Err(WasabiError::PageNotFound)
+            Err(Error::PageNotFound)
         }
     }
     fn page(&self) -> Result<u64> {
         if self.is_present() {
             Ok(self.value & !ATTR_MASK)
         } else {
-            Err(WasabiError::PageNotFound)
+            Err(Error::PageNotFound)
         }
     }
     fn populate(&mut self) -> Result<&mut Self> {
         if self.is_present() {
-            Err(WasabiError::Failed("Page is already populated"))
+            Err(Error::Failed("Page is already populated"))
         } else {
             let next: Box<NEXT> = Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
             self.value = Box::into_raw(next) as u64 | PageAttr::ReadWriteUser as u64;
@@ -234,7 +234,7 @@ impl<const LEVEL: &'static str, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NE
     }
     fn set_page(&mut self, phys: u64, attr: PageAttr) -> Result<()> {
         if phys & ATTR_MASK != 0 {
-            Err(WasabiError::Failed("phys is not aligned"))
+            Err(Error::Failed("phys is not aligned"))
         } else {
             self.value = phys | attr as u64;
             Ok(())
@@ -309,13 +309,13 @@ impl PML4 {
         attr: PageAttr,
     ) -> Result<()> {
         if virt_start & ATTR_MASK != 0 {
-            return Err(WasabiError::Failed("Invalid virt_start"));
+            return Err(Error::Failed("Invalid virt_start"));
         }
         if virt_end & ATTR_MASK != 0 {
-            return Err(WasabiError::Failed("Invalid virt_end"));
+            return Err(Error::Failed("Invalid virt_end"));
         }
         if phys & ATTR_MASK != 0 {
-            return Err(WasabiError::Failed("Invalid phys"));
+            return Err(Error::Failed("Invalid phys"));
         }
         for addr in (virt_start..virt_end).step_by(PAGE_SIZE) {
             let index = self.calc_index(addr);
@@ -360,12 +360,12 @@ fn page_translation() {
         .create_mapping(0, 0x1000, 0, PageAttr::ReadWriteKernel)
         .expect("Failed to create mapping");
     assert_eq!(table.translate(0x0000), Ok(PageMapped4K { phys: 0x0000 }));
-    assert_eq!(table.translate(0x1000), Err(WasabiError::PageNotFound));
+    assert_eq!(table.translate(0x1000), Err(Error::PageNotFound));
     // Non-identity-mapped 4K
     let mut table = PML4::new();
     table
         .create_mapping(0, 0x1000, 0x1000, PageAttr::ReadWriteKernel)
         .expect("Failed to create mapping");
     assert_eq!(table.translate(0x0000), Ok(PageMapped4K { phys: 0x1000 }));
-    assert_eq!(table.translate(0x1000), Err(WasabiError::PageNotFound));
+    assert_eq!(table.translate(0x1000), Err(Error::PageNotFound));
 }

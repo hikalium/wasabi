@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::memory_map_holder;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::util::size_in_pages_from_bytes;
@@ -348,7 +348,7 @@ impl EfiFileProtocol {
         );
         assert_eq!(status, EfiStatus::SUCCESS);
         if size_read != size_expected {
-            Err(WasabiError::ReadFileSizeMismatch {
+            Err(Error::ReadFileSizeMismatch {
                 expected: size_expected,
                 actual: size_read,
             })

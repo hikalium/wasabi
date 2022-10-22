@@ -4,7 +4,7 @@ use crate::arch::x86_64::read_cpuid;
 use crate::arch::x86_64::CpuidRequest;
 use crate::arch::x86_64::CpuidResponse;
 use crate::efi::EfiFileName;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::vram::VRAMBufferInfo;
 use core::fmt;
@@ -24,7 +24,7 @@ impl File {
         name: EfiFileName,
         data: *mut u8,
         len: usize,
-    ) -> Result<Self, WasabiError> {
+    ) -> Result<Self, Error> {
         Ok(Self {
             name,
             data: core::slice::from_raw_parts_mut(data, len),

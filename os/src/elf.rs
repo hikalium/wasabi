@@ -2,7 +2,7 @@ extern crate alloc;
 
 use crate::boot_info::File;
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use crate::println;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
@@ -64,22 +64,22 @@ impl<'a> Elf<'a> {
         let data = self.file.data();
         // https://wiki.osdev.org/ELF#Header
         if &data[0..4] != b"\x7fELF".as_slice() {
-            return Err(WasabiError::Failed("No ELF signature found"));
+            return Err(Error::Failed("No ELF signature found"));
         }
         if data[4] != 2 {
-            return Err(WasabiError::Failed("Not a 64-bit ELF"));
+            return Err(Error::Failed("Not a 64-bit ELF"));
         }
         if data[5] != 1 {
-            return Err(WasabiError::Failed("Not a litte endian ELF"));
+            return Err(Error::Failed("Not a litte endian ELF"));
         }
         if data[7] != 0 {
-            return Err(WasabiError::Failed("ABI is not SystemV"));
+            return Err(Error::Failed("ABI is not SystemV"));
         }
         if read_le_u16(data, 16)? != 2 {
-            return Err(WasabiError::Failed("Not an executable ELF"));
+            return Err(Error::Failed("Not an executable ELF"));
         }
         if read_le_u16(data, 18)? != 0x3E {
-            return Err(WasabiError::Failed("Not an x86_64 ELF"));
+            return Err(Error::Failed("Not an x86_64 ELF"));
         }
         println!("This ELF seems to be executable!");
 
@@ -122,7 +122,7 @@ impl<'a> Elf<'a> {
                 break None;
             }
         }
-        .ok_or(WasabiError::Failed("LOAD segment not found"))?;
+        .ok_or(Error::Failed("LOAD segment not found"))?;
 
         println!("offset: {:#018X}", segment_info.offset);
         println!("vaddr : {:#018X}", segment_info.vaddr);

@@ -12,7 +12,7 @@
 //! to it will be safe.
 
 use crate::error::Result;
-use crate::error::WasabiError;
+use crate::error::Error;
 use core::cell::SyncUnsafeCell;
 use core::ops::Deref;
 use core::ops::DerefMut;
@@ -69,7 +69,7 @@ impl<T: Sized> Mutex<T> {
         {
             Ok(unsafe { MutexGuard::new(self, &self.data) })
         } else {
-            Err(WasabiError::LockFailed)
+            Err(Error::LockFailed)
         }
     }
     pub fn lock(&self) -> MutexGuard<T> {
