@@ -1,6 +1,7 @@
 extern crate alloc;
 
 pub mod context;
+pub mod future;
 pub mod registers;
 pub mod ring;
 pub mod trb;
@@ -13,7 +14,6 @@ use crate::error::WasabiError;
 use crate::executor::yield_execution;
 use crate::executor::Task;
 use crate::executor::ROOT_EXECUTOR;
-use crate::hpet::Hpet;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
@@ -37,14 +37,10 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::cmp::max;
 use core::convert::AsRef;
-use core::future::Future;
-use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::pin::Pin;
 use core::ptr::write_volatile;
 use core::slice;
-use core::task::Context;
-use core::task::Poll;
 
 use context::DeviceContextBaseAddressArray;
 use context::EndpointContext;
@@ -52,6 +48,8 @@ use context::InputContext;
 use context::InputControlContext;
 use context::OutputContext;
 use context::RawDeviceContextBaseAddressArray;
+use future::CommandCompletionEventFuture;
+use future::TransferEventFuture;
 use registers::CapabilityRegisters;
 use registers::OperationalRegisters;
 use registers::PortLinkState;
@@ -67,76 +65,6 @@ use trb::DataStageTrb;
 use trb::GenericTrbEntry;
 use trb::SetupStageTrb;
 use trb::StatusStageTrb;
-use trb::TrbType;
-
-enum EventFutureWaitType {
-    TrbAddr(u64),
-    Slot(u8),
-}
-
-struct EventFuture<'a, const E: TrbType> {
-    event_ring: &'a mut EventRing,
-    wait_on: EventFutureWaitType,
-    time_out: u64,
-    _pinned: PhantomPinned,
-}
-impl<'a, const E: TrbType> EventFuture<'a, E> {
-    fn new(event_ring: &'a mut EventRing, trb_addr: u64) -> Self {
-        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 10;
-        Self {
-            event_ring,
-            wait_on: EventFutureWaitType::TrbAddr(trb_addr),
-            time_out,
-            _pinned: PhantomPinned,
-        }
-    }
-    fn new_on_slot(event_ring: &'a mut EventRing, slot: u8) -> Self {
-        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 10;
-        Self {
-            event_ring,
-            wait_on: EventFutureWaitType::Slot(slot),
-            time_out,
-            _pinned: PhantomPinned,
-        }
-    }
-}
-impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
-    type Output = Result<Option<GenericTrbEntry>>;
-    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<Option<GenericTrbEntry>>> {
-        let time_out = self.time_out;
-        let mut_self = unsafe { self.get_unchecked_mut() };
-        match mut_self.event_ring.pop() {
-            Err(e) => Poll::Ready(Err(e)),
-            Ok(None) => {
-                if time_out < Hpet::take().main_counter() {
-                    Poll::Ready(Ok(None))
-                } else {
-                    Poll::Pending
-                }
-            }
-            Ok(Some(trb)) => {
-                if trb.trb_type() != E as u32 {
-                    println!("Ignoring event (!= type): {:?}", trb);
-                    return Poll::Pending;
-                }
-                match mut_self.wait_on {
-                    EventFutureWaitType::TrbAddr(trb_addr) if trb_addr == trb.data() => {
-                        Poll::Ready(Ok(Some(trb)))
-                    }
-                    EventFutureWaitType::Slot(slot) if trb.slot_id() == slot => {
-                        Poll::Ready(Ok(Some(trb)))
-                    }
-                    _ => {
-                        println!("Ignoring event (!= wait_on): {:?}", trb);
-                        Poll::Pending
-                    }
-                }
-            }
-        }
-    }
-}
-type CommandCompletionEventFuture<'a> = EventFuture<'a, { TrbType::CommandCompletionEvent }>;
-type TransferEventFuture<'a> = EventFuture<'a, { TrbType::TransferEvent }>;
 
 #[repr(C, align(4096))]
 struct EventRingSegmentTableEntry {
