@@ -5,7 +5,6 @@ use crate::arch::x86_64::paging::disable_cache;
 use crate::arch::x86_64::paging::IoBox;
 use crate::error::Result;
 use crate::error::WasabiError;
-use crate::xhci::error_stringify;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
@@ -156,7 +155,7 @@ impl TransferRing {
         for (i, v) in this.buffers.iter_mut().enumerate() {
             *v = ALLOCATOR.alloc_with_options(
                 Layout::from_size_align(Self::BUF_SIZE, Self::BUF_ALIGN)
-                    .map_err(error_stringify)?,
+                    .map_err(|_| WasabiError::Failed("TransferRing buffer allocation failed"))?,
             );
             mut_ring
                 .write(i, NormalTrb::new(*v, 8).into())

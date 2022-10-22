@@ -32,7 +32,6 @@ use crate::util::PAGE_SIZE;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::fmt::Debug;
-use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -69,10 +68,6 @@ use trb::GenericTrbEntry;
 use trb::SetupStageTrb;
 use trb::StatusStageTrb;
 use trb::TrbType;
-
-pub fn error_stringify<T: Debug>(x: T) -> String {
-    format!("[xHC] Error: {x:?}")
-}
 
 enum EventFutureWaitType {
     TrbAddr(u64),
@@ -299,7 +294,7 @@ impl Xhci {
         // PAGESIZE. (PAGESIZE can be retrieved from op_regs.PAGESIZE)
         let scratchpad_buffers = ALLOCATOR.alloc_with_options(
             Layout::from_size_align(size_of::<usize>() * num_scratch_pad_bufs, PAGE_SIZE)
-                .map_err(error_stringify)?,
+                .map_err(|_| WasabiError::Failed("could not allocated scratchpad buffers"))?,
         );
         let scratchpad_buffers = unsafe {
             slice::from_raw_parts(scratchpad_buffers as *mut *mut u8, num_scratch_pad_bufs)
@@ -307,7 +302,8 @@ impl Xhci {
         let mut scratchpad_buffers = Pin::new(Box::<[*mut u8]>::from(scratchpad_buffers));
         for sb in scratchpad_buffers.iter_mut() {
             *sb = ALLOCATOR.alloc_with_options(
-                Layout::from_size_align(PAGE_SIZE, PAGE_SIZE).map_err(error_stringify)?,
+                Layout::from_size_align(PAGE_SIZE, PAGE_SIZE)
+                    .map_err(|_| WasabiError::Failed("could not allocated scratchpad buffers"))?,
             );
         }
         Ok(scratchpad_buffers)
