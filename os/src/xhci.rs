@@ -524,6 +524,153 @@ impl Xhci {
         }
         Ok(())
     }
+    async fn handle_ax88179(
+        &mut self,
+        port: usize,
+        slot: u8,
+        input_context: &mut Pin<&mut InputContext>,
+        ctrl_ep_ring: &mut CommandRing,
+        device_descriptor: &DeviceDescriptor,
+        descriptors: &Vec<UsbDescriptor>,
+    ) -> Result<()> {
+        let portsc = self.portsc.get(port)?;
+        println!("AX88179!");
+        let mut ep_desc_list = Vec::new();
+        for d in descriptors {
+            if let UsbDescriptor::Endpoint(e) = d {
+                ep_desc_list.push(*e);
+            }
+        }
+        let mut ep_rings = self
+            .setup_endpoints(port, slot, input_context, &ep_desc_list)
+            .await?;
+        loop {
+            let event_trb =
+                TransferEventFuture::new_on_slot(&mut self.primary_event_ring, slot).await;
+            match event_trb {
+                Ok(Some(trb)) => {
+                    let transfer_trb_ptr = trb.data() as usize;
+                    let report = unsafe {
+                        Mmio::<[u8; 4096]>::from_raw(
+                            *(transfer_trb_ptr as *const usize) as *mut [u8; 4096],
+                        )
+                    };
+                    println!(
+                        "slot = {}, dci = {}, length = {}",
+                        slot,
+                        trb.dci(),
+                        trb.transfer_length()
+                    );
+                    hexdump(&report.as_ref()[0..16]);
+                    if let Some(ref mut tring) = ep_rings[trb.dci()] {
+                        tring.dequeue_trb(transfer_trb_ptr)?;
+                        self.notify_ep(slot, trb.dci());
+                    }
+                }
+                Ok(None) => {
+                    // Timed out. Do nothing.
+                }
+                Err(e) => {
+                    println!("e: {:?}", e);
+                }
+            }
+            if !portsc.ccs() {
+                return Err(Error::FailedString(format!("port {} disconnected", port)));
+            }
+        }
+    }
+    async fn setup_endpoints(
+        &mut self,
+        port: usize,
+        slot: u8,
+        input_context: &mut Pin<&mut InputContext>,
+        ep_desc_list: &Vec<EndpointDescriptor>,
+    ) -> Result<[Option<TransferRing>; 32]> {
+        // 4.6.6 Configure Endpoint
+        // When configuring or deconfiguring a device, only after completing a successful
+        // Configure Endpoint Command and a successful USB SET_CONFIGURATION
+        // request may software schedule data transfers through a newly enabled endpoint
+        // or Stream Transfer Ring of the Device Slot.
+        let portsc = self.portsc.get(port)?;
+        let mut input_ctrl_ctx = InputControlContext::default();
+        input_ctrl_ctx.add_context(0)?;
+        const EP_RING_NONE: Option<TransferRing> = None;
+        let mut ep_rings = [EP_RING_NONE; 32];
+        let mut last_dci = 1;
+        for ep_desc in ep_desc_list {
+            match EndpointType::from(ep_desc) {
+                EndpointType::InterruptIn => {
+                    println!("InterruptIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
+                    let tring = TransferRing::new(4096)?;
+                    input_ctrl_ctx.add_context(ep_desc.dci())?;
+                    input_context.set_ep_ctx(
+                        ep_desc.dci(),
+                        EndpointContext::new_interrupt_in_endpoint(
+                            portsc.max_packet_size()?,
+                            tring.ring_phys_addr(),
+                            portsc.port_speed(),
+                            ep_desc.interval,
+                            8,
+                        )?,
+                    )?;
+                    last_dci = max(last_dci, ep_desc.dci());
+                    ep_rings[ep_desc.dci()] = Some(tring);
+                }
+                EndpointType::BulkIn => {
+                    println!("BulkIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
+                    let tring = TransferRing::new(4096)?;
+                    input_ctrl_ctx.add_context(ep_desc.dci())?;
+                    input_context.set_ep_ctx(
+                        ep_desc.dci(),
+                        EndpointContext::new_bulk_in_endpoint(
+                            portsc.max_packet_size()?,
+                            tring.ring_phys_addr(),
+                            portsc.port_speed(),
+                            ep_desc.interval,
+                            8,
+                        )?,
+                    )?;
+                    last_dci = max(last_dci, ep_desc.dci());
+                    ep_rings[ep_desc.dci()] = Some(tring);
+                }
+                EndpointType::BulkOut => {
+                    println!("BulkOut! dci={}: {:?}", ep_desc.dci(), ep_desc);
+                    let tring = TransferRing::new(4096)?;
+                    input_ctrl_ctx.add_context(ep_desc.dci())?;
+                    input_context.set_ep_ctx(
+                        ep_desc.dci(),
+                        EndpointContext::new_bulk_out_endpoint(
+                            portsc.max_packet_size()?,
+                            tring.ring_phys_addr(),
+                            portsc.port_speed(),
+                            ep_desc.interval,
+                            8,
+                        )?,
+                    )?;
+                    last_dci = max(last_dci, ep_desc.dci());
+                    ep_rings[ep_desc.dci()] = Some(tring);
+                }
+                _ => {
+                    println!("Ignoring {:?}", ep_desc);
+                }
+            }
+        }
+        input_context.set_last_valid_dci(last_dci)?;
+        input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
+        let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
+        self.send_command(cmd).await?.completed()?;
+        for (dci, tring) in ep_rings.iter_mut().enumerate() {
+            match tring {
+                Some(tring) => {
+                    tring.fill_ring()?;
+                    self.notify_ep(slot, dci);
+                }
+                None => {}
+            }
+        }
+        println!("Endpoint setup done!");
+        Ok(ep_rings)
+    }
     async fn device_ready(
         &mut self,
         port: usize,
@@ -623,7 +770,18 @@ impl Xhci {
                 }
             }
         }
-        if device_descriptor.vendor_id == 0x0bda
+        if device_descriptor.vendor_id == 2965 && device_descriptor.product_id == 6032 {
+            println!("AX88179!");
+            self.handle_ax88179(
+                port,
+                slot,
+                input_context,
+                ctrl_ep_ring,
+                &device_descriptor,
+                &descriptors,
+            )
+            .await?;
+        } else if device_descriptor.vendor_id == 0x0bda
             && (device_descriptor.product_id == 0x8153 || device_descriptor.product_id == 0x8151)
         {
             let mut ep_desc_list = Vec::new();
