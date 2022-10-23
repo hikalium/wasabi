@@ -270,6 +270,7 @@ impl Xhci {
             ctrl_ep_ring,
             DescriptorType::Device,
             0,
+            0,
             desc.as_mut().as_mut_slice_sized(8)?,
         )
         .await?;
@@ -285,6 +286,7 @@ impl Xhci {
             slot,
             ctrl_ep_ring,
             DescriptorType::Device,
+            0,
             0,
             desc.as_mut().as_mut_slice(),
         )
@@ -422,6 +424,7 @@ impl Xhci {
         ctrl_ep_ring: &mut CommandRing,
         desc_type: DescriptorType,
         desc_index: u8,
+        lang_id: u16,
         buf: Pin<&mut [T]>,
     ) -> Result<()> {
         ctrl_ep_ring.push(
@@ -429,7 +432,7 @@ impl Xhci {
                 SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
                 SetupStageTrb::REQ_GET_DESCRIPTOR,
                 (desc_type as u16) << 8 | (desc_index as u16),
-                0,
+                lang_id,
                 (buf.len() * size_of::<T>()) as u16,
             )
             .into(),
@@ -453,14 +456,22 @@ impl Xhci {
             ctrl_ep_ring,
             DescriptorType::Config,
             0,
+            0,
             config_descriptor.as_mut().as_mut_slice(),
         )
         .await?;
         let mut buf = Vec::<u8>::new();
         buf.resize(config_descriptor.total_length(), 0);
         let mut buf = Box::into_pin(buf.into_boxed_slice());
-        self.request_descriptor(slot, ctrl_ep_ring, DescriptorType::Config, 0, buf.as_mut())
-            .await?;
+        self.request_descriptor(
+            slot,
+            ctrl_ep_ring,
+            DescriptorType::Config,
+            0,
+            0,
+            buf.as_mut(),
+        )
+        .await?;
         let iter = DescriptorIterator::new(&buf);
         let descriptors: Vec<UsbDescriptor> = iter.collect();
         Ok(descriptors)
@@ -469,6 +480,7 @@ impl Xhci {
         &mut self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
+        lang_id: u16,
         index: u8,
     ) -> Result<String> {
         let mut buf = Vec::<u8>::new();
@@ -479,6 +491,7 @@ impl Xhci {
             ctrl_ep_ring,
             DescriptorType::String,
             index,
+            lang_id,
             buf.as_mut(),
         )
         .await?;
@@ -492,8 +505,15 @@ impl Xhci {
         let mut buf = Vec::<u16>::new();
         buf.resize(8, 0);
         let mut buf = Box::into_pin(buf.into_boxed_slice());
-        self.request_descriptor(slot, ctrl_ep_ring, DescriptorType::String, 0, buf.as_mut())
-            .await?;
+        self.request_descriptor(
+            slot,
+            ctrl_ep_ring,
+            DescriptorType::String,
+            0,
+            0,
+            buf.as_mut(),
+        )
+        .await?;
         Ok(buf.as_ref().get_ref().to_vec())
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
@@ -553,30 +573,55 @@ impl Xhci {
             .await
         {
             println!("String Descriptor Zero: {:?}", e);
-        }
-        if device_descriptor.manufacturer_idx != 0 {
-            let vendor_name = self
-                .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.manufacturer_idx)
-                .await?;
-            println!("Vendor: {}", vendor_name);
-        } else {
-            println!("Vendor is not available");
-        }
-        if device_descriptor.product_idx != 0 {
-            let product_name = self
-                .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.product_idx)
-                .await?;
-            println!("Product: {}", product_name);
-        } else {
-            println!("Product is not available");
-        }
-        if device_descriptor.serial_idx != 0 {
-            let serial = self
-                .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.serial_idx)
-                .await?;
-            println!("Serial: {}", serial);
-        } else {
-            println!("Serial is not available");
+            let lang_id = e[1];
+            println!("Using lang_id {:#06X}", lang_id);
+            if device_descriptor.manufacturer_idx != 0 {
+                let vendor_name = self
+                    .request_string_descriptor(
+                        slot,
+                        ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.manufacturer_idx,
+                    )
+                    .await?;
+                println!("Vendor: {}", vendor_name);
+            } else {
+                println!("Vendor is not available");
+            }
+            if device_descriptor.product_idx != 0 {
+                let product_name = self
+                    .request_string_descriptor(
+                        slot,
+                        ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.product_idx,
+                    )
+                    .await?;
+                println!("Product: {}", product_name);
+            } else {
+                println!("Product is not available");
+            }
+            if device_descriptor.serial_idx != 0 {
+                let serial = self
+                    .request_string_descriptor(
+                        slot,
+                        ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.serial_idx,
+                    )
+                    .await?;
+                println!("Serial: {}", serial);
+            } else {
+                println!("Serial is not available");
+            }
+            for i in 1..8 {
+                if let Ok(s) = self
+                    .request_string_descriptor(slot, ctrl_ep_ring, lang_id, i)
+                    .await
+                {
+                    println!("string_desc[{}] = {}", i, s);
+                }
+            }
         }
         if device_descriptor.vendor_id == 0x0bda
             && (device_descriptor.product_id == 0x8153 || device_descriptor.product_id == 0x8151)
@@ -588,11 +633,6 @@ impl Xhci {
                 }
             }
             println!("rtl8153/8151!");
-            for i in 0..16 {
-                if let Ok(s) = self.request_string_descriptor(slot, ctrl_ep_ring, i).await {
-                    println!("string_desc[{}] = {}", i, s);
-                }
-            }
             let mut input_ctrl_ctx = InputControlContext::default();
             input_ctrl_ctx.add_context(0)?;
             const EP_RING_NONE: Option<TransferRing> = None;
