@@ -103,6 +103,9 @@ impl GenericTrbEntry {
     pub fn completion_code(&self) -> u32 {
         self.option.read_bits(24, 8)
     }
+    pub fn transfer_length(&self) -> usize {
+        self.option.read_bits(0, 24) as usize
+    }
     pub fn slot_id(&self) -> u8 {
         self.control.read_bits(24, 8).try_into().unwrap()
     }
@@ -334,10 +337,10 @@ pub struct DataStageTrb {
 }
 const _: () = assert!(size_of::<DataStageTrb>() == 16);
 impl DataStageTrb {
-    pub fn new_in(buf: Pin<&mut [u8]>) -> Self {
+    pub fn new_in<T: Sized>(buf: Pin<&mut [T]>) -> Self {
         Self {
             buf: buf.as_ptr() as u64,
-            option: buf.len() as u32,
+            option: (buf.len() * size_of::<T>()) as u32,
             control: (TrbType::DataStage as u32) << 10
                 | GenericTrbEntry::CTRL_BIT_DATA_DIR_IN
                 | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION

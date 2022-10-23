@@ -19,6 +19,7 @@ use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
+use crate::print::hexdump;
 use crate::println;
 use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorIterator;
@@ -415,13 +416,13 @@ impl Xhci {
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
-    async fn request_descriptor(
+    async fn request_descriptor<T: Sized>(
         &mut self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
         desc_type: DescriptorType,
         desc_index: u8,
-        buf: Pin<&mut [u8]>,
+        buf: Pin<&mut [T]>,
     ) -> Result<()> {
         ctrl_ep_ring.push(
             SetupStageTrb::new(
@@ -429,7 +430,7 @@ impl Xhci {
                 SetupStageTrb::REQ_GET_DESCRIPTOR,
                 (desc_type as u16) << 8 | (desc_index as u16),
                 0,
-                buf.len() as u16,
+                (buf.len() * size_of::<T>()) as u16,
             )
             .into(),
         )?;
@@ -468,7 +469,6 @@ impl Xhci {
         &mut self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
-
         index: u8,
     ) -> Result<String> {
         let mut buf = Vec::<u8>::new();
@@ -483,6 +483,18 @@ impl Xhci {
         )
         .await?;
         Ok(String::from_utf8_lossy(&buf[2..]).to_string())
+    }
+    async fn request_string_descriptor_zero(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut CommandRing,
+    ) -> Result<Vec<u16>> {
+        let mut buf = Vec::<u16>::new();
+        buf.resize(8, 0);
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        self.request_descriptor(slot, ctrl_ep_ring, DescriptorType::String, 0, buf.as_mut())
+            .await?;
+        Ok(buf.as_ref().get_ref().to_vec())
     }
     async fn ensure_ring_is_working(&mut self) -> Result<()> {
         for _ in 0..TrbRing::NUM_TRB * 2 + 1 {
@@ -533,7 +545,15 @@ impl Xhci {
         let descriptors = self
             .request_config_descriptor_and_rest(slot, ctrl_ep_ring)
             .await?;
-        println!("{:?}", descriptors);
+        for d in &descriptors {
+            println!("{:?}", d);
+        }
+        if let Ok(e) = self
+            .request_string_descriptor_zero(slot, ctrl_ep_ring)
+            .await
+        {
+            println!("String Descriptor Zero: {:?}", e);
+        }
         if device_descriptor.manufacturer_idx != 0 {
             let vendor_name = self
                 .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.manufacturer_idx)
@@ -580,9 +600,27 @@ impl Xhci {
             let mut last_dci = 1;
             for ep_desc in ep_desc_list {
                 match EndpointType::from(&ep_desc) {
+                    EndpointType::InterruptIn => {
+                        println!("InterruptIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
+                        let tring = TransferRing::new(4096)?;
+                        input_ctrl_ctx.add_context(ep_desc.dci())?;
+                        input_context.set_ep_ctx(
+                            ep_desc.dci(),
+                            EndpointContext::new_interrupt_in_endpoint(
+                                portsc.max_packet_size()?,
+                                tring.ring_phys_addr(),
+                                portsc.port_speed(),
+                                ep_desc.interval,
+                                8,
+                            )?,
+                        )?;
+                        last_dci = max(last_dci, ep_desc.dci());
+                        ep_rings[ep_desc.dci()] = Some(tring);
+                    }
+                    /*
                     EndpointType::BulkIn => {
-                        println!("BulkIn!: {:?}", ep_desc);
-                        let tring = TransferRing::new()?;
+                        println!("BulkIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
+                        let tring = TransferRing::new(4096)?;
                         input_ctrl_ctx.add_context(ep_desc.dci())?;
                         input_context.set_ep_ctx(
                             ep_desc.dci(),
@@ -597,9 +635,11 @@ impl Xhci {
                         last_dci = max(last_dci, ep_desc.dci());
                         ep_rings[ep_desc.dci()] = Some(tring);
                     }
+                    */
+                    /*
                     EndpointType::BulkOut => {
-                        println!("BulkOut!: {:?}", ep_desc);
-                        let tring = TransferRing::new()?;
+                        println!("BulkOut! dci={}: {:?}", ep_desc.dci(), ep_desc);
+                        let tring = TransferRing::new(4096)?;
                         input_ctrl_ctx.add_context(ep_desc.dci())?;
                         input_context.set_ep_ctx(
                             ep_desc.dci(),
@@ -614,6 +654,7 @@ impl Xhci {
                         last_dci = max(last_dci, ep_desc.dci());
                         ep_rings[ep_desc.dci()] = Some(tring);
                     }
+                    */
                     _ => {
                         println!("Ignoring {:?}", ep_desc);
                     }
@@ -638,9 +679,11 @@ impl Xhci {
                 }
             }
             println!("setup done!");
+            /*
             self.request_set_ethernet_packet_filter(slot, ctrl_ep_ring, 0b11111)
                 .await?;
             println!("filter cleared!");
+            */
             loop {
                 let event_trb =
                     TransferEventFuture::new_on_slot(&mut self.primary_event_ring, slot).await;
@@ -648,11 +691,17 @@ impl Xhci {
                     Ok(Some(trb)) => {
                         let transfer_trb_ptr = trb.data() as usize;
                         let report = unsafe {
-                            Mmio::<[u8; 8]>::from_raw(
-                                *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
+                            Mmio::<[u8; 4096]>::from_raw(
+                                *(transfer_trb_ptr as *const usize) as *mut [u8; 4096],
                             )
                         };
-                        println!("recv: {:?}", report.as_ref());
+                        println!(
+                            "slot = {}, dci = {}, length = {}",
+                            slot,
+                            trb.dci(),
+                            trb.transfer_length()
+                        );
+                        // hexdump(&report.as_ref()[0..trb.transfer_length()]);
                         if let Some(ref mut tring) = ep_rings[trb.dci()] {
                             tring.dequeue_trb(transfer_trb_ptr)?;
                             self.notify_ep(slot, trb.dci());
@@ -664,6 +713,9 @@ impl Xhci {
                     Err(e) => {
                         println!("e: {:?}", e);
                     }
+                }
+                if !portsc.ccs() {
+                    return Err(Error::FailedString(format!("port {} disconnected", port)));
                 }
             }
         } else if device_descriptor.device_class == 0 {
@@ -704,7 +756,7 @@ impl Xhci {
                 for ep_desc in ep_desc_list {
                     match EndpointType::from(&ep_desc) {
                         EndpointType::InterruptIn => {
-                            let tring = TransferRing::new()?;
+                            let tring = TransferRing::new(8)?;
                             input_ctrl_ctx.add_context(ep_desc.dci())?;
                             input_context.set_ep_ctx(
                                 ep_desc.dci(),
@@ -789,6 +841,9 @@ impl Xhci {
                         Err(e) => {
                             println!("e: {:?}", e);
                         }
+                    }
+                    if !portsc.ccs() {
+                        return Err(Error::FailedString(format!("port {} disconnected", port)));
                     }
                 }
             }

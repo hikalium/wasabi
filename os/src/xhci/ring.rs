@@ -149,7 +149,7 @@ pub struct TransferRing {
 impl TransferRing {
     const BUF_SIZE: usize = 4096;
     const BUF_ALIGN: usize = 4096;
-    pub fn new() -> Result<Self> {
+    pub fn new(transfer_size: usize) -> Result<Self> {
         let mut this = Self {
             ring: TrbRing::new(),
             cycle_state_ours: false,
@@ -169,7 +169,7 @@ impl TransferRing {
                     .map_err(|_| Error::Failed("TransferRing buffer allocation failed"))?,
             );
             mut_ring
-                .write(i, NormalTrb::new(*v, 8).into())
+                .write(i, NormalTrb::new(*v, transfer_size as u16).into())
                 .expect("failed to write a link trb");
         }
         Ok(this)
