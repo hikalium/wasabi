@@ -8,7 +8,7 @@ QEMU_ARGS=\
 		-bios $(OVMF) \
 		-device qemu-xhci \
 		-device usb-mouse \
-		-device usb-kbd \
+		-device usb-host,hostbus=2,hostport=3.2.1 \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=net0 -device usb-net,netdev=net0 \
 		-object filter-dump,id=f1,netdev=net0,file=dump_net0.dat \

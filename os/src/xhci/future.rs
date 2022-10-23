@@ -23,7 +23,10 @@ pub struct EventFuture<'a, const E: TrbType> {
 }
 impl<'a, const E: TrbType> EventFuture<'a, E> {
     pub fn new(event_ring: &'a mut EventRing, trb_addr: u64) -> Self {
-        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 10;
+        Self::new_with_timeout(event_ring, trb_addr, 100)
+    }
+    pub fn new_with_timeout(event_ring: &'a mut EventRing, trb_addr: u64, wait_ms: u64) -> Self {
+        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * wait_ms;
         Self {
             event_ring,
             wait_on: EventFutureWaitType::TrbAddr(trb_addr),

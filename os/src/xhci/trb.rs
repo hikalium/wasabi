@@ -285,14 +285,14 @@ impl SetupStageTrb {
     //      _: Reserved
     //pub const REQ_TYPE_TYPE_STANDARD: u8 = 0 << 5;
     pub const REQ_TYPE_TYPE_CLASS: u8 = 1 << 5;
-    //pub const REQ_TYPE_TYPE_VENDOR: u8 = 2 << 5;
+    pub const REQ_TYPE_TYPE_VENDOR: u8 = 2 << 5;
     // bmRequest bit[0..=4]: Recipient
     //      0: Device
     //      1: Interface
     //      2: Endpoint
     //      3: Other
     //      _: Reserved
-    //pub const REQ_TYPE_TO_DEVICE: u8 = 0;
+    pub const REQ_TYPE_TO_DEVICE: u8 = 0;
     pub const REQ_TYPE_TO_INTERFACE: u8 = 1;
     //pub const REQ_TYPE_TO_ENDPOINT: u8 = 2;
     //pub const REQ_TYPE_TO_OTHER: u8 = 3;

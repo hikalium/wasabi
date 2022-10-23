@@ -524,6 +524,39 @@ impl Xhci {
         }
         Ok(())
     }
+    async fn request_read_vendor_device<T: Sized>(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut CommandRing,
+        request: u8,
+        index: u16,
+        value: u16,
+        buf: Pin<&mut [T]>,
+    ) -> Result<()> {
+        ctrl_ep_ring.push(
+            SetupStageTrb::new(
+                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                    | SetupStageTrb::REQ_TYPE_TYPE_VENDOR
+                    | SetupStageTrb::REQ_TYPE_TO_DEVICE,
+                request,
+                value,
+                index,
+                (buf.len() * size_of::<T>()) as u16,
+            )
+            .into(),
+        )?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
+        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
+        self.notify_ep(slot, 1);
+        TransferEventFuture::new_with_timeout(
+            &mut self.primary_event_ring,
+            trb_ptr_waiting,
+            10 * 1000,
+        )
+        .await?
+        .ok_or(Error::Failed("Timed out"))?
+        .completed()
+    }
     async fn handle_ax88179(
         &mut self,
         port: usize,
@@ -541,43 +574,34 @@ impl Xhci {
                 ep_desc_list.push(*e);
             }
         }
+        /*
         let mut ep_rings = self
             .setup_endpoints(port, slot, input_context, &ep_desc_list)
             .await?;
-        loop {
-            let event_trb =
-                TransferEventFuture::new_on_slot(&mut self.primary_event_ring, slot).await;
-            match event_trb {
-                Ok(Some(trb)) => {
-                    let transfer_trb_ptr = trb.data() as usize;
-                    let report = unsafe {
-                        Mmio::<[u8; 4096]>::from_raw(
-                            *(transfer_trb_ptr as *const usize) as *mut [u8; 4096],
-                        )
-                    };
-                    println!(
-                        "slot = {}, dci = {}, length = {}",
-                        slot,
-                        trb.dci(),
-                        trb.transfer_length()
-                    );
-                    hexdump(&report.as_ref()[0..16]);
-                    if let Some(ref mut tring) = ep_rings[trb.dci()] {
-                        tring.dequeue_trb(transfer_trb_ptr)?;
-                        self.notify_ep(slot, trb.dci());
-                    }
-                }
-                Ok(None) => {
-                    // Timed out. Do nothing.
-                }
-                Err(e) => {
-                    println!("e: {:?}", e);
-                }
-            }
-            if !portsc.ccs() {
-                return Err(Error::FailedString(format!("port {} disconnected", port)));
-            }
-        }
+        */
+        let mut mac = Vec::<u8>::new();
+        mac.resize(6, 0);
+        let mut mac = Box::into_pin(mac.into_boxed_slice());
+        self.request_read_vendor_device(
+            slot,
+            ctrl_ep_ring,
+            0x01, /* Access to MAC  */
+            6,
+            0x10, /* Node ID */
+            mac.as_mut(),
+        )
+        .await?;
+        println!(
+            "MAC Addr: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            mac.as_ref()[0],
+            mac.as_ref()[1],
+            mac.as_ref()[2],
+            mac.as_ref()[3],
+            mac.as_ref()[4],
+            mac.as_ref()[5],
+        );
+        // https://github.com/lwhsu/if_axge-kmod/blob/master/if_axge.c#L793
+        Ok(())
     }
     async fn setup_endpoints(
         &mut self,
