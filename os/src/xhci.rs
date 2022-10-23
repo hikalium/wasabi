@@ -364,6 +364,30 @@ impl Xhci {
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
+    async fn request_set_ethernet_packet_filter(
+        &mut self,
+        slot: u8,
+        ctrl_ep_ring: &mut CommandRing,
+        filter_bmp: u8,
+    ) -> Result<()> {
+        // [usbcdc11.pdf] Table 46: Class-Specific Request Codes
+        ctrl_ep_ring.push(
+            SetupStageTrb::new(
+                SetupStageTrb::REQ_TYPE_TYPE_CLASS | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+                0x43, /* SET_ETHERNET_PACKET_FILTER */
+                filter_bmp as u16,
+                0,
+                0,
+            )
+            .into(),
+        )?;
+        let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
+        self.notify_ep(slot, 1);
+        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+            .await?
+            .ok_or(Error::Failed("Timed out"))?
+            .completed()
+    }
     pub async fn request_report_bytes(
         &mut self,
         slot: u8,
@@ -505,11 +529,11 @@ impl Xhci {
             //ctrl_ep_ring.reset();
         }
         let device_descriptor = self.request_device_descriptor(slot, ctrl_ep_ring).await?;
-
+        println!("{:?}", device_descriptor);
         let descriptors = self
             .request_config_descriptor_and_rest(slot, ctrl_ep_ring)
             .await?;
-        println!("{:?}", device_descriptor);
+        println!("{:?}", descriptors);
         if device_descriptor.manufacturer_idx != 0 {
             let vendor_name = self
                 .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.manufacturer_idx)
@@ -526,11 +550,127 @@ impl Xhci {
         } else {
             println!("Product is not available");
         }
-        let mut last_config: Option<ConfigDescriptor> = None;
-        let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
-        let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
-        if device_descriptor.device_class == 0 {
+        if device_descriptor.serial_idx != 0 {
+            let serial = self
+                .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.serial_idx)
+                .await?;
+            println!("Serial: {}", serial);
+        } else {
+            println!("Serial is not available");
+        }
+        if device_descriptor.vendor_id == 0x0bda
+            && (device_descriptor.product_id == 0x8153 || device_descriptor.product_id == 0x8151)
+        {
+            let mut ep_desc_list = Vec::new();
+            for d in &descriptors {
+                if let UsbDescriptor::Endpoint(e) = d {
+                    ep_desc_list.push(*e);
+                }
+            }
+            println!("rtl8153/8151!");
+            for i in 0..16 {
+                if let Ok(s) = self.request_string_descriptor(slot, ctrl_ep_ring, i).await {
+                    println!("string_desc[{}] = {}", i, s);
+                }
+            }
+            let mut input_ctrl_ctx = InputControlContext::default();
+            input_ctrl_ctx.add_context(0)?;
+            const EP_RING_NONE: Option<TransferRing> = None;
+            let mut ep_rings = [EP_RING_NONE; 32];
+            let mut last_dci = 1;
+            for ep_desc in ep_desc_list {
+                match EndpointType::from(&ep_desc) {
+                    EndpointType::BulkIn => {
+                        println!("BulkIn!: {:?}", ep_desc);
+                        let tring = TransferRing::new()?;
+                        input_ctrl_ctx.add_context(ep_desc.dci())?;
+                        input_context.set_ep_ctx(
+                            ep_desc.dci(),
+                            EndpointContext::new_bulk_in_endpoint(
+                                portsc.max_packet_size()?,
+                                tring.ring_phys_addr(),
+                                portsc.port_speed(),
+                                ep_desc.interval,
+                                8,
+                            )?,
+                        )?;
+                        last_dci = max(last_dci, ep_desc.dci());
+                        ep_rings[ep_desc.dci()] = Some(tring);
+                    }
+                    EndpointType::BulkOut => {
+                        println!("BulkOut!: {:?}", ep_desc);
+                        let tring = TransferRing::new()?;
+                        input_ctrl_ctx.add_context(ep_desc.dci())?;
+                        input_context.set_ep_ctx(
+                            ep_desc.dci(),
+                            EndpointContext::new_bulk_out_endpoint(
+                                portsc.max_packet_size()?,
+                                tring.ring_phys_addr(),
+                                portsc.port_speed(),
+                                ep_desc.interval,
+                                8,
+                            )?,
+                        )?;
+                        last_dci = max(last_dci, ep_desc.dci());
+                        ep_rings[ep_desc.dci()] = Some(tring);
+                    }
+                    _ => {
+                        println!("Ignoring {:?}", ep_desc);
+                    }
+                }
+            }
+            input_context.set_last_valid_dci(last_dci)?;
+            input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
+            let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
+            self.send_command(cmd).await?.completed()?;
+            // 4.6.6 Configure Endpoint
+            // When configuring or deconfiguring a device, only after completing a successful
+            // Configure Endpoint Command and a successful USB SET_CONFIGURATION
+            // request may software schedule data transfers through a newly enabled endpoint
+            // or Stream Transfer Ring of the Device Slot.
+            for (dci, tring) in ep_rings.iter_mut().enumerate() {
+                match tring {
+                    Some(tring) => {
+                        tring.fill_ring()?;
+                        self.notify_ep(slot, dci);
+                    }
+                    None => {}
+                }
+            }
+            println!("setup done!");
+            self.request_set_ethernet_packet_filter(slot, ctrl_ep_ring, 0b11111)
+                .await?;
+            println!("filter cleared!");
+            loop {
+                let event_trb =
+                    TransferEventFuture::new_on_slot(&mut self.primary_event_ring, slot).await;
+                match event_trb {
+                    Ok(Some(trb)) => {
+                        let transfer_trb_ptr = trb.data() as usize;
+                        let report = unsafe {
+                            Mmio::<[u8; 8]>::from_raw(
+                                *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
+                            )
+                        };
+                        println!("recv: {:?}", report.as_ref());
+                        if let Some(ref mut tring) = ep_rings[trb.dci()] {
+                            tring.dequeue_trb(transfer_trb_ptr)?;
+                            self.notify_ep(slot, trb.dci());
+                        }
+                    }
+                    Ok(None) => {
+                        // Timed out. Do nothing.
+                    }
+                    Err(e) => {
+                        println!("e: {:?}", e);
+                    }
+                }
+            }
+        } else if device_descriptor.device_class == 0 {
             // Device class is derived from Interface Descriptor
+            let mut last_config: Option<ConfigDescriptor> = None;
+            let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
+            let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
             for d in &descriptors {
                 println!("{:?}", d);
             }

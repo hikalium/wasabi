@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::volatile::Volatile;
 use crate::xhci::registers::UsbMode;
 use crate::xhci::EndpointType;
@@ -61,6 +61,70 @@ impl EndpointContext {
         };
         let mut ep = unsafe { Self::new() };
         ep.set_ep_type(EndpointType::InterruptIn)?;
+        ep.set_dequeue_cycle_state(true)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.data[0] = (interval as u32) << 16;
+        ep.average_trb_length = average_trb_length;
+        ep.max_esit_payload_low = max_packet_size; // 4.14.2
+        Ok(ep)
+    }
+    pub fn new_bulk_in_endpoint(
+        max_packet_size: u16,
+        tr_dequeue_ptr: u64,
+        mode: UsbMode,
+        interval_from_ep_desc: u8,
+        average_trb_length: u16,
+    ) -> Result<Self> {
+        // See [xhci] Table 6-12
+        let interval = match mode {
+            UsbMode::LowSpeed | UsbMode::FullSpeed => {
+                // interval_ms == 2^interval / 8 == interval_from_ep_desc
+                interval_from_ep_desc.ilog2() as u8 + 3
+            }
+            UsbMode::HighSpeed | UsbMode::SuperSpeed => interval_from_ep_desc - 1,
+            mode => {
+                return Err(Error::FailedString(format!(
+                    "Failed to calc interval for {:?}",
+                    mode
+                )))
+            }
+        };
+        let mut ep = unsafe { Self::new() };
+        ep.set_ep_type(EndpointType::BulkIn)?;
+        ep.set_dequeue_cycle_state(true)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.data[0] = (interval as u32) << 16;
+        ep.average_trb_length = average_trb_length;
+        ep.max_esit_payload_low = max_packet_size; // 4.14.2
+        Ok(ep)
+    }
+    pub fn new_bulk_out_endpoint(
+        max_packet_size: u16,
+        tr_dequeue_ptr: u64,
+        mode: UsbMode,
+        interval_from_ep_desc: u8,
+        average_trb_length: u16,
+    ) -> Result<Self> {
+        // See [xhci] Table 6-12
+        let interval = match mode {
+            UsbMode::LowSpeed | UsbMode::FullSpeed => {
+                // interval_ms == 2^interval / 8 == interval_from_ep_desc
+                interval_from_ep_desc.ilog2() as u8 + 3
+            }
+            UsbMode::HighSpeed | UsbMode::SuperSpeed => interval_from_ep_desc - 1,
+            mode => {
+                return Err(Error::FailedString(format!(
+                    "Failed to calc interval for {:?}",
+                    mode
+                )))
+            }
+        };
+        let mut ep = unsafe { Self::new() };
+        ep.set_ep_type(EndpointType::BulkOut)?;
         ep.set_dequeue_cycle_state(true)?;
         ep.set_error_count(3)?;
         ep.set_max_packet_size(max_packet_size);
