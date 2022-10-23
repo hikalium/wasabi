@@ -32,6 +32,7 @@ use crate::util::PAGE_SIZE;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::fmt::Debug;
+use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -475,6 +476,7 @@ impl Xhci {
         ctrl_ep_ring: &mut CommandRing,
     ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
+        println!("Port speed: {:?}", portsc.port_speed());
         if portsc.port_speed() == UsbMode::FullSpeed {
             // For full speed device, we should read the first 8 bytes of the device descriptor to
             // get proper MaxPacketSize parameter.
@@ -508,13 +510,22 @@ impl Xhci {
             .request_config_descriptor_and_rest(slot, ctrl_ep_ring)
             .await?;
         println!("{:?}", device_descriptor);
-        let vendor_name = self
-            .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.manufacturer_idx)
-            .await?;
-        let product_name = self
-            .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.product_idx)
-            .await?;
-        println!("{} {}", vendor_name, product_name);
+        if device_descriptor.manufacturer_idx != 0 {
+            let vendor_name = self
+                .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.manufacturer_idx)
+                .await?;
+            println!("Vendor: {}", vendor_name);
+        } else {
+            println!("Vendor is not available");
+        }
+        if device_descriptor.product_idx != 0 {
+            let product_name = self
+                .request_string_descriptor(slot, ctrl_ep_ring, device_descriptor.product_idx)
+                .await?;
+            println!("Product: {}", product_name);
+        } else {
+            println!("Product is not available");
+        }
         let mut last_config: Option<ConfigDescriptor> = None;
         let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
         let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
@@ -641,6 +652,11 @@ impl Xhci {
                     }
                 }
             }
+        } else {
+            println!(
+                "Device class {} is not supported yet",
+                device_descriptor.device_class
+            );
         }
         Ok(())
     }
@@ -674,11 +690,20 @@ impl Xhci {
         )?;
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
+        println!("Sending AddressDeviceCommand...");
         self.send_command(cmd).await?.completed()?;
+        println!("Device Addressed!");
         self.device_ready(port, slot, &mut input_context, &mut ctrl_ep_ring)
             .await
     }
     async fn enable_slot(&mut self, port: usize) -> Result<()> {
+        let portsc = self.portsc.get(port)?;
+        if !portsc.ccs() {
+            return Err(Error::FailedString(format!(
+                "port {} disconnected while initialization",
+                port
+            )));
+        }
         let slot = self
             .send_command(GenericTrbEntry::cmd_enable_slot())
             .await?
@@ -712,22 +737,43 @@ impl Xhci {
         self.enable_slot(port).await
     }
     async fn poll(&mut self) -> Result<()> {
-        let port = self
-            .portsc
-            .iter()
-            .find_map(|PortScIteratorItem { port, portsc }| {
+        // 4.3 USB Device Initialization
+        // USB3: Disconnected -> Polling -> Enabled
+        // USB2: Disconnected -> Disabled
+        if let Some((port, portsc)) =
+            self.portsc
+                .iter()
+                .rev()
+                .find_map(|PortScIteratorItem { port, portsc }| {
+                    if portsc.csc() {
+                        portsc.clear_csc();
+                        Some((port, portsc))
+                    } else {
+                        None
+                    }
+                })
+        {
+            if portsc.ccs() {
+                println!("Port {}: Device attached: {:?}", port, portsc);
                 if portsc.state() == PortState::Disabled {
-                    Some(port)
-                } else {
-                    None
+                    // USB2
+                    if let Err(e) = self.enable_port(port).await {
+                        println!(
+                            "Failed to initialize an USB2 device on port {}: {:?}",
+                            port, e
+                        );
+                    }
+                } else if portsc.state() == PortState::Enabled {
+                    // USB3
+                    if let Err(e) = self.enable_slot(port).await {
+                        println!(
+                            "Failed to initialize an USB3 device on port {}: {:?}",
+                            port, e
+                        );
+                    }
                 }
-            });
-        if let Some(port) = port {
-            if let Err(e) = self.enable_port(port).await {
-                println!(
-                    "Failed to initialize an USB device on port {}: {:?}",
-                    port, e
-                );
+            } else {
+                println!("Port {}: Device detached: {:?}", port, portsc);
             }
         }
         Ok(())

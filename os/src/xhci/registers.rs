@@ -1,8 +1,8 @@
 extern crate alloc;
 
 use crate::arch::x86_64::busy_loop_hint;
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::pci::BarMem64;
 use crate::print;
 use crate::println;
@@ -80,16 +80,19 @@ pub enum PortState {
     },
 }
 impl PortScWrapper {
+    const PRESERVE_MASK: u32 = 0b01001111000000011111111111101001;
     const BIT_CURRENT_CONNECT_STATUS: u32 = 1 << 0;
     const BIT_PORT_ENABLED_DISABLED: u32 = 1 << 1;
     const BIT_PORT_RESET: u32 = 1 << 4;
     const BIT_PORT_POWER: u32 = 1 << 9;
+    const BIT_CONNECT_STATUS_CHANGE: u32 = 1 << 17;
+    const BIT_PORT_RESET_CHANGE: u32 = 1 << 21;
     pub fn value(&self) -> u32 {
         unsafe { read_volatile(self.ptr) }
     }
     pub fn set_bits(&self, bits: u32) {
         let old = self.value();
-        unsafe { write_volatile(self.ptr, old | bits) }
+        unsafe { write_volatile(self.ptr, (old & Self::PRESERVE_MASK) | bits) }
     }
     pub fn reset(&self) {
         self.set_bits(Self::BIT_PORT_POWER);
@@ -120,6 +123,20 @@ impl PortScWrapper {
     pub fn pp(&self) -> bool {
         // PP - Port Power - RWS
         self.value() & Self::BIT_PORT_POWER != 0
+    }
+    pub fn csc(&self) -> bool {
+        // CSC - Connect Status Change - RW1CS
+        self.value() & Self::BIT_CONNECT_STATUS_CHANGE != 0
+    }
+    pub fn clear_csc(&self) {
+        self.set_bits(Self::BIT_CONNECT_STATUS_CHANGE);
+    }
+    pub fn prc(&self) -> bool {
+        // PRC - Port Reset Change - RW1CS
+        self.value() & Self::BIT_PORT_RESET_CHANGE != 0
+    }
+    pub fn clear_prc(&self) {
+        self.set_bits(Self::BIT_PORT_RESET_CHANGE);
     }
     pub fn port_speed(&self) -> UsbMode {
         // Port Speed - ROS
@@ -179,14 +196,31 @@ pub struct PortScIteratorItem {
 pub struct PortScIterator<'a> {
     list: &'a PortSc,
     next_index: usize,
+    next_index_back: usize,
 }
 impl<'a> Iterator for PortScIterator<'a> {
     type Item = PortScIteratorItem;
     fn next(&mut self) -> Option<Self::Item> {
-        let port = self.next_index + 1;
-        let portsc = self.list.get(port).ok()?;
-        self.next_index += 1;
-        Some(PortScIteratorItem { port, portsc })
+        if self.next_index > self.next_index_back {
+            None
+        } else {
+            let port = self.next_index + 1;
+            let portsc = self.list.get(port).ok()?;
+            self.next_index += 1;
+            Some(PortScIteratorItem { port, portsc })
+        }
+    }
+}
+impl<'a> DoubleEndedIterator for PortScIterator<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.next_index > self.next_index_back {
+            None
+        } else {
+            let port = self.next_index_back - 1;
+            let portsc = self.list.get(port).ok()?;
+            self.next_index_back -= 1;
+            Some(PortScIteratorItem { port, portsc })
+        }
     }
 }
 // Interface to access PORTSC registers
@@ -217,6 +251,7 @@ impl PortSc {
         PortScIterator {
             list: self,
             next_index: 0,
+            next_index_back: self.num_ports,
         }
     }
 }
