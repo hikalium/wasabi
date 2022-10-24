@@ -524,27 +524,13 @@ impl Xhci {
         }
         Ok(())
     }
-    async fn request_read_vendor_device<T: Sized>(
+    async fn request_read_mac_addr(
         &mut self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
-        request: u8,
-        index: u16,
-        value: u16,
-        buf: Pin<&mut [T]>,
+        buf: Pin<&mut [u8; 6]>,
     ) -> Result<()> {
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
-                    | SetupStageTrb::REQ_TYPE_TYPE_VENDOR
-                    | SetupStageTrb::REQ_TYPE_TO_DEVICE,
-                request,
-                value,
-                index,
-                (buf.len() * size_of::<T>()) as u16,
-            )
-            .into(),
-        )?;
+        ctrl_ep_ring.push(SetupStageTrb::new(0xC0, 0x01, 0x0010, 0x0006, 0x0006).into())?;
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);
@@ -566,31 +552,28 @@ impl Xhci {
         device_descriptor: &DeviceDescriptor,
         descriptors: &Vec<UsbDescriptor>,
     ) -> Result<()> {
+        println!("setting config");
+        self.request_set_config(slot, ctrl_ep_ring, 1).await?;
+        println!("config set done");
+        /*
         let portsc = self.portsc.get(port)?;
         println!("AX88179!");
+        // Init PHY
         let mut ep_desc_list = Vec::new();
         for d in descriptors {
             if let UsbDescriptor::Endpoint(e) = d {
                 ep_desc_list.push(*e);
             }
         }
-        /*
-        let mut ep_rings = self
+        let ep_rings = self
             .setup_endpoints(port, slot, input_context, &ep_desc_list)
             .await?;
         */
-        let mut mac = Vec::<u8>::new();
-        mac.resize(6, 0);
-        let mut mac = Box::into_pin(mac.into_boxed_slice());
-        self.request_read_vendor_device(
-            slot,
-            ctrl_ep_ring,
-            0x01, /* Access to MAC  */
-            6,
-            0x10, /* Node ID */
-            mac.as_mut(),
-        )
-        .await?;
+        //https://github.com/lwhsu/if_axge-kmod/blob/master/if_axge.c#L401
+        let mac = [0u8; 6];
+        let mut mac = Box::pin(mac);
+        self.request_read_mac_addr(slot, ctrl_ep_ring, mac.as_mut())
+            .await?;
         println!(
             "MAC Addr: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
             mac.as_ref()[0],
@@ -784,14 +767,6 @@ impl Xhci {
                 println!("Serial: {}", serial);
             } else {
                 println!("Serial is not available");
-            }
-            for i in 1..8 {
-                if let Ok(s) = self
-                    .request_string_descriptor(slot, ctrl_ep_ring, lang_id, i)
-                    .await
-                {
-                    println!("string_desc[{}] = {}", i, s);
-                }
             }
         }
         if device_descriptor.vendor_id == 2965 && device_descriptor.product_id == 6032 {
