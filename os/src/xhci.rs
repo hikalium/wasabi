@@ -530,7 +530,9 @@ impl Xhci {
         ctrl_ep_ring: &mut CommandRing,
         buf: Pin<&mut [u8; 6]>,
     ) -> Result<()> {
-        ctrl_ep_ring.push(SetupStageTrb::new(0xC0, 0x01, 0x0010, 0x0006, 0x0006).into())?;
+        // https://github.com/lwhsu/if_axge-kmod/blob/8afe945e769c87f2eaaf62468e30fe860108d26f/if_axge.c#L414
+        ctrl_ep_ring
+            .push(SetupStageTrb::new_vendor_device_in(0x01, 0x0010, 0x0006, 0x0006).into())?;
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1);

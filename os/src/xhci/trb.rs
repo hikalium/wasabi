@@ -302,6 +302,17 @@ impl SetupStageTrb {
     pub const REQ_SET_CONFIGURATION: u8 = 9;
     pub const REQ_SET_INTERFACE: u8 = 11;
     pub const REQ_SET_PROTOCOL: u8 = 0x0b;
+    pub fn new_vendor_device_in(request: u8, value: u16, index: u16, length: u16) -> Self {
+        Self::new(
+            Self::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | Self::REQ_TYPE_TYPE_VENDOR
+                | Self::REQ_TYPE_TO_DEVICE,
+            request,
+            value,
+            index,
+            length,
+        )
+    }
     pub fn new(request_type: u8, request: u8, value: u16, index: u16, length: u16) -> Self {
         // Table 4-7: USB SETUP Data to Data Stage TRB and Status Stage TRB mapping
         const TRT_NO_DATA_STAGE: u32 = 0;
