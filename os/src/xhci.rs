@@ -374,30 +374,6 @@ impl Xhci {
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
-    async fn request_set_ethernet_packet_filter(
-        &mut self,
-        slot: u8,
-        ctrl_ep_ring: &mut CommandRing,
-        filter_bmp: u8,
-    ) -> Result<()> {
-        // [usbcdc11.pdf] Table 46: Class-Specific Request Codes
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_TYPE_CLASS | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
-                0x43, /* SET_ETHERNET_PACKET_FILTER */
-                filter_bmp as u16,
-                0,
-                0,
-            )
-            .into(),
-        )?;
-        let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
-        self.notify_ep(slot, 1);
-        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .ok_or(Error::Failed("Timed out"))?
-            .completed()
-    }
     pub async fn request_report_bytes(
         &mut self,
         slot: u8,
@@ -571,8 +547,7 @@ impl Xhci {
                 }
                 EndpointType::BulkIn => {
                     println!("BulkIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
-                    let mut tring = TransferRing::new(4096)?;
-                    tring.fill_ring()?;
+                    let tring = TransferRing::new(4096)?;
                     input_ctrl_ctx.add_context(ep_desc.dci())?;
                     input_context.set_ep_ctx(
                         ep_desc.dci(),
@@ -613,12 +588,21 @@ impl Xhci {
         input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
         let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
-        for (dci, tring) in ep_rings.iter_mut().enumerate() {
-            match tring {
-                Some(tring) => {
+        for ep_desc in ep_desc_list {
+            match EndpointType::from(ep_desc) {
+                EndpointType::InterruptIn => {
+                    let dci = ep_desc.dci();
+                    let tring = ep_rings[dci].as_mut().expect("tring not found");
+                    tring.fill_ring()?;
                     self.notify_ep(slot, dci);
                 }
-                None => {}
+                EndpointType::BulkIn => {
+                    let dci = ep_desc.dci();
+                    let tring = ep_rings[dci].as_mut().expect("tring not found");
+                    tring.fill_ring()?;
+                    self.notify_ep(slot, dci);
+                }
+                _ => {}
             }
         }
         println!("Endpoint setup done!");
@@ -717,16 +701,8 @@ impl Xhci {
         }
         if device_descriptor.vendor_id == 2965 && device_descriptor.product_id == 6032 {
             println!("AX88179!");
-            ax88179::attach_usb_device(
-                self,
-                port,
-                slot,
-                input_context,
-                ctrl_ep_ring,
-                &device_descriptor,
-                &descriptors,
-            )
-            .await?;
+            ax88179::attach_usb_device(self, port, slot, input_context, ctrl_ep_ring, &descriptors)
+                .await?;
         } else if device_descriptor.vendor_id == 0x0bda
             && (device_descriptor.product_id == 0x8153 || device_descriptor.product_id == 0x8151)
         {
@@ -834,11 +810,6 @@ impl Xhci {
                 match event_trb {
                     Ok(Some(trb)) => {
                         let transfer_trb_ptr = trb.data() as usize;
-                        let report = unsafe {
-                            Mmio::<[u8; 4096]>::from_raw(
-                                *(transfer_trb_ptr as *const usize) as *mut [u8; 4096],
-                            )
-                        };
                         println!(
                             "slot = {}, dci = {}, length = {}",
                             slot,

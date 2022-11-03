@@ -1,11 +1,9 @@
 extern crate alloc;
 
-use crate::arch::x86_64::paging::Mmio;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::delay;
 use crate::println;
-use crate::usb::DeviceDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::xhci::context::InputContext;
 use crate::xhci::future::TransferEventFuture;
@@ -36,7 +34,11 @@ const MAC_REG_CLK_SELECT_BCS: u8 = 0x01;
 const MAC_REG_CLK_SELECT_ACS: u8 = 0x02;
 
 const MAC_REG_RX_CTL: u16 = 0x000b;
-const MAC_REG_RX_CTL_PROMISC: u16 = 0x0001;
+const MAC_REG_RX_CTL_ACCEPT_MULTICAST: u16 = 0x0010;
+const MAC_REG_RX_CTL_ACCEPT_BROADCAST: u16 = 0x0008;
+const MAC_REG_RX_CTL_PROMISCUOUS: u16 = 0x0001;
+const MAC_REG_RX_CTL_START: u16 = 0x0080;
+const MAC_REG_RX_CTL_ALIGN_IP_HEADER: u16 = 0x0200;
 
 async fn read_from_device<T: Sized>(
     xhci: &mut Xhci,
@@ -132,12 +134,23 @@ pub async fn attach_usb_device(
     slot: u8,
     input_context: &mut Pin<&mut InputContext>,
     ctrl_ep_ring: &mut CommandRing,
-    device_descriptor: &DeviceDescriptor,
     descriptors: &Vec<UsbDescriptor>,
 ) -> Result<()> {
     xhci.request_set_config(slot, ctrl_ep_ring, 1).await?;
+    let mut ep_desc_list = Vec::new();
+    for d in descriptors {
+        if let UsbDescriptor::Endpoint(e) = d {
+            ep_desc_list.push(*e);
+        }
+    }
+    let mut ep_rings = xhci
+        .setup_endpoints(port, slot, input_context, &ep_desc_list)
+        .await?;
+    let portsc = xhci.portsc(port)?;
     // Power up the PHY
     // https://github.com/lwhsu/if_axge-kmod/blob/be7510b1bc7e5974963fe17e67462d3689e80631/if_axge.c#L367
+    // Init PHY
+    // https://github.com/lwhsu/if_axge-kmod/blob/be7510b1bc7e5974963fe17e67462d3689e80631/if_axge.c#L793
     write_mac_reg_u16(
         xhci,
         slot,
@@ -147,6 +160,7 @@ pub async fn attach_usb_device(
         0,
     )
     .await?;
+    delay().await;
     write_mac_reg_u16(
         xhci,
         slot,
@@ -173,7 +187,11 @@ pub async fn attach_usb_device(
         ctrl_ep_ring,
         REQUEST_ACCESS_MAC,
         MAC_REG_RX_CTL,
-        MAC_REG_RX_CTL_PROMISC | 0x80,
+        MAC_REG_RX_CTL_ACCEPT_MULTICAST
+            | MAC_REG_RX_CTL_ACCEPT_BROADCAST
+            | MAC_REG_RX_CTL_PROMISCUOUS
+            | MAC_REG_RX_CTL_START
+            | MAC_REG_RX_CTL_ALIGN_IP_HEADER,
     )
     .await?;
     delay().await;
@@ -189,34 +207,17 @@ pub async fn attach_usb_device(
         mac.as_ref()[4],
         mac.as_ref()[5],
     );
-    let mut ep_desc_list = Vec::new();
-    for d in descriptors {
-        if let UsbDescriptor::Endpoint(e) = d {
-            ep_desc_list.push(*e);
-        }
-    }
-    let mut ep_rings = xhci
-        .setup_endpoints(port, slot, input_context, &ep_desc_list)
-        .await?;
-    let portsc = xhci.portsc(port)?;
-
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
             Ok(Some(trb)) => {
                 let transfer_trb_ptr = trb.data() as usize;
-                let report = unsafe {
-                    Mmio::<[u8; 4096]>::from_raw(
-                        *(transfer_trb_ptr as *const usize) as *mut [u8; 4096],
-                    )
-                };
                 println!(
                     "slot = {}, dci = {}, length = {}",
                     slot,
                     trb.dci(),
                     trb.transfer_length()
                 );
-                // hexdump(&report.as_ref()[0..trb.transfer_length()]);
                 if let Some(ref mut tring) = ep_rings[trb.dci()] {
                     tring.dequeue_trb(transfer_trb_ptr)?;
                     xhci.notify_ep(slot, trb.dci());
