@@ -76,7 +76,10 @@ impl GenericTrbEntry {
     const CTRL_BIT_INTERRUPT_ON_SHORT_PACKET: u32 = 1 << 2;
     const CTRL_BIT_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
     const CTRL_BIT_IMMEDIATE_DATA: u32 = 1 << 6;
+
+    const CTRL_BIT_DATA_DIR_OUT: u32 = 0 << 16;
     const CTRL_BIT_DATA_DIR_IN: u32 = 1 << 16;
+
     pub fn data(&self) -> u64 {
         self.data.read()
     }
@@ -277,7 +280,7 @@ impl SetupStageTrb {
     //      0: Host to Device
     //      1: Device to Host
     pub const REQ_TYPE_DIR_DEVICE_TO_HOST: u8 = 1 << 7;
-    //pub const REQ_TYPE_DIR_HOST_TO_DEVICE: u8 = 0 << 7;
+    pub const REQ_TYPE_DIR_HOST_TO_DEVICE: u8 = 0 << 7;
     // bmRequest bit[5..=6]: Request Type
     //      0: Standard
     //      1: Class
@@ -305,6 +308,17 @@ impl SetupStageTrb {
     pub fn new_vendor_device_in(request: u8, value: u16, index: u16, length: u16) -> Self {
         Self::new(
             Self::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | Self::REQ_TYPE_TYPE_VENDOR
+                | Self::REQ_TYPE_TO_DEVICE,
+            request,
+            value,
+            index,
+            length,
+        )
+    }
+    pub fn new_vendor_device_out(request: u8, value: u16, index: u16, length: u16) -> Self {
+        Self::new(
+            Self::REQ_TYPE_DIR_HOST_TO_DEVICE
                 | Self::REQ_TYPE_TYPE_VENDOR
                 | Self::REQ_TYPE_TO_DEVICE,
             request,
@@ -354,6 +368,16 @@ impl DataStageTrb {
             option: (buf.len() * size_of::<T>()) as u32,
             control: (TrbType::DataStage as u32) << 10
                 | GenericTrbEntry::CTRL_BIT_DATA_DIR_IN
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_SHORT_PACKET,
+        }
+    }
+    pub fn new_out<T: Sized>(buf: Pin<&mut [T]>) -> Self {
+        Self {
+            buf: buf.as_ptr() as u64,
+            option: (buf.len() * size_of::<T>()) as u32,
+            control: (TrbType::DataStage as u32) << 10
+                | GenericTrbEntry::CTRL_BIT_DATA_DIR_OUT
                 | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION
                 | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_SHORT_PACKET,
         }
