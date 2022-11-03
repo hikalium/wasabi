@@ -35,6 +35,9 @@ const MAC_REG_CLK_SELECT: u16 = 0x0033;
 const MAC_REG_CLK_SELECT_BCS: u8 = 0x01;
 const MAC_REG_CLK_SELECT_ACS: u8 = 0x02;
 
+const MAC_REG_RX_CTL: u16 = 0x000b;
+const MAC_REG_RX_CTL_PROMISC: u16 = 0x0001;
+
 async fn read_from_device<T: Sized>(
     xhci: &mut Xhci,
     slot: u8,
@@ -163,6 +166,17 @@ pub async fn attach_usb_device(
         MAC_REG_CLK_SELECT_ACS | MAC_REG_CLK_SELECT_BCS,
     )
     .await?;
+    delay().await;
+    write_mac_reg_u16(
+        xhci,
+        slot,
+        ctrl_ep_ring,
+        REQUEST_ACCESS_MAC,
+        MAC_REG_RX_CTL,
+        MAC_REG_RX_CTL_PROMISC | 0x80,
+    )
+    .await?;
+    delay().await;
 
     // Read MAC Address
     let mac = request_read_mac_addr(xhci, slot, ctrl_ep_ring).await?;

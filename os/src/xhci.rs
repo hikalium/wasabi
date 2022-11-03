@@ -553,7 +553,8 @@ impl Xhci {
             match EndpointType::from(ep_desc) {
                 EndpointType::InterruptIn => {
                     println!("InterruptIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
-                    let tring = TransferRing::new(4096)?;
+                    let mut tring = TransferRing::new(4096)?;
+                    tring.fill_ring()?;
                     input_ctrl_ctx.add_context(ep_desc.dci())?;
                     input_context.set_ep_ctx(
                         ep_desc.dci(),
@@ -570,7 +571,8 @@ impl Xhci {
                 }
                 EndpointType::BulkIn => {
                     println!("BulkIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
-                    let tring = TransferRing::new(4096)?;
+                    let mut tring = TransferRing::new(4096)?;
+                    tring.fill_ring()?;
                     input_ctrl_ctx.add_context(ep_desc.dci())?;
                     input_context.set_ep_ctx(
                         ep_desc.dci(),
@@ -614,7 +616,6 @@ impl Xhci {
         for (dci, tring) in ep_rings.iter_mut().enumerate() {
             match tring {
                 Some(tring) => {
-                    tring.fill_ring()?;
                     self.notify_ep(slot, dci);
                 }
                 None => {}
