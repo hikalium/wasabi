@@ -9,6 +9,7 @@ pub mod trb;
 use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::paging::IoBox;
 use crate::arch::x86_64::paging::Mmio;
+use crate::ax88179;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::yield_execution;
@@ -19,7 +20,6 @@ use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
-use crate::print::hexdump;
 use crate::println;
 use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorIterator;
@@ -57,6 +57,7 @@ use registers::OperationalRegisters;
 use registers::PortLinkState;
 use registers::PortSc;
 use registers::PortScIteratorItem;
+use registers::PortScWrapper;
 use registers::PortState;
 use registers::RuntimeRegisters;
 use registers::UsbMode;
@@ -201,10 +202,16 @@ impl Xhci {
 
         Ok(xhc)
     }
+    pub fn portsc(&mut self, port: usize) -> Result<PortScWrapper> {
+        self.portsc.get(port)
+    }
     fn init_primary_event_ring(&mut self) -> Result<()> {
         let eq = &mut self.primary_event_ring;
         unsafe { self.rt_regs.get_unchecked_mut() }.init_irs(0, eq)?;
         Ok(())
+    }
+    pub fn primary_event_ring(&mut self) -> &mut EventRing {
+        &mut self.primary_event_ring
     }
     fn init_slots_and_contexts(&mut self) -> Result<()> {
         let num_slots = self.cap_regs.as_ref().num_of_device_slots();
@@ -244,7 +251,7 @@ impl Xhci {
             write_volatile(&mut self.doorbell_regs.get_unchecked_mut()[0], 0);
         }
     }
-    fn notify_ep(&mut self, slot: u8, dci: usize) {
+    pub fn notify_ep(&mut self, slot: u8, dci: usize) {
         unsafe {
             write_volatile(
                 &mut self.doorbell_regs.get_unchecked_mut()[slot as usize],
@@ -293,7 +300,7 @@ impl Xhci {
         .await?;
         Ok(*desc)
     }
-    async fn request_set_config(
+    pub async fn request_set_config(
         &mut self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
@@ -524,71 +531,7 @@ impl Xhci {
         }
         Ok(())
     }
-    async fn request_read_mac_addr(
-        &mut self,
-        slot: u8,
-        ctrl_ep_ring: &mut CommandRing,
-        buf: Pin<&mut [u8; 6]>,
-    ) -> Result<()> {
-        // https://github.com/lwhsu/if_axge-kmod/blob/8afe945e769c87f2eaaf62468e30fe860108d26f/if_axge.c#L414
-        ctrl_ep_ring
-            .push(SetupStageTrb::new_vendor_device_in(0x01, 0x0010, 0x0006, 0x0006).into())?;
-        let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1);
-        TransferEventFuture::new_with_timeout(
-            &mut self.primary_event_ring,
-            trb_ptr_waiting,
-            10 * 1000,
-        )
-        .await?
-        .ok_or(Error::Failed("Timed out"))?
-        .completed()
-    }
-    async fn handle_ax88179(
-        &mut self,
-        port: usize,
-        slot: u8,
-        input_context: &mut Pin<&mut InputContext>,
-        ctrl_ep_ring: &mut CommandRing,
-        device_descriptor: &DeviceDescriptor,
-        descriptors: &Vec<UsbDescriptor>,
-    ) -> Result<()> {
-        println!("setting config");
-        self.request_set_config(slot, ctrl_ep_ring, 1).await?;
-        println!("config set done");
-        /*
-        let portsc = self.portsc.get(port)?;
-        println!("AX88179!");
-        // Init PHY
-        let mut ep_desc_list = Vec::new();
-        for d in descriptors {
-            if let UsbDescriptor::Endpoint(e) = d {
-                ep_desc_list.push(*e);
-            }
-        }
-        let ep_rings = self
-            .setup_endpoints(port, slot, input_context, &ep_desc_list)
-            .await?;
-        */
-        //https://github.com/lwhsu/if_axge-kmod/blob/master/if_axge.c#L401
-        let mac = [0u8; 6];
-        let mut mac = Box::pin(mac);
-        self.request_read_mac_addr(slot, ctrl_ep_ring, mac.as_mut())
-            .await?;
-        println!(
-            "MAC Addr: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            mac.as_ref()[0],
-            mac.as_ref()[1],
-            mac.as_ref()[2],
-            mac.as_ref()[3],
-            mac.as_ref()[4],
-            mac.as_ref()[5],
-        );
-        // https://github.com/lwhsu/if_axge-kmod/blob/master/if_axge.c#L793
-        Ok(())
-    }
-    async fn setup_endpoints(
+    pub async fn setup_endpoints(
         &mut self,
         port: usize,
         slot: u8,
@@ -773,7 +716,8 @@ impl Xhci {
         }
         if device_descriptor.vendor_id == 2965 && device_descriptor.product_id == 6032 {
             println!("AX88179!");
-            self.handle_ax88179(
+            ax88179::attach_usb_device(
+                self,
                 port,
                 slot,
                 input_context,

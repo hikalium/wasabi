@@ -7,11 +7,8 @@ QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
 		-bios $(OVMF) \
 		-device qemu-xhci \
-		-device usb-mouse \
 		-device usb-host,hostbus=1,hostport=1 \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
-		-netdev user,id=net0 -device usb-net,netdev=net0 \
-		-object filter-dump,id=f1,netdev=net0,file=dump_net0.dat \
 		-netdev user,id=net1 -device rtl8139,netdev=net1 \
 		-object filter-dump,id=f2,netdev=net1,file=dump_net1.dat \
 		-m 1024M \
@@ -24,6 +21,10 @@ QEMU_ARGS=\
 		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
 		--no-reboot \
 		${MORE_QEMU_FLAGS}
+
+# -device usb-mouse \
+# -netdev user,id=net0 -device usb-net,netdev=net0 \
+# -object filter-dump,id=f1,netdev=net0,file=dump_net0.dat \
 
 HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
 

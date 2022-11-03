@@ -23,6 +23,7 @@
 pub mod acpi;
 pub mod allocator;
 pub mod arch;
+pub mod ax88179;
 pub mod boot_info;
 pub mod debug_exit;
 pub mod efi;
