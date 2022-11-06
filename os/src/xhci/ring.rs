@@ -10,13 +10,14 @@ use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
 use crate::xhci::EventRingSegmentTableEntry;
 use alloc::alloc::Layout;
+use alloc::fmt;
+use alloc::fmt::Debug;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::ptr::null_mut;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 
-#[derive(Debug)]
 #[repr(C, align(4096))]
 pub struct TrbRing {
     trb: [GenericTrbEntry; Self::NUM_TRB],
@@ -88,6 +89,15 @@ impl TrbRing {
             .expect("writing to the current index shall not fail")
     }
 }
+impl Debug for TrbRing {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "TrbRing: state: ",)?;
+        for e in self.trb {
+            write!(f, "{}", e.cycle_state() as u8)?;
+        }
+        Ok(())
+    }
+}
 
 pub struct CommandRing {
     ring: IoBox<TrbRing>,
@@ -139,6 +149,7 @@ impl CommandRing {
 // Producer: Software
 // Consumer: xHC
 // Producer is responsible to flip the cycle bits
+// (Consumer will not change the cycle bits)
 pub struct TransferRing {
     ring: IoBox<TrbRing>,
     cycle_state_ours: bool,
@@ -196,14 +207,17 @@ impl TransferRing {
         Ok(())
     }
     pub fn dequeue_trb(&mut self, trb_ptr: usize) -> Result<()> {
-        // Update dequeue_index
         if self.ring.as_ref().trb_ptr(self.dequeue_index) != trb_ptr {
             return Err(Error::Failed("unexpected trb ptr"));
         }
-        // Wrap with num_trbs() - 1 to ignore LinkTrb
-        self.dequeue_index = (self.dequeue_index + 1) % (self.ring.as_ref().num_trbs() - 1);
-        // Update enqeue_index
         let mut_ring = unsafe { self.ring.get_unchecked_mut() };
+        // Dequeue the trb
+        self.dequeue_index += 1;
+        if self.dequeue_index == mut_ring.num_trbs() - 1 {
+            // Dequeue the link trb
+            self.dequeue_index = 0;
+        }
+        // Enqueue the next trb
         mut_ring.advance_index(!self.cycle_state_ours)?;
         if mut_ring.current().trb_type() == TrbType::Link as u32 {
             // Reached to Link TRB. Let's skip it and toggle the cycle.
@@ -212,8 +226,24 @@ impl TransferRing {
         }
         Ok(())
     }
+    pub fn current(&self) -> GenericTrbEntry {
+        self.ring.as_ref().current()
+    }
     pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
+    }
+}
+impl Debug for TransferRing {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "TransferRing @ {:#018X}: di: {}, ei: {}, {:?}",
+            self.ring_phys_addr(),
+            self.dequeue_index,
+            self.ring.as_ref().current_index,
+            self.ring.as_ref(),
+        )?;
+        Ok(())
     }
 }
 

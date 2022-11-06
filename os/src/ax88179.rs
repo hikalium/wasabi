@@ -453,15 +453,18 @@ pub async fn attach_usb_device(
                     trb.dci(),
                     trb.transfer_length()
                 );
-                let transfer_trb_ptr = trb.data() as usize;
-                let data = unsafe {
-                    Mmio::<[u8; 8]>::from_raw(*(transfer_trb_ptr as *const usize) as *mut [u8; 8])
-                };
-                hexdump(data.as_ref());
                 if trb.dci() != 1 {
                     if let Some(ref mut tring) = ep_rings[trb.dci()] {
+                        let cmd = tring.current();
+                        let data = unsafe {
+                            Mmio::<[u8; 8]>::from_raw(*(cmd.data() as *const usize) as *mut [u8; 8])
+                        };
+                        hexdump(data.as_ref());
+                        let transfer_trb_ptr = trb.data() as usize;
                         tring.dequeue_trb(transfer_trb_ptr)?;
+                        println!("{:#018X}", transfer_trb_ptr);
                         xhci.notify_ep(slot, trb.dci());
+                        println!("{:?}", tring)
                     }
                 }
                 let status =

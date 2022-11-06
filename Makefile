@@ -1,6 +1,6 @@
 PROJECT_ROOT:=$(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 OVMF=${PROJECT_ROOT}/third_party/ovmf/RELEASEX64_OVMF.fd
-QEMU=qemu-system-x86_64
+QEMU=sudo qemu-system-x86_64
 PORT_MONITOR?=2222
 
 QEMU_ARGS=\
@@ -8,6 +8,7 @@ QEMU_ARGS=\
 		-bios $(OVMF) \
 		-device qemu-xhci \
 		-device usb-host,hostbus=1,hostport=1 \
+		-device usb-host,hostbus=2,hostport=1.2.1 \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=net1 -device rtl8139,netdev=net1 \
 		-object filter-dump,id=f2,netdev=net1,file=dump_net1.dat \

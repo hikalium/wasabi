@@ -44,6 +44,7 @@ pub mod serial;
 pub mod test_runner;
 pub mod text_area;
 pub mod usb;
+pub mod usb_hid_keyboard;
 pub mod util;
 pub mod volatile;
 pub mod vram;

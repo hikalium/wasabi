@@ -29,6 +29,7 @@ use crate::usb::EndpointDescriptor;
 use crate::usb::InterfaceDescriptor;
 use crate::usb::IntoPinnedMutableSlice;
 use crate::usb::UsbDescriptor;
+use crate::usb_hid_keyboard;
 use crate::util::PAGE_SIZE;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
@@ -124,7 +125,7 @@ impl PciDeviceDriver for XhciDriver {
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
 #[derive(PartialEq, Eq)]
-enum EndpointType {
+pub enum EndpointType {
     IsochOut = 1,
     BulkOut = 2,
     InterruptOut = 3,
@@ -259,7 +260,7 @@ impl Xhci {
             );
         }
     }
-    async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
+    pub async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.push(cmd)?;
         self.notify_xhc();
         CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr)
@@ -323,7 +324,7 @@ impl Xhci {
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
-    async fn request_set_interface(
+    pub async fn request_set_interface(
         &mut self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
@@ -347,7 +348,7 @@ impl Xhci {
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
-    async fn request_set_protocol(
+    pub async fn request_set_protocol(
         &mut self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
@@ -588,21 +589,20 @@ impl Xhci {
         let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
         for ep_desc in ep_desc_list {
+            let dci = ep_desc.dci();
+            let tring = ep_rings[dci].as_mut().expect("tring not found");
             match EndpointType::from(ep_desc) {
                 EndpointType::InterruptIn => {
-                    let dci = ep_desc.dci();
-                    let tring = ep_rings[dci].as_mut().expect("tring not found");
                     tring.fill_ring()?;
                     self.notify_ep(slot, dci);
                 }
                 EndpointType::BulkIn => {
-                    let dci = ep_desc.dci();
-                    let tring = ep_rings[dci].as_mut().expect("tring not found");
                     tring.fill_ring()?;
                     self.notify_ep(slot, dci);
                 }
                 _ => {}
             }
+            println!("dci {}: {:?}", dci, tring);
         }
         println!("Endpoint setup done!");
         Ok(ep_rings)
@@ -705,133 +705,7 @@ impl Xhci {
         } else if device_descriptor.vendor_id == 0x0bda
             && (device_descriptor.product_id == 0x8153 || device_descriptor.product_id == 0x8151)
         {
-            let mut ep_desc_list = Vec::new();
-            for d in &descriptors {
-                if let UsbDescriptor::Endpoint(e) = d {
-                    ep_desc_list.push(*e);
-                }
-            }
-            println!("rtl8153/8151!");
-            let mut input_ctrl_ctx = InputControlContext::default();
-            input_ctrl_ctx.add_context(0)?;
-            const EP_RING_NONE: Option<TransferRing> = None;
-            let mut ep_rings = [EP_RING_NONE; 32];
-            let mut last_dci = 1;
-            for ep_desc in ep_desc_list {
-                match EndpointType::from(&ep_desc) {
-                    EndpointType::InterruptIn => {
-                        println!("InterruptIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
-                        let tring = TransferRing::new(4096)?;
-                        input_ctrl_ctx.add_context(ep_desc.dci())?;
-                        input_context.set_ep_ctx(
-                            ep_desc.dci(),
-                            EndpointContext::new_interrupt_in_endpoint(
-                                portsc.max_packet_size()?,
-                                tring.ring_phys_addr(),
-                                portsc.port_speed(),
-                                ep_desc.interval,
-                                8,
-                            )?,
-                        )?;
-                        last_dci = max(last_dci, ep_desc.dci());
-                        ep_rings[ep_desc.dci()] = Some(tring);
-                    }
-                    /*
-                    EndpointType::BulkIn => {
-                        println!("BulkIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
-                        let tring = TransferRing::new(4096)?;
-                        input_ctrl_ctx.add_context(ep_desc.dci())?;
-                        input_context.set_ep_ctx(
-                            ep_desc.dci(),
-                            EndpointContext::new_bulk_in_endpoint(
-                                portsc.max_packet_size()?,
-                                tring.ring_phys_addr(),
-                                portsc.port_speed(),
-                                ep_desc.interval,
-                                8,
-                            )?,
-                        )?;
-                        last_dci = max(last_dci, ep_desc.dci());
-                        ep_rings[ep_desc.dci()] = Some(tring);
-                    }
-                    */
-                    /*
-                    EndpointType::BulkOut => {
-                        println!("BulkOut! dci={}: {:?}", ep_desc.dci(), ep_desc);
-                        let tring = TransferRing::new(4096)?;
-                        input_ctrl_ctx.add_context(ep_desc.dci())?;
-                        input_context.set_ep_ctx(
-                            ep_desc.dci(),
-                            EndpointContext::new_bulk_out_endpoint(
-                                portsc.max_packet_size()?,
-                                tring.ring_phys_addr(),
-                                portsc.port_speed(),
-                                ep_desc.interval,
-                                8,
-                            )?,
-                        )?;
-                        last_dci = max(last_dci, ep_desc.dci());
-                        ep_rings[ep_desc.dci()] = Some(tring);
-                    }
-                    */
-                    _ => {
-                        println!("Ignoring {:?}", ep_desc);
-                    }
-                }
-            }
-            input_context.set_last_valid_dci(last_dci)?;
-            input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
-            let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
-            self.send_command(cmd).await?.completed()?;
-            // 4.6.6 Configure Endpoint
-            // When configuring or deconfiguring a device, only after completing a successful
-            // Configure Endpoint Command and a successful USB SET_CONFIGURATION
-            // request may software schedule data transfers through a newly enabled endpoint
-            // or Stream Transfer Ring of the Device Slot.
-            for (dci, tring) in ep_rings.iter_mut().enumerate() {
-                match tring {
-                    Some(tring) => {
-                        tring.fill_ring()?;
-                        self.notify_ep(slot, dci);
-                    }
-                    None => {}
-                }
-            }
-            println!("setup done!");
-            /*
-            self.request_set_ethernet_packet_filter(slot, ctrl_ep_ring, 0b11111)
-                .await?;
-            println!("filter cleared!");
-            */
-            loop {
-                let event_trb =
-                    TransferEventFuture::new_on_slot(&mut self.primary_event_ring, slot).await;
-                match event_trb {
-                    Ok(Some(trb)) => {
-                        let transfer_trb_ptr = trb.data() as usize;
-                        println!(
-                            "slot = {}, dci = {}, length = {}",
-                            slot,
-                            trb.dci(),
-                            trb.transfer_length()
-                        );
-                        // hexdump(&report.as_ref()[0..trb.transfer_length()]);
-                        if let Some(ref mut tring) = ep_rings[trb.dci()] {
-                            tring.dequeue_trb(transfer_trb_ptr)?;
-                            self.notify_ep(slot, trb.dci());
-                        }
-                    }
-                    Ok(None) => {
-                        // Timed out. Do nothing.
-                    }
-                    Err(e) => {
-                        println!("e: {:?}", e);
-                    }
-                }
-                if !portsc.ccs() {
-                    return Err(Error::FailedString(format!("port {} disconnected", port)));
-                }
-            }
+            println!("rtl8153/8151 is not supported yet...");
         } else if device_descriptor.device_class == 0 {
             // Device class is derived from Interface Descriptor
             let mut last_config: Option<ConfigDescriptor> = None;
@@ -862,104 +736,18 @@ impl Xhci {
             }
             if let Some(interface_desc) = boot_keyboard_interface {
                 println!("!!!!! USB KBD Found!");
-                let mut input_ctrl_ctx = InputControlContext::default();
-                input_ctrl_ctx.add_context(0)?;
-                const EP_RING_NONE: Option<TransferRing> = None;
-                let mut ep_rings = [EP_RING_NONE; 32];
-                let mut last_dci = 1;
-                for ep_desc in ep_desc_list {
-                    match EndpointType::from(&ep_desc) {
-                        EndpointType::InterruptIn => {
-                            let tring = TransferRing::new(8)?;
-                            input_ctrl_ctx.add_context(ep_desc.dci())?;
-                            input_context.set_ep_ctx(
-                                ep_desc.dci(),
-                                EndpointContext::new_interrupt_in_endpoint(
-                                    portsc.max_packet_size()?,
-                                    tring.ring_phys_addr(),
-                                    portsc.port_speed(),
-                                    ep_desc.interval,
-                                    8,
-                                )?,
-                            )?;
-                            last_dci = max(last_dci, ep_desc.dci());
-                            ep_rings[ep_desc.dci()] = Some(tring);
-                        }
-                        _ => {
-                            println!("Ignoring {:?}", ep_desc);
-                        }
-                    }
-                }
-                input_context.set_last_valid_dci(last_dci)?;
-                input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
-                let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
-                self.send_command(cmd).await?.completed()?;
-                println!("setting config");
-                self.request_set_config(
+                usb_hid_keyboard::attach_usb_device(
+                    self,
+                    port,
                     slot,
+                    input_context,
                     ctrl_ep_ring,
-                    last_config.expect("no config").config_value(),
+                    &descriptors,
+                    &ep_desc_list,
+                    last_config.expect("No config found"),
+                    interface_desc,
                 )
                 .await?;
-                println!("setting interface");
-                self.request_set_interface(
-                    slot,
-                    ctrl_ep_ring,
-                    interface_desc.interface_number(),
-                    interface_desc.alt_setting(),
-                )
-                .await?;
-                println!("setting protocol");
-                self.request_set_protocol(
-                    slot,
-                    ctrl_ep_ring,
-                    interface_desc.interface_number(),
-                    0, /* Boot Protocol */
-                )
-                .await?;
-                // 4.6.6 Configure Endpoint
-                // When configuring or deconfiguring a device, only after completing a successful
-                // Configure Endpoint Command and a successful USB SET_CONFIGURATION
-                // request may software schedule data transfers through a newly enabled endpoint
-                // or Stream Transfer Ring of the Device Slot.
-                for (dci, tring) in ep_rings.iter_mut().enumerate() {
-                    match tring {
-                        Some(tring) => {
-                            tring.fill_ring()?;
-                            self.notify_ep(slot, dci);
-                        }
-                        None => {}
-                    }
-                }
-                println!("USB KBD init done!");
-                loop {
-                    let event_trb =
-                        TransferEventFuture::new_on_slot(&mut self.primary_event_ring, slot).await;
-                    match event_trb {
-                        Ok(Some(trb)) => {
-                            let transfer_trb_ptr = trb.data() as usize;
-                            let report = unsafe {
-                                Mmio::<[u8; 8]>::from_raw(
-                                    *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
-                                )
-                            };
-                            println!("recv: {:?}", report.as_ref());
-                            if let Some(ref mut tring) = ep_rings[trb.dci()] {
-                                tring.dequeue_trb(transfer_trb_ptr)?;
-                                self.notify_ep(slot, trb.dci());
-                            }
-                        }
-                        Ok(None) => {
-                            // Timed out. Do nothing.
-                        }
-                        Err(e) => {
-                            println!("e: {:?}", e);
-                        }
-                    }
-                    if !portsc.ccs() {
-                        return Err(Error::FailedString(format!("port {} disconnected", port)));
-                    }
-                }
             }
         } else {
             println!(
