@@ -708,33 +708,15 @@ impl Xhci {
             println!("rtl8153/8151 is not supported yet...");
         } else if device_descriptor.device_class == 0 {
             // Device class is derived from Interface Descriptor
-            let mut last_config: Option<ConfigDescriptor> = None;
             let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
-            let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
             for d in &descriptors {
-                println!("{:?}", d);
-            }
-            for d in &descriptors {
-                match d {
-                    UsbDescriptor::Config(e) => {
-                        if boot_keyboard_interface.is_some() {
-                            break;
-                        }
-                        last_config = Some(*e);
-                        ep_desc_list.clear();
+                if let UsbDescriptor::Interface(e) = d {
+                    if let (3, 1, 1) = e.triple() {
+                        boot_keyboard_interface = Some(*e)
                     }
-                    UsbDescriptor::Interface(e) => {
-                        if let (3, 1, 1) = e.triple() {
-                            boot_keyboard_interface = Some(*e)
-                        }
-                    }
-                    UsbDescriptor::Endpoint(e) => {
-                        ep_desc_list.push(*e);
-                    }
-                    _ => {}
                 }
             }
-            if let Some(interface_desc) = boot_keyboard_interface {
+            if boot_keyboard_interface.is_some() {
                 println!("!!!!! USB KBD Found!");
                 usb_hid_keyboard::attach_usb_device(
                     self,
@@ -743,9 +725,6 @@ impl Xhci {
                     input_context,
                     ctrl_ep_ring,
                     &descriptors,
-                    &ep_desc_list,
-                    last_config.expect("No config found"),
-                    interface_desc,
                 )
                 .await?;
             }

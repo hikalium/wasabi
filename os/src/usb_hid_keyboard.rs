@@ -29,10 +29,34 @@ pub async fn attach_usb_device(
     input_context: &mut Pin<&mut InputContext>,
     ctrl_ep_ring: &mut CommandRing,
     descriptors: &Vec<UsbDescriptor>,
-    ep_desc_list: &Vec<EndpointDescriptor>,
-    config_desc: ConfigDescriptor,
-    interface_desc: InterfaceDescriptor,
 ) -> Result<()> {
+    let mut last_config: Option<ConfigDescriptor> = None;
+    let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
+    let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
+    for d in descriptors {
+        match d {
+            UsbDescriptor::Config(e) => {
+                if boot_keyboard_interface.is_some() {
+                    break;
+                }
+                last_config = Some(*e);
+                ep_desc_list.clear();
+            }
+            UsbDescriptor::Interface(e) => {
+                if let (3, 1, 1) = e.triple() {
+                    boot_keyboard_interface = Some(*e)
+                }
+            }
+            UsbDescriptor::Endpoint(e) => {
+                ep_desc_list.push(*e);
+            }
+            _ => {}
+        }
+    }
+    let config_desc = last_config.ok_or(Error::Failed("No USB KBD Boot config found"))?;
+    let interface_desc =
+        boot_keyboard_interface.ok_or(Error::Failed("No USB KBD Boot interface found"))?;
+
     let portsc = xhci.portsc(port)?;
     let mut input_ctrl_ctx = InputControlContext::default();
     input_ctrl_ctx.add_context(0)?;
@@ -40,7 +64,7 @@ pub async fn attach_usb_device(
     let mut ep_rings = [EP_RING_NONE; 32];
     let mut last_dci = 1;
     for ep_desc in ep_desc_list {
-        match EndpointType::from(ep_desc) {
+        match EndpointType::from(&ep_desc) {
             EndpointType::InterruptIn => {
                 let tring = TransferRing::new(8)?;
                 input_ctrl_ctx.add_context(ep_desc.dci())?;
