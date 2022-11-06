@@ -209,23 +209,20 @@ async fn disable_checksum_offloading(
     delay().await;
     Ok(())
 }
-pub async fn attach_usb_device(
-    xhci: &mut Xhci,
-    port: usize,
-    slot: u8,
-    input_context: &mut Pin<&mut InputContext>,
-    ctrl_ep_ring: &mut CommandRing,
-    descriptors: &Vec<UsbDescriptor>,
-) -> Result<()> {
+async fn init(xhci: &mut Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) -> Result<()> {
+    // Read MAC Address
+    let mac = request_read_mac_addr(xhci, slot, ctrl_ep_ring).await?;
+    println!(
+        "MAC Addr: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        mac.as_ref()[0],
+        mac.as_ref()[1],
+        mac.as_ref()[2],
+        mac.as_ref()[3],
+        mac.as_ref()[4],
+        mac.as_ref()[5],
+    );
     xhci.request_set_config(slot, ctrl_ep_ring, 1).await?;
-    let mut ep_desc_list = Vec::new();
-    for d in descriptors {
-        if let UsbDescriptor::Endpoint(e) = d {
-            ep_desc_list.push(*e);
-        }
-    }
     reset_phy(xhci, slot, ctrl_ep_ring).await?;
-    let portsc = xhci.portsc(port)?;
     disable_checksum_offloading(xhci, slot, ctrl_ep_ring).await?;
     write_mac_reg_u16(
         xhci,
@@ -245,21 +242,27 @@ pub async fn attach_usb_device(
     let rx_ctrl =
         read_mac_reg_u16(xhci, slot, ctrl_ep_ring, REQUEST_ACCESS_MAC, MAC_REG_RX_CTL).await?;
     println!("rx_ctrl: {:#06X}", rx_ctrl);
-
-    // Read MAC Address
-    let mac = request_read_mac_addr(xhci, slot, ctrl_ep_ring).await?;
-    println!(
-        "MAC Addr: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        mac.as_ref()[0],
-        mac.as_ref()[1],
-        mac.as_ref()[2],
-        mac.as_ref()[3],
-        mac.as_ref()[4],
-        mac.as_ref()[5],
-    );
+    Ok(())
+}
+pub async fn attach_usb_device(
+    xhci: &mut Xhci,
+    port: usize,
+    slot: u8,
+    input_context: &mut Pin<&mut InputContext>,
+    ctrl_ep_ring: &mut CommandRing,
+    descriptors: &Vec<UsbDescriptor>,
+) -> Result<()> {
+    init(xhci, slot, ctrl_ep_ring).await?;
+    let mut ep_desc_list = Vec::new();
+    for d in descriptors {
+        if let UsbDescriptor::Endpoint(e) = d {
+            ep_desc_list.push(*e);
+        }
+    }
     let mut ep_rings = xhci
         .setup_endpoints(port, slot, input_context, &ep_desc_list)
         .await?;
+    let portsc = xhci.portsc(port)?;
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
