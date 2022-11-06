@@ -529,8 +529,7 @@ impl Xhci {
             match EndpointType::from(ep_desc) {
                 EndpointType::InterruptIn => {
                     println!("InterruptIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
-                    let mut tring = TransferRing::new(4096)?;
-                    tring.fill_ring()?;
+                    let tring = TransferRing::new(4096)?;
                     input_ctrl_ctx.add_context(ep_desc.dci())?;
                     input_context.set_ep_ctx(
                         ep_desc.dci(),

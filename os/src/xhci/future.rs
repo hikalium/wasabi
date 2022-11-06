@@ -10,6 +10,27 @@ use core::pin::Pin;
 use core::task::Context;
 use core::task::Poll;
 
+pub struct TimeoutFuture {
+    time_out: u64,
+}
+impl TimeoutFuture {
+    pub fn new_ms(timeout_ms: u64) -> Self {
+        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * timeout_ms;
+        Self { time_out }
+    }
+}
+impl Future for TimeoutFuture {
+    type Output = ();
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<()> {
+        let time_out = self.time_out;
+        if time_out < Hpet::take().main_counter() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
 pub enum EventFutureWaitType {
     TrbAddr(u64),
     Slot(u8),
