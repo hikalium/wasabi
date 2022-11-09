@@ -8,16 +8,19 @@ use crate::arch::x86_64::write_io_port_u16;
 use crate::arch::x86_64::write_io_port_u32;
 use crate::arch::x86_64::write_io_port_u8;
 use crate::error::Result;
-use crate::network::EthernetAddress;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
-use crate::print::hexdump;
 use crate::println;
 use alloc::boxed::Box;
+use alloc::fmt;
+use alloc::fmt::Debug;
 use core::alloc::Layout;
+use core::marker::PhantomPinned;
+use core::mem::size_of;
+use core::pin::Pin;
 use core::slice;
 
 pub struct Rtl8139Driver {}
@@ -51,21 +54,129 @@ impl PciDeviceDriver for Rtl8139Driver {
         "Rtl8139Driver"
     }
 }
+
+#[repr(packed)]
+#[derive(Clone, Copy)]
+struct EthernetAddress {
+    mac: [u8; 6],
+}
+impl EthernetAddress {
+    fn new(mac: [u8; 6]) -> Self {
+        Self { mac }
+    }
+    const fn broardcast() -> Self {
+        Self {
+            mac: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+        }
+    }
+    const fn zero() -> Self {
+        Self {
+            mac: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        }
+    }
+}
+impl Debug for EthernetAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            self.mac[0], self.mac[1], self.mac[2], self.mac[3], self.mac[4], self.mac[5],
+        )
+    }
+}
+#[repr(packed)]
+struct IpV4Addr {
+    ip: [u8; 4],
+}
+impl IpV4Addr {
+    fn new(ip: [u8; 4]) -> Self {
+        Self { ip }
+    }
+}
+impl Debug for IpV4Addr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}.{}",
+            self.ip[0], self.ip[1], self.ip[2], self.ip[3],
+        )
+    }
+}
+#[repr(packed)]
+#[allow(unused)]
+struct EthernetHeader {
+    dst_eth: EthernetAddress,
+    src_eth: EthernetAddress,
+    eth_type: [u8; 2],
+}
+#[repr(packed)]
+#[allow(unused)]
+struct ArpPacket {
+    eth_header: EthernetHeader,
+    hw_type: [u8; 2],
+    proto_type: [u8; 2],
+    hw_addr_size: u8,
+    proto_addr_size: u8,
+    op: [u8; 2],
+    sender_mac: EthernetAddress,
+    sender_ip: IpV4Addr,
+    target_mac: EthernetAddress,
+    target_ip: IpV4Addr,
+    //
+    _pinned: PhantomPinned,
+}
+impl ArpPacket {
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        // SAFETY: any bytes can be parsed as the ARP packet
+        if bytes.len() >= size_of::<ArpPacket>() {
+            let mut tmp = [0u8; size_of::<ArpPacket>()];
+            tmp.copy_from_slice(&bytes[0..size_of::<ArpPacket>()]);
+            Ok(unsafe { core::mem::transmute(tmp) })
+        } else {
+            Err(crate::error::Error::Failed("too short"))
+        }
+    }
+    fn request(src_eth: EthernetAddress, src_ip: IpV4Addr, dst_ip: IpV4Addr) -> Self {
+        Self {
+            eth_header: EthernetHeader {
+                dst_eth: src_eth,
+                src_eth: EthernetAddress::broardcast(),
+                eth_type: [0x08, 0x06],
+            },
+            hw_type: [0x00, 0x01],
+            proto_type: [0x08, 0x00],
+            hw_addr_size: 6,
+            proto_addr_size: 4,
+            op: [0x00, 0x01],
+            sender_mac: src_eth,
+            sender_ip: src_ip,
+            target_mac: EthernetAddress::zero(), // target_mac = Unknown
+            target_ip: dst_ip,
+            //
+            _pinned: PhantomPinned,
+        }
+    }
+}
+impl Debug for ArpPacket {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "ArpPacket {{ op: {}, sender: {:?} ({:?}), target: {:?} ({:?}) }}",
+            match (self.op[0], self.op[1]) {
+                (0, 1) => "request",
+                (0, 2) => "response",
+                (_, _) => "unknown",
+            },
+            self.sender_ip,
+            self.sender_mac,
+            self.target_ip,
+            self.target_mac,
+        )
+    }
+}
+const _: () = assert!(size_of::<ArpPacket>() == 42);
+
 const RTL8139_RXBUF_SIZE: usize = 8208;
-const ARP_REQ_SAMPLE_DATA: [u8; 42] = [
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // dst eth addr
-    0x52, 0x54, 0x00, 0x12, 0x34, 0x57, // src eth addr
-    0x08, 0x06, // eth_type = ARP
-    0x00, 0x01, // hw_type = Ethernet
-    0x08, 0x00, // proto_type = IPv4
-    0x06, // hw_addr_size = 6 bytes
-    0x04, // proto_addr_type = 4 bytes
-    0x00, 0x01, // operation = ARP request
-    0x52, 0x54, 0x00, 0x12, 0x34, 0x57, // sender_mac = 52:54:00:12:34:57
-    0x0A, 0x00, 0x02, 0x0F, // sender_ip = 10.0.2.15
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // target_mac = Unknown
-    0x0A, 0x00, 0x02, 0x02, // target_ip = 10.0.2.2
-];
 pub struct Rtl8139DriverInstance<'a> {
     #[allow(dead_code)]
     bdf: BusDeviceFunction,
@@ -89,8 +200,8 @@ impl<'a> Rtl8139DriverInstance<'a> {
         for (i, e) in eth_addr.iter_mut().enumerate() {
             *e = read_io_port_u8(io_base + i as u16);
         }
-        let eth_addr = EthernetAddress::new(&eth_addr);
-        println!("eth_addr: {}", eth_addr);
+        let eth_addr = EthernetAddress::new(eth_addr);
+        println!("eth_addr: {:?}", eth_addr);
         // Turn on
         write_io_port_u8(io_base + 0x52, 0);
         // Software Reset
@@ -115,14 +226,22 @@ impl<'a> Rtl8139DriverInstance<'a> {
 
         write_io_port_u8(io_base + 0x37, 0x0C); // RE+TE
 
+        let arp_req = Box::pin(ArpPacket::request(
+            eth_addr,
+            IpV4Addr::new([10, 0, 2, 15]),
+            IpV4Addr::new([10, 0, 2, 2]),
+        ));
+
         write_io_port_u32(
             io_base + 0x20, /* TSAD[0] */
-            ARP_REQ_SAMPLE_DATA.as_ptr() as usize as u32,
+            (arp_req.as_ref().get_ref() as *const ArpPacket as usize).try_into()?,
         );
         write_io_port_u32(
             io_base + 0x10, /* TSD[0] */
-            ARP_REQ_SAMPLE_DATA.len() as u32,
+            size_of::<ArpPacket>().try_into()?,
         );
+        println!("Sending ARP Request...");
+        println!("{arp_req:?}");
         let write_count = loop {
             let write_count = read_io_port_u16(io_base + 0x3A);
             if write_count != 0 {
@@ -133,9 +252,14 @@ impl<'a> Rtl8139DriverInstance<'a> {
         println!("write_count: {}", write_count);
         let rx_status = unsafe { *(rx_buffer.as_ptr() as *const u16) };
         println!("rx_status: {}", rx_status);
-        let packet_len = unsafe { *(rx_buffer.as_ptr().offset(2) as *const u16) };
+        let packet_len = unsafe { *(rx_buffer.as_ptr().offset(2) as *const u16) } as usize;
         println!("packet_len: {}", packet_len);
-        hexdump(unsafe { slice::from_raw_parts(rx_buffer.as_ptr().offset(4), packet_len.into()) });
+        println!("Received packet:");
+        let arp = unsafe { slice::from_raw_parts(rx_buffer.as_ptr().offset(4), packet_len) };
+        if packet_len >= size_of::<ArpPacket>() {
+            let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
+            println!("{arp:?}");
+        }
 
         Ok(Rtl8139DriverInstance { bdf, rx_buffer })
     }

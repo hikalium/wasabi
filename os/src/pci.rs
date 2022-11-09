@@ -3,8 +3,8 @@ extern crate alloc;
 use crate::acpi::Mcfg;
 use crate::arch::x86_64::paging::with_current_page_table;
 use crate::arch::x86_64::paging::PageAttr;
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::print::hexdump;
 use crate::println;
 use crate::rtl8139::Rtl8139Driver;
@@ -233,7 +233,7 @@ impl Pci {
 
         let drivers = vec![
             Rc::new(Box::new(Rtl8139Driver::default()) as Box<dyn PciDeviceDriver>),
-            Rc::new(Box::new(XhciDriver::default()) as Box<dyn PciDeviceDriver>),
+            // Rc::new(Box::new(XhciDriver::default()) as Box<dyn PciDeviceDriver>),
         ];
 
         Pci {
