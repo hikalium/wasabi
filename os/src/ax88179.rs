@@ -13,6 +13,7 @@ use crate::xhci::ring::CommandRing;
 use crate::xhci::trb::DataStageTrb;
 use crate::xhci::trb::SetupStageTrb;
 use crate::xhci::trb::StatusStageTrb;
+use crate::xhci::EndpointType;
 use crate::xhci::Xhci;
 use alloc::boxed::Box;
 use alloc::format;
@@ -50,6 +51,9 @@ const MAC_REG_RX_CTL_ACCEPT_ALL_MULTICAST: u16 = 0x0002;
 const MAC_REG_RX_CTL_ACCEPT_BROADCAST: u16 = 0x0008;
 const MAC_REG_RX_CTL_ACCEPT_MULTICAST: u16 = 0x0010;
 const MAC_REG_RX_CTL_ACCEPT_PHYS_ADDR_FROM_MULTICAST_ARRAY: u16 = 0x0020;
+// https://github.com/lamw/ax88179_178a-esxi/blob/master/ax88179_178a.h#L55
+// HW auto-added 8-bytes data when meet USB bulk in transfer boundary (1024/512/64)
+// const MAC_REG_RX_CTL_HA8B: u16 = 0x0080;
 const MAC_REG_RX_CTL_START: u16 = 0x0080;
 const MAC_REG_RX_CTL_DROP_CRC_ERROR: u16 = 0x0100;
 const MAC_REG_RX_CTL_ALIGN_IP_HEADER: u16 = 0x0200;
@@ -335,7 +339,9 @@ async fn init(xhci: &mut Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) -> Resu
         mac.as_ref()[5],
     );
 
-    let mut bulk_in_queue_config = Box::<[u8; 5]>::pin([7, 0x4f, 0x00, 0x12, 0xff]);
+    // Without this, StallError will happen
+    // https://github.com/KunYi/hardware_asix_usbnet/blob/80e2c5e18f3e453b701b2369eb6d3d10f31bc0cd/ax88179_178a.c#L1098-L1110
+    let mut bulk_in_queue_config = Box::<[u8; 5]>::pin([7, 0x4f, 0x00, 0x24, 0xff]);
     write_to_device(
         xhci,
         slot,
@@ -432,7 +438,6 @@ pub async fn attach_usb_device(
     ctrl_ep_ring: &mut CommandRing,
     descriptors: &Vec<UsbDescriptor>,
 ) -> Result<()> {
-    init(xhci, slot, ctrl_ep_ring).await?;
     let mut ep_desc_list = Vec::new();
     for d in descriptors {
         if let UsbDescriptor::Endpoint(e) = d {
@@ -442,6 +447,23 @@ pub async fn attach_usb_device(
     let mut ep_rings = xhci
         .setup_endpoints(port, slot, input_context, &ep_desc_list)
         .await?;
+    init(xhci, slot, ctrl_ep_ring).await?;
+    for ep_desc in ep_desc_list {
+        let dci = ep_desc.dci();
+        let tring = ep_rings[dci].as_mut().expect("tring not found");
+        match EndpointType::from(&ep_desc) {
+            EndpointType::InterruptIn => {
+                tring.fill_ring()?;
+                xhci.notify_ep(slot, dci);
+            }
+            EndpointType::BulkIn => {
+                tring.fill_ring()?;
+                xhci.notify_ep(slot, dci);
+            }
+            _ => {}
+        }
+        println!("dci {}: {:?}", dci, tring);
+    }
     let portsc = xhci.portsc(port)?;
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;

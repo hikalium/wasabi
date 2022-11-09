@@ -588,22 +588,6 @@ impl Xhci {
         input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
         let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
-        for ep_desc in ep_desc_list {
-            let dci = ep_desc.dci();
-            let tring = ep_rings[dci].as_mut().expect("tring not found");
-            match EndpointType::from(ep_desc) {
-                EndpointType::InterruptIn => {
-                    tring.fill_ring()?;
-                    self.notify_ep(slot, dci);
-                }
-                EndpointType::BulkIn => {
-                    tring.fill_ring()?;
-                    self.notify_ep(slot, dci);
-                }
-                _ => {}
-            }
-            println!("dci {}: {:?}", dci, tring);
-        }
         println!("Endpoint setup done!");
         Ok(ep_rings)
     }
@@ -718,6 +702,7 @@ impl Xhci {
             }
             if boot_keyboard_interface.is_some() {
                 println!("!!!!! USB KBD Found!");
+                /*
                 usb_hid_keyboard::attach_usb_device(
                     self,
                     port,
@@ -727,6 +712,7 @@ impl Xhci {
                     &descriptors,
                 )
                 .await?;
+                */
             }
         } else {
             println!(

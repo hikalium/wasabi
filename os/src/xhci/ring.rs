@@ -5,6 +5,7 @@ use crate::arch::x86_64::paging::disable_cache;
 use crate::arch::x86_64::paging::IoBox;
 use crate::error::Error;
 use crate::error::Result;
+use crate::println;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
@@ -197,13 +198,14 @@ impl TransferRing {
             // Wrap with num_trbs() - 1 to ignore LinkTrb
             let next_enqueue_index =
                 (self.ring.as_ref().current_index() + 1) % (self.ring.as_ref().num_trbs() - 1);
-            if next_enqueue_index == self.dequeue_index {
+            if next_enqueue_index == self.ring.as_ref().num_trbs() - 4 {
                 // Ring is full. stop filling.
                 break;
             }
             let mut_ring = unsafe { self.ring.get_unchecked_mut() };
             mut_ring.advance_index(!self.cycle_state_ours)?;
         }
+        println!("ring filled: {:?}", self);
         Ok(())
     }
     pub fn dequeue_trb(&mut self, trb_ptr: usize) -> Result<()> {
