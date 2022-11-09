@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use crate::arch::x86_64::busy_loop_hint;
 use crate::error::Result;
+use crate::hpet::Hpet;
 use crate::mutex::Mutex;
 use crate::println;
 use alloc::boxed::Box;
@@ -100,8 +100,23 @@ impl Executor {
     }
 }
 
-pub async fn delay() {
-    for _ in 0..10000 {
-        busy_loop_hint();
+pub struct TimeoutFuture {
+    time_out: u64,
+}
+impl TimeoutFuture {
+    pub fn new_ms(timeout_ms: u64) -> Self {
+        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * timeout_ms;
+        Self { time_out }
+    }
+}
+impl Future for TimeoutFuture {
+    type Output = ();
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<()> {
+        let time_out = self.time_out;
+        if time_out < Hpet::take().main_counter() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
     }
 }

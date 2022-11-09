@@ -702,7 +702,6 @@ impl Xhci {
             }
             if boot_keyboard_interface.is_some() {
                 println!("!!!!! USB KBD Found!");
-                /*
                 usb_hid_keyboard::attach_usb_device(
                     self,
                     port,
@@ -712,7 +711,6 @@ impl Xhci {
                     &descriptors,
                 )
                 .await?;
-                */
             }
         } else {
             println!(

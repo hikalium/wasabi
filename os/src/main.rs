@@ -14,10 +14,10 @@ use os::arch::x86_64::read_rsp;
 use os::boot_info::BootInfo;
 use os::elf::Elf;
 use os::error::Result;
-use os::executor::delay;
 use os::executor::yield_execution;
 use os::executor::Executor;
 use os::executor::Task;
+use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
@@ -79,7 +79,7 @@ fn run_tasks() -> Result<()> {
                 x = xbegin;
                 c += 1;
             }
-            delay().await;
+            TimeoutFuture::new_ms(10).await;
             yield_execution().await;
         }
     };
@@ -98,7 +98,7 @@ fn run_tasks() -> Result<()> {
                 x = xbegin;
                 c += 1;
             }
-            delay().await;
+            TimeoutFuture::new_ms(20).await;
             yield_execution().await;
         }
     };

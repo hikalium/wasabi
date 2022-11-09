@@ -7,6 +7,7 @@ QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
 		-bios $(OVMF) \
 		-device qemu-xhci \
+		-device usb-kbd \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=net1 -device rtl8139,netdev=net1 \
 		-object filter-dump,id=f2,netdev=net1,file=dump_net1.dat \
