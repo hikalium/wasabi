@@ -1,6 +1,5 @@
 extern crate alloc;
 
-use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::busy_loop_hint;
 use crate::arch::x86_64::read_io_port_u16;
 use crate::arch::x86_64::read_io_port_u8;
@@ -8,6 +7,9 @@ use crate::arch::x86_64::write_io_port_u16;
 use crate::arch::x86_64::write_io_port_u32;
 use crate::arch::x86_64::write_io_port_u8;
 use crate::error::Result;
+use crate::executor::yield_execution;
+use crate::executor::Task;
+use crate::executor::ROOT_EXECUTOR;
 use crate::network::ArpPacket;
 use crate::network::EthernetAddr;
 use crate::network::IpV4Addr;
@@ -18,8 +20,9 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::println;
 use alloc::boxed::Box;
-use core::alloc::Layout;
 use core::mem::size_of;
+use core::mem::MaybeUninit;
+use core::pin::Pin;
 use core::slice;
 
 pub struct Rtl8139Driver {}
@@ -55,13 +58,12 @@ impl PciDeviceDriver for Rtl8139Driver {
 }
 
 const RTL8139_RXBUF_SIZE: usize = 8208;
-pub struct Rtl8139DriverInstance<'a> {
-    #[allow(dead_code)]
-    bdf: BusDeviceFunction,
-    #[allow(dead_code)]
-    rx_buffer: &'a mut [u8; RTL8139_RXBUF_SIZE],
+struct Rtl8139 {
+    _bdf: BusDeviceFunction,
+    rx_buf: Pin<Box<[u8; RTL8139_RXBUF_SIZE]>>,
+    eth_addr: EthernetAddr,
 }
-impl<'a> Rtl8139DriverInstance<'a> {
+impl Rtl8139 {
     // https://wiki.osdev.org/RTL8139
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
         let pci = Pci::take();
@@ -88,15 +90,16 @@ impl<'a> Rtl8139DriverInstance<'a> {
             busy_loop_hint();
         }
         println!("Software Reset Done!");
-        let rx_buffer = unsafe {
-            &mut *(ALLOCATOR.alloc_with_options(
-                Layout::from_size_align(RTL8139_RXBUF_SIZE, 1).expect("Invalid Layout"),
-            ) as *mut [u8; RTL8139_RXBUF_SIZE])
+        let d = Self {
+            _bdf: bdf,
+            rx_buf: Box::pin(unsafe { MaybeUninit::zeroed().assume_init() }),
+            eth_addr,
         };
-        assert!((rx_buffer.as_ptr() as usize) < ((u32::MAX) as usize - RTL8139_RXBUF_SIZE));
-        println!("rx_buffer is at {:#p}", rx_buffer);
+        let rx_buf_ptr = d.rx_buf.as_ref().as_ptr();
+        assert!((rx_buf_ptr as usize) < ((u32::MAX) as usize - RTL8139_RXBUF_SIZE));
+        println!("rx_buffer is at {:#p}", rx_buf_ptr);
 
-        write_io_port_u32(io_base + 0x30, rx_buffer.as_ptr() as usize as u32);
+        write_io_port_u32(io_base + 0x30, rx_buf_ptr as usize as u32);
 
         write_io_port_u32(io_base + 0x3C, 0x0005); // Interrupts: Transmit OK, Receive OK
 
@@ -128,21 +131,41 @@ impl<'a> Rtl8139DriverInstance<'a> {
             busy_loop_hint();
         };
         println!("write_count: {}", write_count);
-        let rx_status = unsafe { *(rx_buffer.as_ptr() as *const u16) };
+        let rx_status = unsafe { *(rx_buf_ptr as *const u16) };
         println!("rx_status: {}", rx_status);
-        let packet_len = unsafe { *(rx_buffer.as_ptr().offset(2) as *const u16) } as usize;
+        let packet_len = unsafe { *(rx_buf_ptr.offset(2) as *const u16) } as usize;
         println!("packet_len: {}", packet_len);
         println!("Received packet:");
-        let arp = unsafe { slice::from_raw_parts(rx_buffer.as_ptr().offset(4), packet_len) };
+        let arp = unsafe { slice::from_raw_parts(rx_buf_ptr.offset(4), packet_len) };
         if packet_len >= size_of::<ArpPacket>() {
             let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
             println!("{arp:?}");
         }
 
-        Ok(Rtl8139DriverInstance { bdf, rx_buffer })
+        Ok(d)
+    }
+    async fn poll(&mut self) -> Result<()> {
+        Ok(())
     }
 }
-impl<'a> PciDeviceDriverInstance for Rtl8139DriverInstance<'a> {
+
+pub struct Rtl8139DriverInstance {}
+impl Rtl8139DriverInstance {
+    fn new(bdf: BusDeviceFunction) -> Result<Self> {
+        (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
+            let mut d = Rtl8139::new(bdf)?;
+            loop {
+                if let Err(e) = d.poll().await {
+                    break Err(e);
+                } else {
+                    yield_execution().await;
+                }
+            }
+        }));
+        Ok(Self {})
+    }
+}
+impl<'a> PciDeviceDriverInstance for Rtl8139DriverInstance {
     fn name(&self) -> &str {
         "Rtl8139DriverInstance"
     }
