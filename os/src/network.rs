@@ -8,10 +8,10 @@ use core::mem::size_of;
 
 #[repr(packed)]
 #[derive(Clone, Copy)]
-pub struct EthernetAddress {
+pub struct EthernetAddr {
     mac: [u8; 6],
 }
-impl EthernetAddress {
+impl EthernetAddr {
     pub fn new(mac: [u8; 6]) -> Self {
         Self { mac }
     }
@@ -26,7 +26,7 @@ impl EthernetAddress {
         }
     }
 }
-impl Debug for EthernetAddress {
+impl Debug for EthernetAddr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -56,10 +56,12 @@ impl Debug for IpV4Addr {
 #[repr(packed)]
 #[allow(unused)]
 pub struct EthernetHeader {
-    dst_eth: EthernetAddress,
-    src_eth: EthernetAddress,
+    dst_eth: EthernetAddr,
+    src_eth: EthernetAddr,
     eth_type: [u8; 2],
 }
+const _: () = assert!(size_of::<EthernetHeader>() == 14);
+
 #[repr(packed)]
 #[allow(unused)]
 pub struct ArpPacket {
@@ -69,13 +71,14 @@ pub struct ArpPacket {
     hw_addr_size: u8,
     proto_addr_size: u8,
     op: [u8; 2],
-    sender_mac: EthernetAddress,
+    sender_mac: EthernetAddr,
     sender_ip: IpV4Addr,
-    target_mac: EthernetAddress,
+    target_mac: EthernetAddr,
     target_ip: IpV4Addr,
     //
     _pinned: PhantomPinned,
 }
+const _: () = assert!(size_of::<ArpPacket>() == 42);
 impl ArpPacket {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         // SAFETY: any bytes can be parsed as the ARP packet
@@ -87,11 +90,11 @@ impl ArpPacket {
             Err(crate::error::Error::Failed("too short"))
         }
     }
-    pub fn request(src_eth: EthernetAddress, src_ip: IpV4Addr, dst_ip: IpV4Addr) -> Self {
+    pub fn request(src_eth: EthernetAddr, src_ip: IpV4Addr, dst_ip: IpV4Addr) -> Self {
         Self {
             eth_header: EthernetHeader {
                 dst_eth: src_eth,
-                src_eth: EthernetAddress::broardcast(),
+                src_eth: EthernetAddr::broardcast(),
                 eth_type: [0x08, 0x06],
             },
             hw_type: [0x00, 0x01],
@@ -101,7 +104,7 @@ impl ArpPacket {
             op: [0x00, 0x01],
             sender_mac: src_eth,
             sender_ip: src_ip,
-            target_mac: EthernetAddress::zero(), // target_mac = Unknown
+            target_mac: EthernetAddr::zero(), // target_mac = Unknown
             target_ip: dst_ip,
             //
             _pinned: PhantomPinned,
@@ -125,4 +128,68 @@ impl Debug for ArpPacket {
         )
     }
 }
-const _: () = assert!(size_of::<ArpPacket>() == 42);
+
+#[allow(unused)]
+mod ipv4_protocol {
+    pub const ICMP: u8 = 1;
+    pub const TCP: u8 = 6;
+    pub const UDP: u8 = 17;
+}
+
+#[repr(packed)]
+#[allow(unused)]
+struct IpV4Packet {
+    eth_header: EthernetHeader,
+    version_and_ihl: u8,
+    dscp_and_ecn: u8,
+    length: [u8; 2],
+    ident: u16,
+    flags: u16,
+    ttl: u8,
+    protocol: u8,
+    csum: InternetChecksum, // for this header
+    src_ip: IpV4Addr,
+    dst_ip: IpV4Addr,
+}
+
+#[repr(packed)]
+#[allow(unused)]
+struct InternetChecksum {
+    // https://tools.ietf.org/html/rfc1071
+    csum: [u8; 2],
+}
+
+#[repr(packed)]
+#[allow(unused)]
+struct UdpPacket {
+    ip_header: IpV4Packet,
+    src_port: [u8; 2], // optional
+    dst_port: [u8; 2],
+    len: [u8; 2],
+    csum: InternetChecksum,
+}
+
+#[repr(packed)]
+#[allow(unused)]
+struct DhcpPacket {
+    udp_header: UdpPacket,
+    op: u8,
+    htype: u8,
+    hlen: u8,
+    hops: u8,
+    xid: u32,
+    secs: u16,
+    flags: u16,
+    ciaddr: IpV4Addr,
+    yiaddr: IpV4Addr,
+    siaddr: IpV4Addr,
+    giaddr: IpV4Addr,
+    chaddr: EthernetAddr,
+    chaddr_padding: [u8; 10],
+    sname: [u8; 64],
+    file: [u8; 128],
+    cookie: [u8; 4],
+    // Optional fields follow
+}
+const _: () = assert!(size_of::<DhcpPacket>() == 282);
+impl DhcpPacket {}

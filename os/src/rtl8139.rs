@@ -9,7 +9,7 @@ use crate::arch::x86_64::write_io_port_u32;
 use crate::arch::x86_64::write_io_port_u8;
 use crate::error::Result;
 use crate::network::ArpPacket;
-use crate::network::EthernetAddress;
+use crate::network::EthernetAddr;
 use crate::network::IpV4Addr;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
@@ -78,7 +78,7 @@ impl<'a> Rtl8139DriverInstance<'a> {
         for (i, e) in eth_addr.iter_mut().enumerate() {
             *e = read_io_port_u8(io_base + i as u16);
         }
-        let eth_addr = EthernetAddress::new(eth_addr);
+        let eth_addr = EthernetAddr::new(eth_addr);
         println!("eth_addr: {:?}", eth_addr);
         // Turn on
         write_io_port_u8(io_base + 0x52, 0);
