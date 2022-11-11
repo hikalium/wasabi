@@ -8,7 +8,6 @@ use crate::error::Result;
 use crate::print::hexdump;
 use crate::println;
 use crate::rtl8139::Rtl8139Driver;
-use crate::xhci::XhciDriver;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
