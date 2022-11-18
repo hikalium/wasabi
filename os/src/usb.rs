@@ -1,9 +1,6 @@
-use crate::error::Error;
-use crate::error::Result;
+use crate::util::IntoPinnedMutableSlice;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
-use core::pin::Pin;
-use core::slice;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
@@ -88,39 +85,6 @@ pub struct DeviceDescriptor {
 }
 const _: () = assert!(size_of::<DeviceDescriptor>() == 18);
 
-/// # Safety
-/// Implementing this trait is safe only when the target type can be constructed from any byte
-/// sequences that has the same size. If not, modification made via the byte slice produced by
-/// as_mut_slice can be an undefined behavior since the bytes can not be interpreted as the
-/// original type.
-pub unsafe trait IntoPinnedMutableSlice: Sized + Copy + Clone {
-    fn as_mut_slice(self: Pin<&mut Self>) -> Pin<&mut [u8]> {
-        Pin::new(unsafe {
-            slice::from_raw_parts_mut(
-                self.get_unchecked_mut() as *mut Self as *mut u8,
-                size_of::<Self>(),
-            )
-        })
-    }
-    fn as_mut_slice_sized(self: Pin<&mut Self>, size: usize) -> Result<Pin<&mut [u8]>> {
-        if size > size_of::<Self>() {
-            Err(Error::Failed(
-                "Cannot take mut slice longer than the object",
-            ))
-        } else {
-            Ok(Pin::new(unsafe {
-                slice::from_raw_parts_mut(self.get_unchecked_mut() as *mut Self as *mut u8, size)
-            }))
-        }
-    }
-    fn copy_from_slice(data: &[u8]) -> Result<Self> {
-        if size_of::<Self>() > data.len() {
-            Err(Error::Failed("data is too short"))
-        } else {
-            Ok(unsafe { *(data.as_ptr() as *const Self) })
-        }
-    }
-}
 unsafe impl IntoPinnedMutableSlice for DeviceDescriptor {}
 unsafe impl IntoPinnedMutableSlice for ConfigDescriptor {}
 unsafe impl IntoPinnedMutableSlice for InterfaceDescriptor {}

@@ -7,8 +7,8 @@ use crate::arch::x86_64::write_io_port_u16;
 use crate::arch::x86_64::write_io_port_u32;
 use crate::arch::x86_64::write_io_port_u8;
 use crate::error::Result;
-use crate::executor::yield_execution;
 use crate::executor::Task;
+use crate::executor::TimeoutFuture;
 use crate::executor::ROOT_EXECUTOR;
 use crate::network::ArpPacket;
 use crate::network::EthernetAddr;
@@ -20,6 +20,7 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::println;
 use alloc::boxed::Box;
+use alloc::collections::VecDeque;
 use core::mem::size_of;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
@@ -62,6 +63,9 @@ struct Rtl8139 {
     _bdf: BusDeviceFunction,
     rx_buf: Pin<Box<[u8; RTL8139_RXBUF_SIZE]>>,
     eth_addr: EthernetAddr,
+    io_base: u16,
+    next_tx_reg_idx: usize, // 0-3
+    tx_pending_packets: VecDeque<Box<[u8]>>,
 }
 impl Rtl8139 {
     // https://wiki.osdev.org/RTL8139
@@ -94,78 +98,82 @@ impl Rtl8139 {
             _bdf: bdf,
             rx_buf: Box::pin(unsafe { MaybeUninit::zeroed().assume_init() }),
             eth_addr,
+            io_base,
+            next_tx_reg_idx: 0,
+            tx_pending_packets: VecDeque::new(),
         };
         let rx_buf_ptr = d.rx_buf.as_ref().as_ptr();
         assert!((rx_buf_ptr as usize) < ((u32::MAX) as usize - RTL8139_RXBUF_SIZE));
         println!("rx_buffer is at {:#p}", rx_buf_ptr);
-
         write_io_port_u32(io_base + 0x30, rx_buf_ptr as usize as u32);
-
         write_io_port_u32(io_base + 0x3C, 0x0005); // Interrupts: Transmit OK, Receive OK
-
         write_io_port_u16(io_base + 0x44, 0xf); // AB+AM+APM+AAP
-
         write_io_port_u8(io_base + 0x37, 0x0C); // RE+TE
-
+        Ok(d)
+    }
+    fn queue_packet(&mut self, packet: Box<[u8]>) -> Result<()> {
+        self.tx_pending_packets.push_back(packet);
+        Ok(())
+    }
+    async fn poll(&mut self) -> Result<()> {
         let arp_req = Box::pin(ArpPacket::request(
-            eth_addr,
+            self.eth_addr,
             IpV4Addr::new([10, 0, 2, 15]),
             IpV4Addr::new([10, 0, 2, 2]),
         ));
 
-        write_io_port_u32(
-            io_base + 0x20, /* TSAD[0] */
-            (arp_req.as_ref().get_ref() as *const ArpPacket as usize).try_into()?,
-        );
-        write_io_port_u32(
-            io_base + 0x10, /* TSD[0] */
-            size_of::<ArpPacket>().try_into()?,
-        );
-        println!("Sending ARP Request...");
-        println!("{arp_req:?}");
-        let write_count = loop {
-            let write_count = read_io_port_u16(io_base + 0x3A);
-            if write_count != 0 {
-                break write_count;
-            }
-            busy_loop_hint();
-        };
-        println!("write_count: {}", write_count);
-        let rx_status = unsafe { *(rx_buf_ptr as *const u16) };
-        println!("rx_status: {}", rx_status);
-        let packet_len = unsafe { *(rx_buf_ptr.offset(2) as *const u16) } as usize;
-        println!("packet_len: {}", packet_len);
-        println!("Received packet:");
-        let arp = unsafe { slice::from_raw_parts(rx_buf_ptr.offset(4), packet_len) };
-        if packet_len >= size_of::<ArpPacket>() {
-            let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
-            println!("{arp:?}");
-        }
+        let rx_buf_ptr = self.rx_buf.as_ref().as_ptr();
+        loop {
+            let arp_req = Box::pin(ArpPacket::request(
+                self.eth_addr,
+                IpV4Addr::new([10, 0, 2, 15]),
+                IpV4Addr::new([10, 0, 2, 2]),
+            ));
 
-        Ok(d)
-    }
-    async fn poll(&mut self) -> Result<()> {
-        Ok(())
+            write_io_port_u32(
+                self.io_base + 0x20, /* TSAD[0] */
+                (arp_req.as_ref().get_ref() as *const ArpPacket as usize).try_into()?,
+            );
+            write_io_port_u32(
+                self.io_base + 0x10, /* TSD[0] */
+                size_of::<ArpPacket>().try_into()?,
+            );
+            println!("Sending ARP Request...");
+            println!("{arp_req:?}");
+            let write_count = loop {
+                let write_count = read_io_port_u16(self.io_base + 0x3A);
+                if write_count != 0 {
+                    break write_count;
+                }
+                busy_loop_hint();
+            };
+            println!("write_count: {}", write_count);
+            let rx_status = unsafe { *(rx_buf_ptr as *const u16) };
+            println!("rx_status: {}", rx_status);
+            let packet_len = unsafe { *(rx_buf_ptr.offset(2) as *const u16) } as usize;
+            println!("packet_len: {}", packet_len);
+            println!("Received packet:");
+            let arp = unsafe { slice::from_raw_parts(rx_buf_ptr.offset(4), packet_len) };
+            if packet_len >= size_of::<ArpPacket>() {
+                let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
+                println!("{arp:?}");
+            }
+
+            println!("sending ping!!\n");
+            TimeoutFuture::new_ms(1000).await;
+        }
     }
 }
 
 pub struct Rtl8139DriverInstance {}
 impl Rtl8139DriverInstance {
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
-        (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
-            let mut d = Rtl8139::new(bdf)?;
-            loop {
-                if let Err(e) = d.poll().await {
-                    break Err(e);
-                } else {
-                    yield_execution().await;
-                }
-            }
-        }));
+        let mut d = Rtl8139::new(bdf)?;
+        (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move { d.poll().await }));
         Ok(Self {})
     }
 }
-impl<'a> PciDeviceDriverInstance for Rtl8139DriverInstance {
+impl PciDeviceDriverInstance for Rtl8139DriverInstance {
     fn name(&self) -> &str {
         "Rtl8139DriverInstance"
     }

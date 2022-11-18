@@ -1,12 +1,49 @@
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use core::cmp::min;
 use core::convert::From;
 use core::convert::TryInto;
+use core::mem::size_of;
 use core::num::Saturating;
+use core::pin::Pin;
+use core::slice;
 
 pub const PAGE_OFFSET_BITS: usize = 12;
 pub const PAGE_SIZE: usize = 1 << PAGE_OFFSET_BITS;
+
+/// # Safety
+/// Implementing this trait is safe only when the target type can be constructed from any byte
+/// sequences that has the same size. If not, modification made via the byte slice produced by
+/// as_mut_slice can be an undefined behavior since the bytes can not be interpreted as the
+/// original type.
+pub unsafe trait IntoPinnedMutableSlice: Sized + Copy + Clone {
+    fn as_mut_slice(self: Pin<&mut Self>) -> Pin<&mut [u8]> {
+        Pin::new(unsafe {
+            slice::from_raw_parts_mut(
+                self.get_unchecked_mut() as *mut Self as *mut u8,
+                size_of::<Self>(),
+            )
+        })
+    }
+    fn as_mut_slice_sized(self: Pin<&mut Self>, size: usize) -> Result<Pin<&mut [u8]>> {
+        if size > size_of::<Self>() {
+            Err(Error::Failed(
+                "Cannot take mut slice longer than the object",
+            ))
+        } else {
+            Ok(Pin::new(unsafe {
+                slice::from_raw_parts_mut(self.get_unchecked_mut() as *mut Self as *mut u8, size)
+            }))
+        }
+    }
+    fn copy_from_slice(data: &[u8]) -> Result<Self> {
+        if size_of::<Self>() > data.len() {
+            Err(Error::Failed("data is too short"))
+        } else {
+            Ok(unsafe { *(data.as_ptr() as *const Self) })
+        }
+    }
+}
 
 pub fn extract_bits<T>(value: T, shift: usize, width: usize) -> T
 where
@@ -49,10 +86,7 @@ pub fn round_up_to_nearest_pow2(v: usize) -> Result<usize> {
 }
 #[test_case]
 fn round_up_to_nearest_pow2_tests() {
-    assert_eq!(
-        round_up_to_nearest_pow2(0),
-        Err(Error::CalcOutOfRange)
-    );
+    assert_eq!(round_up_to_nearest_pow2(0), Err(Error::CalcOutOfRange));
     assert_eq!(round_up_to_nearest_pow2(1), Ok(1));
     assert_eq!(round_up_to_nearest_pow2(2), Ok(2));
     assert_eq!(round_up_to_nearest_pow2(3), Ok(4));

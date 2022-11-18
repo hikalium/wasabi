@@ -192,4 +192,3 @@ struct DhcpPacket {
     // Optional fields follow
 }
 const _: () = assert!(size_of::<DhcpPacket>() == 282);
-impl DhcpPacket {}
