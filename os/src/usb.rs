@@ -1,4 +1,5 @@
 use crate::util::IntoPinnedMutableSlice;
+use crate::util::Sliceable;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 
@@ -85,11 +86,6 @@ pub struct DeviceDescriptor {
 }
 const _: () = assert!(size_of::<DeviceDescriptor>() == 18);
 
-unsafe impl IntoPinnedMutableSlice for DeviceDescriptor {}
-unsafe impl IntoPinnedMutableSlice for ConfigDescriptor {}
-unsafe impl IntoPinnedMutableSlice for InterfaceDescriptor {}
-unsafe impl IntoPinnedMutableSlice for EndpointDescriptor {}
-
 #[derive(Debug, Copy, Clone, Default)]
 #[allow(unused)]
 #[repr(packed)]
@@ -175,3 +171,13 @@ impl EndpointDescriptor {
     }
 }
 const _: () = assert!(size_of::<EndpointDescriptor>() == 7);
+
+unsafe impl IntoPinnedMutableSlice for DeviceDescriptor {}
+unsafe impl IntoPinnedMutableSlice for ConfigDescriptor {}
+unsafe impl IntoPinnedMutableSlice for InterfaceDescriptor {}
+unsafe impl IntoPinnedMutableSlice for EndpointDescriptor {}
+
+unsafe impl Sliceable for DeviceDescriptor {}
+unsafe impl Sliceable for ConfigDescriptor {}
+unsafe impl Sliceable for InterfaceDescriptor {}
+unsafe impl Sliceable for EndpointDescriptor {}

@@ -1,6 +1,7 @@
 extern crate alloc;
 
 use crate::error::Result;
+use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use core::marker::PhantomPinned;
@@ -35,6 +36,8 @@ impl Debug for EthernetAddr {
         )
     }
 }
+
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct IpV4Addr {
     ip: [u8; 4],
@@ -53,8 +56,10 @@ impl Debug for IpV4Addr {
         )
     }
 }
+
 #[repr(packed)]
 #[allow(unused)]
+#[derive(Copy, Clone)]
 pub struct EthernetHeader {
     dst_eth: EthernetAddr,
     src_eth: EthernetAddr,
@@ -62,6 +67,7 @@ pub struct EthernetHeader {
 }
 const _: () = assert!(size_of::<EthernetHeader>() == 14);
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 #[allow(unused)]
 pub struct ArpPacket {
@@ -128,6 +134,7 @@ impl Debug for ArpPacket {
         )
     }
 }
+unsafe impl Sliceable for ArpPacket {}
 
 #[allow(unused)]
 mod ipv4_protocol {

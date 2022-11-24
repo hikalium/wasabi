@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::arch::x86_64::busy_loop_hint;
 use crate::arch::x86_64::read_io_port_u16;
+use crate::arch::x86_64::read_io_port_u32;
 use crate::arch::x86_64::read_io_port_u8;
 use crate::arch::x86_64::write_io_port_u16;
 use crate::arch::x86_64::write_io_port_u32;
@@ -19,6 +20,7 @@ use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::println;
+use crate::util::Sliceable;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use core::mem::size_of;
@@ -121,9 +123,26 @@ impl Rtl8139 {
             IpV4Addr::new([10, 0, 2, 15]),
             IpV4Addr::new([10, 0, 2, 2]),
         ));
+        self.queue_packet(arp_req.copy_into_slice())?;
+        self.queue_packet(arp_req.copy_into_slice())?;
 
+        const PACKET_NONE: Option<Box<[u8]>> = None;
+        let mut tx_queue_packets: [Option<Box<[u8]>>; 4] = [PACKET_NONE; 4];
         let rx_buf_ptr = self.rx_buf.as_ref().as_ptr();
         loop {
+            // Tx operations
+            for i in 0..4usize {
+                let tx_cmd = read_io_port_u32(self.io_base + (0x20 + 4 * i) as u16);
+                if tx_cmd & (1 << 13) != 0 {
+                    if tx_queue_packets[i].is_some() {
+                        println!("Tx[{}] sent!", i);
+                        tx_queue_packets[i].take();
+                    }
+                } else {
+                    continue;
+                }
+            }
+
             let arp_req = Box::pin(ArpPacket::request(
                 self.eth_addr,
                 IpV4Addr::new([10, 0, 2, 15]),
