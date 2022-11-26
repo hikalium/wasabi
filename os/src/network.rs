@@ -237,12 +237,21 @@ static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None);
 pub async fn network_manager_thread() -> Result<()> {
     println!("Network manager is started!");
     let network = Network::take();
+
     loop {
         println!("Network interfaces:");
         let interfaces = network.interfaces.lock();
         for iface in &*interfaces {
             if let Some(iface) = iface.upgrade() {
                 println!("{:?} {}", iface.ethernet_addr(), iface.name());
+                for _ in 0..10 {
+                    let arp_req = Box::pin(ArpPacket::request(
+                        iface.ethernet_addr(),
+                        IpV4Addr::new([10, 0, 2, 15]),
+                        IpV4Addr::new([10, 0, 2, 2]),
+                    ));
+                    iface.queue_packet(arp_req.copy_into_slice())?;
+                }
             }
         }
         TimeoutFuture::new_ms(1000).await;

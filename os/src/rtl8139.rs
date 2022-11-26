@@ -277,15 +277,6 @@ impl Rtl8139DriverInstance {
             Network::take().register_interface(d);
         }
         (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
-            for _ in 0..100 {
-                let arp_req = Box::pin(ArpPacket::request(
-                    d.eth_addr,
-                    IpV4Addr::new([10, 0, 2, 15]),
-                    IpV4Addr::new([10, 0, 2, 2]),
-                ));
-                d.queue_packet(arp_req.copy_into_slice())?;
-            }
-
             loop {
                 d.poll().await?
             }
