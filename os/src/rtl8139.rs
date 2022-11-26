@@ -69,10 +69,12 @@ struct Rtl8139 {
     //
     rx_buf: Pin<Box<[u8; RTL8139_RXBUF_SIZE]>>,
     next_rx_byte_idx: usize,
+    rx_packet_count: usize,
     //
     tx_pending_packets: VecDeque<Box<[u8]>>,
     tx_queued_packets: [Option<Pin<Box<[u8]>>>; 4],
     next_tx_reg_idx: usize,
+    tx_packet_count: usize,
 }
 impl Rtl8139 {
     // https://wiki.osdev.org/RTL8139
@@ -110,10 +112,12 @@ impl Rtl8139 {
             //
             rx_buf: Box::pin(unsafe { MaybeUninit::zeroed().assume_init() }),
             next_rx_byte_idx: 0,
+            rx_packet_count: 0,
             //
             tx_pending_packets: VecDeque::new(),
             tx_queued_packets: [PACKET_NONE; 4],
             next_tx_reg_idx: 0,
+            tx_packet_count: 0,
         };
         let rx_buf_ptr = d.rx_buf.as_ref().as_ptr();
         assert!((rx_buf_ptr as usize) < ((u32::MAX) as usize - RTL8139_RXBUF_SIZE));
@@ -133,7 +137,7 @@ impl Rtl8139 {
         // Tx operations
         loop {
             // Fill Tx Queue as much as possible
-            let tx_cmd = read_io_port_u32(self.io_base + (0x20 + 4 * self.next_tx_reg_idx) as u16);
+            let tx_cmd = read_io_port_u32(self.io_base + (0x10 + 4 * self.next_tx_reg_idx) as u16);
             // bit 0-12
             // - packet size. 1792 is the max size
             // bit 13 (OWND):
@@ -154,27 +158,35 @@ impl Rtl8139 {
             let qp = &mut self.tx_queued_packets[self.next_tx_reg_idx];
             if qp.is_some() && tx_cmd & (1 << 13) != 0 && tx_cmd & (1 << 15) != 0 {
                 // Tx operation is done, release the entry
-                qp.take();
+                *qp = None;
                 println!("Tx[{}] done!", self.next_tx_reg_idx);
             }
-
-            let next_packet = self.tx_pending_packets.pop_front();
-            if let (None, Some(next_packet)) = (&qp, next_packet) {
+            if qp.is_some() {
+                // No more Tx entry are available.
+                break;
+            }
+            // qp is None == we can send a packet
+            if let Some(next_packet) = self.tx_pending_packets.pop_front() {
                 // Enqueue Tx packet
                 let next_packet = Pin::new(next_packet);
+                let packet_len: u32 = next_packet.as_ref().len().try_into()?;
                 write_io_port_u32(
                     self.io_base + 0x20 + 4 * self.next_tx_reg_idx as u16, /* TSAD[self.next_tx_reg_idx], buf addr */
                     (next_packet.as_ref().get_ref().as_ptr() as usize).try_into()?,
                 );
                 write_io_port_u32(
                     self.io_base + 0x10 + 4 * self.next_tx_reg_idx as u16, /* TSD[self.next_tx_reg_idx], size + flags */
-                    next_packet.as_ref().len().try_into()?,
+                    packet_len,
                 );
-                println!("Tx[{}] queued!", self.next_tx_reg_idx);
+                println!(
+                    "Tx[{}] queued! packet_size = {}, #{}",
+                    self.next_tx_reg_idx, packet_len, self.tx_packet_count
+                );
                 *qp = Some(next_packet);
                 self.next_tx_reg_idx = (self.next_tx_reg_idx + 1) % 4;
+                self.tx_packet_count += 1;
             } else {
-                // No more Tx entry are available.
+                // No more packets to send
                 break;
             }
         }
@@ -196,16 +208,18 @@ impl Rtl8139 {
             // - 1 if broardcast packet is received.
             // bit 2
             // - 1 if physical address is received.
-            println!("rx_status: {}", rx_status);
             let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
-            println!("packet_len: {}", packet_len);
-            println!("Received packet:");
+            println!(
+                "rx_status: {}, packet_len: {}, next_rx_byte_idx: {}, #{}",
+                rx_status, packet_len, self.next_rx_byte_idx, self.rx_packet_count
+            );
             let arp = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
             if packet_len >= size_of::<ArpPacket>() {
                 let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
                 println!("{arp:?}");
             }
             self.next_rx_byte_idx += packet_len + 4;
+            self.rx_packet_count += 1;
         }
 
         TimeoutFuture::new_ms(100).await;
@@ -223,8 +237,9 @@ impl Rtl8139DriverInstance {
                 IpV4Addr::new([10, 0, 2, 15]),
                 IpV4Addr::new([10, 0, 2, 2]),
             ));
-            d.queue_packet(arp_req.copy_into_slice())?;
-            d.queue_packet(arp_req.copy_into_slice())?;
+            for _ in 0..200 {
+                d.queue_packet(arp_req.copy_into_slice())?;
+            }
 
             loop {
                 d.poll().await?
