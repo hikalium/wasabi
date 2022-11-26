@@ -14,6 +14,8 @@ use crate::mutex::Mutex;
 use crate::network::ArpPacket;
 use crate::network::EthernetAddr;
 use crate::network::IpV4Addr;
+use crate::network::Network;
+use crate::network::NetworkInterface;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
@@ -254,11 +256,26 @@ impl Rtl8139 {
         Ok(())
     }
 }
+impl NetworkInterface for Rtl8139 {
+    fn name(&self) -> &str {
+        "RTL8139"
+    }
+    fn ethernet_addr(&self) -> EthernetAddr {
+        self.eth_addr
+    }
+    fn queue_packet(&self, packet: Box<[u8]>) -> Result<()> {
+        self.queue_packet(packet)
+    }
+}
 
 pub struct Rtl8139DriverInstance {}
 impl Rtl8139DriverInstance {
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
         let d = Rc::new(Rtl8139::new(bdf)?);
+        {
+            let d = Rc::downgrade(&d);
+            Network::take().register_interface(d);
+        }
         (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
             for _ in 0..100 {
                 let arp_req = Box::pin(ArpPacket::request(

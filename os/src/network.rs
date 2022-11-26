@@ -1,9 +1,16 @@
 extern crate alloc;
 
 use crate::error::Result;
+use crate::executor::TimeoutFuture;
+use crate::mutex::Mutex;
+use crate::println;
 use crate::util::Sliceable;
+use alloc::boxed::Box;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::rc::Rc;
+use alloc::rc::Weak;
+use alloc::vec::Vec;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 
@@ -199,3 +206,45 @@ struct DhcpPacket {
     // Optional fields follow
 }
 const _: () = assert!(size_of::<DhcpPacket>() == 282);
+
+pub trait NetworkInterface {
+    fn name(&self) -> &str;
+    fn ethernet_addr(&self) -> EthernetAddr;
+    fn queue_packet(&self, packet: Box<[u8]>) -> Result<()>;
+}
+
+pub struct Network {
+    interfaces: Mutex<Vec<Weak<dyn NetworkInterface>>>,
+}
+impl Network {
+    fn new() -> Self {
+        Self {
+            interfaces: Mutex::new(Vec::new()),
+        }
+    }
+    pub fn take() -> Rc<Network> {
+        let mut network = NETWORK.lock();
+        let network = network.get_or_insert_with(|| Rc::new(Self::new()));
+        network.clone()
+    }
+    pub fn register_interface(&self, iface: Weak<dyn NetworkInterface>) {
+        let mut interfaces = self.interfaces.lock();
+        interfaces.push(iface)
+    }
+}
+static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None);
+
+pub async fn network_manager_thread() -> Result<()> {
+    println!("Network manager is started!");
+    let network = Network::take();
+    loop {
+        println!("Network interfaces:");
+        let interfaces = network.interfaces.lock();
+        for iface in &*interfaces {
+            if let Some(iface) = iface.upgrade() {
+                println!("{:?} {}", iface.ethernet_addr(), iface.name());
+            }
+        }
+        TimeoutFuture::new_ms(1000).await;
+    }
+}

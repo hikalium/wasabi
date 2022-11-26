@@ -23,6 +23,7 @@ use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
 use os::init;
 use os::init::init_pci;
+use os::network::network_manager_thread;
 use os::println;
 
 fn paint_wasabi_logo() {
@@ -107,6 +108,7 @@ fn run_tasks() -> Result<()> {
         let mut executor = ROOT_EXECUTOR.lock();
         executor.spawn(Task::new(task0));
         executor.spawn(Task::new(task1));
+        executor.spawn(Task::new(async { network_manager_thread().await }));
     }
     init_pci();
     Executor::run(&ROOT_EXECUTOR);
