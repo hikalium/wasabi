@@ -39,16 +39,6 @@ impl PciDeviceDriver for Rtl8139Driver {
             vendor: 0x10ec,
             device: 0x8139,
         };
-        // akemi
-        // 8086:02ed Comet Lake PCH-LP USB 3.1 xHCI Host Controller
-        // 8086:02f0 Comet Lake PCH-LP CNVi WiFi
-        // 8086:02e8 Serial IO I2C Host Controller
-        // 8086:02e9 Comet Lake Serial IO I2C Host Controller
-        // 8086:02c5 Comet Lake Serial IO I2C Host Controller
-        // 8086:02c8 Comet Lake PCH-LP cAVS
-        // 8086:02a3 Comet Lake PCH-LP SMBus Host Controller
-        // 8086:02a4 Comet Lake SPI (flash) Controller
-
         vp == RTL8139_ID
     }
     fn attach(&self, bdf: BusDeviceFunction) -> Result<Box<dyn PciDeviceDriverInstance>> {
