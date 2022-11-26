@@ -1,7 +1,6 @@
 extern crate alloc;
 
 use crate::arch::x86_64::busy_loop_hint;
-use crate::arch::x86_64::read_io_port_u16;
 use crate::arch::x86_64::read_io_port_u32;
 use crate::arch::x86_64::read_io_port_u8;
 use crate::arch::x86_64::write_io_port_u16;
@@ -60,14 +59,20 @@ impl PciDeviceDriver for Rtl8139Driver {
     }
 }
 
-const RTL8139_RXBUF_SIZE: usize = 8208;
+// RTL8139_RXBUF_SIZE == 8192+16+1500 for WRAP=1
+// See https://wiki.osdev.org/RTL8139 for more info
+const RTL8139_RXBUF_SIZE: usize = 9708;
 struct Rtl8139 {
     _bdf: BusDeviceFunction,
-    rx_buf: Pin<Box<[u8; RTL8139_RXBUF_SIZE]>>,
-    eth_addr: EthernetAddr,
     io_base: u16,
-    next_tx_reg_idx: usize, // 0-3
+    eth_addr: EthernetAddr,
+    //
+    rx_buf: Pin<Box<[u8; RTL8139_RXBUF_SIZE]>>,
+    next_rx_byte_idx: usize,
+    //
     tx_pending_packets: VecDeque<Box<[u8]>>,
+    tx_queued_packets: [Option<Pin<Box<[u8]>>>; 4],
+    next_tx_reg_idx: usize,
 }
 impl Rtl8139 {
     // https://wiki.osdev.org/RTL8139
@@ -96,21 +101,28 @@ impl Rtl8139 {
             busy_loop_hint();
         }
         println!("Software Reset Done!");
+
+        const PACKET_NONE: Option<Pin<Box<[u8]>>> = None;
         let d = Self {
             _bdf: bdf,
-            rx_buf: Box::pin(unsafe { MaybeUninit::zeroed().assume_init() }),
-            eth_addr,
             io_base,
-            next_tx_reg_idx: 0,
+            eth_addr,
+            //
+            rx_buf: Box::pin(unsafe { MaybeUninit::zeroed().assume_init() }),
+            next_rx_byte_idx: 0,
+            //
             tx_pending_packets: VecDeque::new(),
+            tx_queued_packets: [PACKET_NONE; 4],
+            next_tx_reg_idx: 0,
         };
         let rx_buf_ptr = d.rx_buf.as_ref().as_ptr();
         assert!((rx_buf_ptr as usize) < ((u32::MAX) as usize - RTL8139_RXBUF_SIZE));
         println!("rx_buffer is at {:#p}", rx_buf_ptr);
         write_io_port_u32(io_base + 0x30, rx_buf_ptr as usize as u32);
         write_io_port_u32(io_base + 0x3C, 0x0005); // Interrupts: Transmit OK, Receive OK
-        write_io_port_u16(io_base + 0x44, 0xf); // AB+AM+APM+AAP
-        write_io_port_u8(io_base + 0x37, 0x0C); // RE+TE
+        write_io_port_u16(io_base + 0x44, 0x8f); // WRAP+AB+AM+APM+AAP (receive any type of packets)
+        write_io_port_u8(io_base + 0x37, 0x0C); // RE+TE (Enable Rx and Tx)
+
         Ok(d)
     }
     fn queue_packet(&mut self, packet: Box<[u8]>) -> Result<()> {
@@ -118,69 +130,86 @@ impl Rtl8139 {
         Ok(())
     }
     async fn poll(&mut self) -> Result<()> {
-        let arp_req = Box::pin(ArpPacket::request(
-            self.eth_addr,
-            IpV4Addr::new([10, 0, 2, 15]),
-            IpV4Addr::new([10, 0, 2, 2]),
-        ));
-        self.queue_packet(arp_req.copy_into_slice())?;
-        self.queue_packet(arp_req.copy_into_slice())?;
-
-        const PACKET_NONE: Option<Box<[u8]>> = None;
-        let mut tx_queue_packets: [Option<Box<[u8]>>; 4] = [PACKET_NONE; 4];
-        let rx_buf_ptr = self.rx_buf.as_ref().as_ptr();
+        // Tx operations
         loop {
-            // Tx operations
-            for i in 0..4usize {
-                let tx_cmd = read_io_port_u32(self.io_base + (0x20 + 4 * i) as u16);
-                if tx_cmd & (1 << 13) != 0 {
-                    if tx_queue_packets[i].is_some() {
-                        println!("Tx[{}] sent!", i);
-                        tx_queue_packets[i].take();
-                    }
-                } else {
-                    continue;
-                }
+            // Fill Tx Queue as much as possible
+            let tx_cmd = read_io_port_u32(self.io_base + (0x20 + 4 * self.next_tx_reg_idx) as u16);
+            // bit 0-12
+            // - packet size. 1792 is the max size
+            // bit 13 (OWND):
+            // - 0 if the data is owned by the device (DMA is in progress)
+            // - 1 if the data is owned by software (DMA is completed)
+            // - setting this bit to 0 will clear all other bits as well
+            // bit 15 (TXOK):
+            // - 0 if the data is being sent to network (transmission is in progress)
+            // - 1 if the data is transmitted (transmission is completed)
+
+            // (tx_queued_packet, OWND, TXOK)
+            // Init > (None, 1, 0)
+            // Write buffer addr > (Some(_), 0, 0)
+            // DMA completed > (Some(_), 1, 0)
+            // Transmission completed > (Some(_), 1, 1)
+            // Queued packet discarded > (None, _, _)
+
+            let qp = &mut self.tx_queued_packets[self.next_tx_reg_idx];
+            if qp.is_some() && tx_cmd & (1 << 13) != 0 && tx_cmd & (1 << 15) != 0 {
+                // Tx operation is done, release the entry
+                qp.take();
+                println!("Tx[{}] done!", self.next_tx_reg_idx);
             }
 
-            let arp_req = Box::pin(ArpPacket::request(
-                self.eth_addr,
-                IpV4Addr::new([10, 0, 2, 15]),
-                IpV4Addr::new([10, 0, 2, 2]),
-            ));
+            let next_packet = self.tx_pending_packets.pop_front();
+            if let (None, Some(next_packet)) = (&qp, next_packet) {
+                // Enqueue Tx packet
+                let next_packet = Pin::new(next_packet);
+                write_io_port_u32(
+                    self.io_base + 0x20 + 4 * self.next_tx_reg_idx as u16, /* TSAD[self.next_tx_reg_idx], buf addr */
+                    (next_packet.as_ref().get_ref().as_ptr() as usize).try_into()?,
+                );
+                write_io_port_u32(
+                    self.io_base + 0x10 + 4 * self.next_tx_reg_idx as u16, /* TSD[self.next_tx_reg_idx], size + flags */
+                    next_packet.as_ref().len().try_into()?,
+                );
+                println!("Tx[{}] queued!", self.next_tx_reg_idx);
+                *qp = Some(next_packet);
+                self.next_tx_reg_idx = (self.next_tx_reg_idx + 1) % 4;
+            } else {
+                // No more Tx entry are available.
+                break;
+            }
+        }
 
-            write_io_port_u32(
-                self.io_base + 0x20, /* TSAD[0] */
-                (arp_req.as_ref().get_ref() as *const ArpPacket as usize).try_into()?,
-            );
-            write_io_port_u32(
-                self.io_base + 0x10, /* TSD[0] */
-                size_of::<ArpPacket>().try_into()?,
-            );
-            println!("Sending ARP Request...");
-            println!("{arp_req:?}");
-            let write_count = loop {
-                let write_count = read_io_port_u16(self.io_base + 0x3A);
-                if write_count != 0 {
-                    break write_count;
-                }
-                busy_loop_hint();
-            };
-            println!("write_count: {}", write_count);
-            let rx_status = unsafe { *(rx_buf_ptr as *const u16) };
+        // Rx Operations
+        loop {
+            let rx_buf_ptr = self.rx_buf.as_ref().as_ptr();
+            let rx_desc_ptr = unsafe { rx_buf_ptr.add(self.next_rx_byte_idx) };
+            let rx_status = unsafe { *(rx_desc_ptr.add(0) as *const u16) };
+            if rx_status == 0 {
+                break;
+            }
+            // Rx Status Info
+            // bit 0
+            // - 1 if a good packet is received
+            // bit 1-5
+            // - Other than 0 means error
+            // bit 1
+            // - 1 if broardcast packet is received.
+            // bit 2
+            // - 1 if physical address is received.
             println!("rx_status: {}", rx_status);
-            let packet_len = unsafe { *(rx_buf_ptr.offset(2) as *const u16) } as usize;
+            let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
             println!("packet_len: {}", packet_len);
             println!("Received packet:");
-            let arp = unsafe { slice::from_raw_parts(rx_buf_ptr.offset(4), packet_len) };
+            let arp = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
             if packet_len >= size_of::<ArpPacket>() {
                 let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
                 println!("{arp:?}");
             }
-
-            println!("sending ping!!\n");
-            TimeoutFuture::new_ms(1000).await;
+            self.next_rx_byte_idx += packet_len + 4;
         }
+
+        TimeoutFuture::new_ms(100).await;
+        Ok(())
     }
 }
 
@@ -188,7 +217,19 @@ pub struct Rtl8139DriverInstance {}
 impl Rtl8139DriverInstance {
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
         let mut d = Rtl8139::new(bdf)?;
-        (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move { d.poll().await }));
+        (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
+            let arp_req = Box::pin(ArpPacket::request(
+                d.eth_addr,
+                IpV4Addr::new([10, 0, 2, 15]),
+                IpV4Addr::new([10, 0, 2, 2]),
+            ));
+            d.queue_packet(arp_req.copy_into_slice())?;
+            d.queue_packet(arp_req.copy_into_slice())?;
+
+            loop {
+                d.poll().await?
+            }
+        }));
         Ok(Self {})
     }
 }
