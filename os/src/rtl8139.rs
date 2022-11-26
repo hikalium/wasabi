@@ -182,7 +182,6 @@ impl Rtl8139 {
                     println!("Tx[{}] done!", index);
                 } else {
                     // No more Tx entry are available.
-                    println!("No more tx entry. tx_cmd[{}] == {:#06X}", index, tx_cmd);
                     break;
                 }
             }
@@ -204,13 +203,11 @@ impl Rtl8139 {
                     "Tx[{}] queued! packet_size = {}, #{}",
                     index, packet_len, tx.packet_count
                 );
-                println!("tx_cmd[{}] == {:#06X}", index, tx_cmd);
                 tx.queued_packets[index] = Some(next_packet);
                 tx.next_index = (index + 1) % 4;
                 tx.packet_count += 1;
             } else {
                 // No more packets to send
-                println!("No more packets to send");
                 break;
             }
         }
@@ -251,10 +248,9 @@ impl Rtl8139 {
         Ok(())
     }
     async fn poll(&self) -> Result<()> {
-        println!("poll!");
         self.poll_tx()?;
         self.poll_rx()?;
-        TimeoutFuture::new_ms(1000).await;
+        TimeoutFuture::new_ms(100).await;
         Ok(())
     }
 }
