@@ -20,6 +20,7 @@ QEMU_ARGS=\
 		-rtc base=localtime \
 		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
 		--no-reboot \
+		-D qemu_debug.log \
 		${MORE_QEMU_FLAGS}
 
 # -device usb-host,hostbus=1,hostport=1 \

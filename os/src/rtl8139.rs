@@ -139,7 +139,7 @@ impl Rtl8139 {
         println!("rx_buffer is at {:#p}", rx_buf_ptr);
         write_io_port_u32(io_base + 0x30, rx_buf_ptr as usize as u32);
         write_io_port_u32(io_base + 0x3C, 0x0005); // Interrupts: Transmit OK, Receive OK
-        write_io_port_u16(io_base + 0x44, 0x8f); // WRAP+AB+AM+APM+AAP (receive any type of packets)
+        write_io_port_u32(io_base + 0x44, 0x8f); // WRAP+AB+AM+APM+AAP (receive any type of packets)
         write_io_port_u8(io_base + 0x37, 0x0C); // RE+TE (Enable Rx and Tx)
 
         Ok(d)
@@ -149,9 +149,9 @@ impl Rtl8139 {
         tx.pending_packets.push_back(packet);
         Ok(())
     }
-    fn update_rx_buf_read_ptr(&self, rp: *const u8) {
+    fn update_rx_buf_read_ptr(&self, read_index: u16) {
         // CAPR: Current Address of Packet Read
-        write_io_port_u32(self.io_base + 0x38, u32::try_from(rp as usize).unwrap());
+        write_io_port_u16(self.io_base + 0x38, read_index);
     }
     fn poll_tx(&self) -> Result<()> {
         let mut tx = self.tx.lock();
@@ -218,7 +218,7 @@ impl Rtl8139 {
     fn poll_rx(&self) -> Result<()> {
         let mut rx = self.rx.lock();
         loop {
-            let rx_buf_ptr = rx.buf.as_ref().as_ptr();
+            let rx_buf_ptr = unsafe { rx.buf.as_mut().get_unchecked_mut().as_mut_ptr() };
             let rx_desc_ptr = unsafe { rx_buf_ptr.add(rx.next_index) };
             let rx_status = unsafe { *(rx_desc_ptr.add(0) as *const u16) };
             if rx_status == 0 {
@@ -243,8 +243,18 @@ impl Rtl8139 {
                 let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
                 println!("{arp:?}");
             }
-            self.update_rx_buf_read_ptr(rx_desc_ptr);
+
+            // Erase the packet for the next cycle
+            unsafe { rx_desc_ptr.write_bytes(0, packet_len + 4) };
+            self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());
+            write_io_port_u16(self.io_base + 0x3E, 0x1);
             rx.next_index += packet_len + 4;
+            if rx.next_index >= 8192 {
+                println!("!!!!!!!!!!!!!!!!!!!!!!!!!!! LOOOOOOOP");
+                rx.next_index %= 8192;
+                self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());
+                write_io_port_u16(self.io_base + 0x3E, 0x11 /*RxOverflow + RxOk*/);
+            }
             rx.packet_count += 1;
         }
         Ok(())

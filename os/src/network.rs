@@ -244,7 +244,7 @@ pub async fn network_manager_thread() -> Result<()> {
         for iface in &*interfaces {
             if let Some(iface) = iface.upgrade() {
                 println!("{:?} {}", iface.ethernet_addr(), iface.name());
-                for _ in 0..10 {
+                for _ in 0..30 {
                     let arp_req = Box::pin(ArpPacket::request(
                         iface.ethernet_addr(),
                         IpV4Addr::new([10, 0, 2, 15]),
