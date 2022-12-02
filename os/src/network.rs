@@ -13,6 +13,8 @@ use alloc::rc::Weak;
 use alloc::vec::Vec;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 
 #[repr(packed)]
 #[derive(Clone, Copy)]
@@ -215,11 +217,13 @@ pub trait NetworkInterface {
 
 pub struct Network {
     interfaces: Mutex<Vec<Weak<dyn NetworkInterface>>>,
+    interface_has_added: AtomicBool,
 }
 impl Network {
     fn new() -> Self {
         Self {
             interfaces: Mutex::new(Vec::new()),
+            interface_has_added: AtomicBool::new(false),
         }
     }
     pub fn take() -> Rc<Network> {
@@ -229,7 +233,8 @@ impl Network {
     }
     pub fn register_interface(&self, iface: Weak<dyn NetworkInterface>) {
         let mut interfaces = self.interfaces.lock();
-        interfaces.push(iface)
+        interfaces.push(iface);
+        self.interface_has_added.store(true, Ordering::SeqCst);
     }
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None);
@@ -239,18 +244,25 @@ pub async fn network_manager_thread() -> Result<()> {
     let network = Network::take();
 
     loop {
-        println!("Network interfaces:");
-        let interfaces = network.interfaces.lock();
-        for iface in &*interfaces {
-            if let Some(iface) = iface.upgrade() {
-                println!("{:?} {}", iface.ethernet_addr(), iface.name());
-                for _ in 0..30 {
-                    let arp_req = Box::pin(ArpPacket::request(
-                        iface.ethernet_addr(),
-                        IpV4Addr::new([10, 0, 2, 15]),
-                        IpV4Addr::new([10, 0, 2, 2]),
-                    ));
-                    iface.queue_packet(arp_req.copy_into_slice())?;
+        if let network.interface_has_added.compare_exchange_weak(
+            true,
+            false,
+            Ordering::SeqCst,
+            Ordering::Relaxed,
+        ).is_ok() {
+            println!("Network: network interfaces updated:");
+            let interfaces = network.interfaces.lock();
+            for iface in &*interfaces {
+                if let Some(iface) = iface.upgrade() {
+                    println!("{:?} {}", iface.ethernet_addr(), iface.name());
+                    for _ in 0..30 {
+                        let arp_req = Box::pin(ArpPacket::request(
+                            iface.ethernet_addr(),
+                            IpV4Addr::new([10, 0, 2, 15]),
+                            IpV4Addr::new([10, 0, 2, 2]),
+                        ));
+                        iface.queue_packet(arp_req.copy_into_slice())?;
+                    }
                 }
             }
         }

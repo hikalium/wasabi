@@ -100,11 +100,6 @@ impl Rtl8139 {
         let pci = Pci::take();
         pci.disable_interrupt(bdf)?;
         pci.enable_bus_master(bdf)?;
-        if let Some(caps) = pci.capabilities(bdf) {
-            for cap in caps {
-                println!("CAP {:#04X}", cap.id);
-            }
-        }
         // Assume that BAR0 has IO Port address
         let io_base = pci.try_bar0_io(bdf)?;
         let mut eth_addr = [0u8; 6];
@@ -112,7 +107,7 @@ impl Rtl8139 {
             *e = read_io_port_u8(io_base + i as u16);
         }
         let eth_addr = EthernetAddr::new(eth_addr);
-        println!("eth_addr: {:?}", eth_addr);
+        println!("Rtl8139: eth_addr: {:?}", eth_addr);
         // Turn on
         write_io_port_u8(io_base + 0x52, 0);
         // Software Reset
@@ -120,7 +115,6 @@ impl Rtl8139 {
         while (read_io_port_u8(io_base + 0x37) & 0x10) != 0 {
             busy_loop_hint();
         }
-        println!("Software Reset Done!");
 
         let d = Self {
             _bdf: bdf,
@@ -134,7 +128,6 @@ impl Rtl8139 {
             rx.buf.as_ref().as_ptr()
         };
         assert!((rx_buf_ptr as usize) < ((u32::MAX) as usize - RTL8139_RXBUF_SIZE));
-        println!("rx_buffer is at {:#p}", rx_buf_ptr);
         write_io_port_u32(io_base + 0x30, rx_buf_ptr as usize as u32);
         write_io_port_u32(io_base + 0x3C, 0x0005); // Interrupts: Transmit OK, Receive OK
         write_io_port_u32(io_base + 0x44, 0x8f); // WRAP+AB+AM+APM+AAP (receive any type of packets)
@@ -175,11 +168,9 @@ impl Rtl8139 {
             // Queued packet discarded > (None, _, _)
 
             if tx.queued_packets[index].is_some() {
-                println!("tx_cmd[{}] == {:#06X}", index, tx_cmd);
                 if tx_cmd & (1 << 13) != 0 && tx_cmd & (1 << 15) != 0 {
                     // Tx operation is done, release the entry
                     tx.queued_packets[index] = None;
-                    println!("Tx[{}] done!", index);
                 } else {
                     // No more Tx entry are available.
                     break;
@@ -198,10 +189,6 @@ impl Rtl8139 {
                 write_io_port_u32(
                     self.io_base + 0x10 + 4 * index as u16, /* TSD[self.next_tx_reg_idx], size + flags */
                     packet_len,
-                );
-                println!(
-                    "Tx[{}] queued! packet_size = {}, #{}",
-                    index, packet_len, tx.packet_count
                 );
                 tx.queued_packets[index] = Some(next_packet);
                 tx.next_index = (index + 1) % 4;
@@ -232,14 +219,9 @@ impl Rtl8139 {
             // bit 2
             // - 1 if physical address is received.
             let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
-            println!(
-                "rx_status: {}, packet_len: {}, next_rx_byte_idx: {}, #{}",
-                rx_status, packet_len, rx.next_index, rx.packet_count,
-            );
             let arp = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
             if packet_len >= size_of::<ArpPacket>() {
                 let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
-                println!("{arp:?}");
             }
 
             // Erase the packet for the next cycle
@@ -248,7 +230,6 @@ impl Rtl8139 {
             write_io_port_u16(self.io_base + 0x3E, 0x1);
             rx.next_index += packet_len + 4;
             if rx.next_index >= 8192 {
-                println!("!!!!!!!!!!!!!!!!!!!!!!!!!!! LOOOOOOOP");
                 rx.next_index %= 8192;
                 self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());
                 write_io_port_u16(self.io_base + 0x3E, 0x11 /*RxOverflow + RxOk*/);
