@@ -8,3 +8,4 @@ name="hello"
 test=false
 
 [dependencies]
+noli = { path = "../noli", version = "0.1.0" }
