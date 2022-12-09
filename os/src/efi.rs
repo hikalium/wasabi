@@ -1,5 +1,5 @@
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::memory_map_holder;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::util::size_in_pages_from_bytes;

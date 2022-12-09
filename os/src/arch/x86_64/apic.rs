@@ -1,7 +1,7 @@
 use crate::arch::x86_64;
 use crate::arch::x86_64::CpuidRequest;
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::println;
 use core::ptr::write_volatile;
 

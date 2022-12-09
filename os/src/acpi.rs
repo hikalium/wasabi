@@ -1,5 +1,5 @@
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::hpet;
 use crate::println;
 use core::fmt;

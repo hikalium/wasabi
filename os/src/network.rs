@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::error::Error;
 use crate::error::Result;
 use crate::executor::TimeoutFuture;
 use crate::mutex::Mutex;
@@ -102,7 +103,7 @@ impl ArpPacket {
             tmp.copy_from_slice(&bytes[0..size_of::<ArpPacket>()]);
             Ok(unsafe { core::mem::transmute(tmp) })
         } else {
-            Err(crate::error::Error::Failed("too short"))
+            Err(Error::Failed("too short"))
         }
     }
     pub fn request(src_eth: EthernetAddr, src_ip: IpV4Addr, dst_ip: IpV4Addr) -> Self {
@@ -244,12 +245,11 @@ pub async fn network_manager_thread() -> Result<()> {
     let network = Network::take();
 
     loop {
-        if let network.interface_has_added.compare_exchange_weak(
-            true,
-            false,
-            Ordering::SeqCst,
-            Ordering::Relaxed,
-        ).is_ok() {
+        if network
+            .interface_has_added
+            .compare_exchange_weak(true, false, Ordering::SeqCst, Ordering::Relaxed)
+            .is_ok()
+        {
             println!("Network: network interfaces updated:");
             let interfaces = network.interfaces.lock();
             for iface in &*interfaces {

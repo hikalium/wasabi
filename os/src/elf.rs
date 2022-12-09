@@ -1,8 +1,8 @@
 extern crate alloc;
 
 use crate::boot_info::File;
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::println;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;

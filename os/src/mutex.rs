@@ -11,8 +11,8 @@
 //! is unique so taking a mutable reference
 //! to it will be safe.
 
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use core::cell::SyncUnsafeCell;
 use core::ops::Deref;
 use core::ops::DerefMut;

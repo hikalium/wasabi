@@ -20,9 +20,7 @@ use os::simple_allocator::ALLOCATOR;
 use os::text_area::TextArea;
 use os::vram;
 
-pub fn main_with_boot_services(
-    efi_system_table: &EFISystemTable,
-) -> Result<WasabiBootInfo, Error> {
+pub fn main_with_boot_services(efi_system_table: &EFISystemTable) -> Result<WasabiBootInfo, Error> {
     let mut efi_writer = EFISimpleTextOutputProtocolWriter {
         protocol: efi_system_table.con_out,
     };

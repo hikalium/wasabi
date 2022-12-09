@@ -28,6 +28,8 @@ use core::mem::size_of;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 use core::slice;
+use core::sync::atomic::fence;
+use core::sync::atomic::Ordering;
 
 pub struct Rtl8139Driver {}
 impl Rtl8139Driver {
@@ -185,7 +187,7 @@ impl Rtl8139 {
                     self.io_base + 0x20 + 4 * index as u16, /* TSAD[self.next_tx_reg_idx], buf addr */
                     (next_packet.as_ref().get_ref().as_ptr() as usize).try_into()?,
                 );
-                core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+                fence(Ordering::SeqCst);
                 write_io_port_u32(
                     self.io_base + 0x10 + 4 * index as u16, /* TSD[self.next_tx_reg_idx], size + flags */
                     packet_len,
@@ -221,7 +223,7 @@ impl Rtl8139 {
             let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
             let arp = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
             if packet_len >= size_of::<ArpPacket>() {
-                let arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
+                let _arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
             }
 
             // Erase the packet for the next cycle

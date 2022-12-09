@@ -20,11 +20,7 @@ impl File {
     /// # Safety
     ///
     /// passed data and len should be valid
-    pub unsafe fn from_raw(
-        name: EfiFileName,
-        data: *mut u8,
-        len: usize,
-    ) -> Result<Self, Error> {
+    pub unsafe fn from_raw(name: EfiFileName, data: *mut u8, len: usize) -> Result<Self, Error> {
         Ok(Self {
             name,
             data: core::slice::from_raw_parts_mut(data, len),

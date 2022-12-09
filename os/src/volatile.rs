@@ -1,5 +1,5 @@
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use core::ops::BitAnd;
 use core::ops::BitOr;
 use core::ops::Not;

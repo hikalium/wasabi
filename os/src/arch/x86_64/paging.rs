@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use crate::error::Result;
 use crate::error::Error;
+use crate::error::Result;
 use crate::util::PAGE_SIZE;
 use alloc::boxed::Box;
 use core::arch::asm;
