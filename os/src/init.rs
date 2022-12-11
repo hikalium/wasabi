@@ -214,7 +214,8 @@ pub fn init_paging() -> Result<()> {
             _ => (),
         }
     }
-    table.create_mapping(0, end_of_mem, 0, PageAttr::ReadWriteKernel)?;
+    // TODO(hikalium): Use ReadWriteKernel
+    table.create_mapping(0, end_of_mem, 0, PageAttr::ReadWriteUser)?;
     println!("{:?}", table);
     unsafe {
         write_cr3(Box::into_raw(table));
@@ -227,12 +228,13 @@ pub fn init_interrupts() {
     println!("Initial rsp = {:#018X}", x86_64::read_rsp());
     unsafe {
         GDT.load();
-        x86_64::write_es(x86_64::KERNEL_DS);
         x86_64::write_cs(x86_64::KERNEL_CS);
         x86_64::write_ss(x86_64::KERNEL_DS);
-        x86_64::write_ds(x86_64::KERNEL_DS);
-        x86_64::write_fs(x86_64::KERNEL_DS);
-        x86_64::write_gs(x86_64::KERNEL_DS);
+        // TODO(hikalium): Use KERNEL_DS
+        x86_64::write_es(x86_64::USER_DS);
+        x86_64::write_ds(x86_64::USER_DS);
+        x86_64::write_fs(x86_64::USER_DS);
+        x86_64::write_gs(x86_64::USER_DS);
     }
     x86_64::disable_legacy_pic();
     let bsp_local_apic = BootInfo::take().bsp_local_apic();

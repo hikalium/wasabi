@@ -1,5 +1,5 @@
 bulid:
-	cargo build
+	cargo -v build
 	cargo install --path . --root ../../generated/
 	file ../../generated/bin/hello
 	ls -lah ../../generated/bin/hello

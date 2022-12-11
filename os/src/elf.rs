@@ -145,6 +145,11 @@ impl<'a> Elf<'a> {
         let retcode: i64;
         unsafe {
             asm!("call rax",
+                // Call exit() when it is returned
+                "mov ecx, eax",
+                "mov eax, 0 // exit",
+                "syscall",
+                "ud2",
                 in("rax") code_dst.as_ptr().add(rel_code_entry_ofs as usize),
                 lateout("rax") retcode,
             );

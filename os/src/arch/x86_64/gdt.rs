@@ -1,12 +1,24 @@
-use attr_bits::BIT_CS_LONG_MODE;
-use attr_bits::BIT_CS_READABLE;
-use attr_bits::BIT_DS_WRITABLE;
-use attr_bits::BIT_PRESENT;
-use attr_bits::BIT_TYPE_CODE;
-use attr_bits::BIT_TYPE_DATA;
 use core::arch::asm;
 use core::fmt;
 use core::mem::size_of;
+
+pub const BIT_TYPE_DATA: u64 = 0b10u64 << 43;
+pub const BIT_TYPE_CODE: u64 = 0b11u64 << 43;
+
+pub const BIT_PRESENT: u64 = 1u64 << 47;
+pub const BIT_CS_LONG_MODE: u64 = 1u64 << 53;
+pub const BIT_CS_READABLE: u64 = 1u64 << 53;
+pub const BIT_DS_WRITABLE: u64 = 1u64 << 41;
+pub const BIT_DPL0: u64 = 0u64 << 45;
+pub const BIT_DPL3: u64 = 3u64 << 45;
+
+#[repr(u64)]
+enum GdtAttr {
+    KernelCode = BIT_TYPE_CODE | BIT_PRESENT | BIT_CS_LONG_MODE | BIT_CS_READABLE,
+    KernelData = BIT_TYPE_DATA | BIT_PRESENT | BIT_DS_WRITABLE,
+    User64Code = BIT_TYPE_CODE | BIT_PRESENT | BIT_CS_LONG_MODE | BIT_CS_READABLE | BIT_DPL3,
+    UserData = BIT_TYPE_DATA | BIT_PRESENT | BIT_DS_WRITABLE | BIT_DPL3,
+}
 
 #[allow(dead_code)]
 #[repr(packed)]
@@ -46,25 +58,9 @@ pub static GDT: Gdt = Gdt {
     kernel_code_segment: GdtSegmentDescriptor::new(GdtAttr::KernelCode),
     kernel_data_segment: GdtSegmentDescriptor::new(GdtAttr::KernelData),
     user_code_segment_32: GdtSegmentDescriptor::null(),
-    user_data_segment: GdtSegmentDescriptor::null(),
-    user_code_segment_64: GdtSegmentDescriptor::null(),
+    user_data_segment: GdtSegmentDescriptor::new(GdtAttr::UserData),
+    user_code_segment_64: GdtSegmentDescriptor::new(GdtAttr::User64Code),
 };
-
-mod attr_bits {
-    pub const BIT_TYPE_DATA: u64 = 0b10u64 << 43;
-    pub const BIT_TYPE_CODE: u64 = 0b11u64 << 43;
-
-    pub const BIT_PRESENT: u64 = 1u64 << 47;
-    pub const BIT_CS_LONG_MODE: u64 = 1u64 << 53;
-    pub const BIT_CS_READABLE: u64 = 1u64 << 53;
-    pub const BIT_DS_WRITABLE: u64 = 1u64 << 41;
-}
-
-#[repr(u64)]
-enum GdtAttr {
-    KernelCode = BIT_TYPE_CODE | BIT_PRESENT | BIT_CS_LONG_MODE | BIT_CS_READABLE,
-    KernelData = BIT_TYPE_DATA | BIT_PRESENT | BIT_DS_WRITABLE,
-}
 
 pub struct GdtSegmentDescriptor {
     value: u64,

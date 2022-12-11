@@ -20,6 +20,7 @@ QEMU_ARGS=\
 		-rtc base=localtime \
 		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
 		--no-reboot \
+		-d int,cpu_reset \
 		-D qemu_debug.log \
 		${MORE_QEMU_FLAGS}
 
@@ -163,7 +164,7 @@ act:
 	act -P hikalium/wasabi-builder:latest=hikalium/wasabi-builder:latest
 
 symbols:
-	cargo run --bin=dbgutil > symbols.txt
+	cargo run --bin=dbgutil > symbols.txt < /dev/null
 
 objdump:
 	cargo install cargo-binutils
@@ -171,3 +172,7 @@ objdump:
 	cd os && cargo-objdump -- -d > ../objdump.txt
 	echo "Saved objdump as objdump.txt"
 
+crash:
+	@cat com2.log | grep -a LOADER_CODE | tee dbgutil_input.txt
+	@cat qemu_debug.log | grep -e 'check_exception old' -A 100 | grep -e check_exception -e 'RIP' -e 'fault' -e 'CR2' -e 'e=' | tee -a dbgutil_input.txt
+	cargo run --bin=dbgutil < dbgutil_input.txt

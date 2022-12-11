@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+use arch::x86_64::init_syscall;
 use core::pin::Pin;
 use os::arch;
 use os::arch::x86_64;
@@ -23,7 +24,6 @@ use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
 use os::init;
-use os::init::init_pci;
 use os::network::network_manager_thread;
 use os::println;
 
@@ -111,7 +111,7 @@ fn run_tasks() -> Result<()> {
         executor.spawn(Task::new(task1));
         executor.spawn(Task::new(async { network_manager_thread().await }));
     }
-    init_pci();
+    init::init_pci();
     Executor::run(&ROOT_EXECUTOR);
     Ok(())
 }
@@ -126,6 +126,7 @@ fn main() -> Result<()> {
     init::init_interrupts();
     init::init_paging()?;
     init::init_timer();
+    init_syscall();
 
     println!("Wasabi OS booted.");
 
