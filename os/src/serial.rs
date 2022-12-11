@@ -37,13 +37,9 @@ pub fn com_initialize(base_io_addr: u16) {
 pub struct SerialConsoleWriter {
     base_io_addr: u16,
 }
-
 impl SerialConsoleWriter {
     pub fn new(base_io_addr: u16) -> Self {
         Self { base_io_addr }
-    }
-    pub fn default() -> Self {
-        Self::new(IO_ADDR_COM2)
     }
     pub fn send_char(&self, c: char) {
         while (x86_64::read_io_port_u8(self.base_io_addr + 5) & 0x20) == 0 {
@@ -60,11 +56,15 @@ impl SerialConsoleWriter {
         }
     }
 }
-
 impl fmt::Write for SerialConsoleWriter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let serial = SerialConsoleWriter::default();
         serial.send_str(s);
         Ok(())
+    }
+}
+impl Default for SerialConsoleWriter {
+    fn default() -> Self {
+        Self::new(IO_ADDR_COM2)
     }
 }

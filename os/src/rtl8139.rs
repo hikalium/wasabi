@@ -31,12 +31,8 @@ use core::slice;
 use core::sync::atomic::fence;
 use core::sync::atomic::Ordering;
 
+#[derive(Default)]
 pub struct Rtl8139Driver {}
-impl Rtl8139Driver {
-    pub fn default() -> Self {
-        Rtl8139Driver {}
-    }
-}
 impl PciDeviceDriver for Rtl8139Driver {
     fn supports(&self, vp: VendorDeviceId) -> bool {
         const RTL8139_ID: VendorDeviceId = VendorDeviceId {

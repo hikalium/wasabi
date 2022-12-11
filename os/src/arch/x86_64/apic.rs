@@ -14,8 +14,19 @@ pub struct LocalApic {
 }
 
 impl LocalApic {
+    fn id(&self) -> u32 {
+        self.x2apic_id
+    }
+    pub fn notify_end_of_interrupt(&self) {
+        // This is safe as far as this LocalApic struct is properly set up.
+        unsafe {
+            write_volatile((self.base_addr as usize + 0xB0) as *mut u32, 0);
+        }
+    }
+}
+impl Default for LocalApic {
     /// creates an instance to manage Local APIC for the current processor
-    pub fn default() -> Self {
+    fn default() -> Self {
         let x2apic_id = x86_64::read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx();
         println!("x2APIC ID: {}", x2apic_id);
         let apic_base = unsafe {
@@ -30,15 +41,6 @@ impl LocalApic {
             x2apic_id,
             base_addr: apic_base & !((1u64 << 12) - 1),
             status,
-        }
-    }
-    fn id(&self) -> u32 {
-        self.x2apic_id
-    }
-    pub fn notify_end_of_interrupt(&self) {
-        // This is safe as far as this LocalApic struct is properly set up.
-        unsafe {
-            write_volatile((self.base_addr as usize + 0xB0) as *mut u32, 0);
         }
     }
 }

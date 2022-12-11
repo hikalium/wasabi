@@ -20,8 +20,7 @@ impl<'a> Iterator for MemoryMapIterator<'a> {
             None
         } else {
             let e: &EfiMemoryDescriptor = unsafe {
-                &*(self.map.memory_map_buffer.as_ptr().add(self.ofs as usize)
-                    as *const EfiMemoryDescriptor)
+                &*(self.map.memory_map_buffer.as_ptr().add(self.ofs) as *const EfiMemoryDescriptor)
             };
             self.ofs += self.map.descriptor_size;
             Some(e)
@@ -33,7 +32,7 @@ impl MemoryMapHolder {
     pub const fn new() -> MemoryMapHolder {
         MemoryMapHolder {
             memory_map_buffer: [0; MEMORY_MAP_BUFFER_SIZE],
-            memory_map_size: MEMORY_MAP_BUFFER_SIZE as usize,
+            memory_map_size: MEMORY_MAP_BUFFER_SIZE,
             map_key: 0,
             descriptor_size: 0,
             descriptor_version: 0,

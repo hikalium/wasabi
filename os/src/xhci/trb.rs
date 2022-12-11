@@ -128,7 +128,7 @@ impl GenericTrbEntry {
         {
             Err(Error::FailedString(format!(
                 "Expected CompletionCode == Success but got {} ({})",
-                self.completion_code() as u32,
+                self.completion_code(),
                 CompletionCode::parse(self.completion_code())
             )))
         } else {

@@ -90,12 +90,8 @@ impl EventRingSegmentTableEntry {
     }
 }
 
+#[derive(Default)]
 pub struct XhciDriver {}
-impl XhciDriver {
-    pub fn default() -> Self {
-        XhciDriver {}
-    }
-}
 impl PciDeviceDriver for XhciDriver {
     fn supports(&self, vp: VendorDeviceId) -> bool {
         const VDI_LIST: [VendorDeviceId; 3] = [

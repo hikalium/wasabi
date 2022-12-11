@@ -30,10 +30,10 @@ pub trait BitmapImageBuffer {
     }
     fn is_in_x_range(&self, px: i64) -> bool {
         use core::cmp::min;
-        0 <= px && px < min(self.width(), self.pixels_per_line()) as i64
+        0 <= px && px < min(self.width(), self.pixels_per_line())
     }
     fn is_in_y_range(&self, py: i64) -> bool {
-        0 <= py && py < self.height() as i64
+        0 <= py && py < self.height()
     }
 }
 

@@ -231,7 +231,7 @@ impl Pci {
         );
 
         let drivers = vec![
-            Rc::new(Box::new(Rtl8139Driver::default()) as Box<dyn PciDeviceDriver>),
+            Rc::new(Box::<Rtl8139Driver>::default() as Box<dyn PciDeviceDriver>),
             // Rc::new(Box::new(XhciDriver::default()) as Box<dyn PciDeviceDriver>),
         ];
 
@@ -374,11 +374,9 @@ impl Pci {
     pub fn list_devices(&self) {
         println!("{:?}", self.devices)
     }
-    /// # Safety
-    ///
-    /// Taking static immutable reference here is safe because BOOT_INFO is only set once and no
-    /// one will take a mutable reference to it.
     pub fn take() -> &'static Self {
+        // SAFETY: Taking static immutable reference here is safe because BOOT_INFO is only set once and no
+        // one will take a mutable reference to it.
         unsafe { PCI.as_ref().expect("PCI is not initialized yet") }
     }
     /// # Safety
