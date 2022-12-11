@@ -53,6 +53,7 @@ bin: font
 CLIPPY_OPTIONS=-D warnings
 
 clippy: font
+	rustup component add clippy
 	cd font && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
 	# Following ones will run clippy on examples as well, but disabled for now
@@ -135,8 +136,7 @@ watch_serial:
 watch_qemu_monitor:
 	while ! telnet localhost ${PORT_MONITOR} ; do sleep 1 ; done ;
 
-install : run_deps
-	cd os && cargo install --path . --root ../generated/
+install : run_deps generated/bin/os.efi
 	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
 	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " REPLY && \
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
@@ -161,3 +161,13 @@ internal_run_os_test : run_deps
 
 act:
 	act -P hikalium/wasabi-builder:latest=hikalium/wasabi-builder:latest
+
+symbols:
+	cargo run --bin=dbgutil > symbols.txt
+
+objdump:
+	cargo install cargo-binutils
+	rustup component add llvm-tools-preview
+	cd os && cargo-objdump -- -d > ../objdump.txt
+	echo "Saved objdump as objdump.txt"
+

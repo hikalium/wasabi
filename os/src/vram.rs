@@ -2,6 +2,7 @@ use crate::efi::locate_graphic_protocol;
 use crate::efi::EfiSystemTable;
 use crate::error::Result;
 use crate::graphics::BitmapImageBuffer;
+use core::pin::Pin;
 
 #[derive(Clone, Copy)]
 pub struct VRAMBufferInfo {
@@ -32,7 +33,7 @@ impl BitmapImageBuffer for VRAMBufferInfo {
     }
 }
 
-pub fn init_vram(efi_system_table: &EfiSystemTable) -> Result<VRAMBufferInfo> {
+pub fn init_vram(efi_system_table: Pin<&EfiSystemTable>) -> Result<VRAMBufferInfo> {
     let gp = locate_graphic_protocol(efi_system_table)?;
     Ok(VRAMBufferInfo {
         buf: gp.mode.frame_buffer_base as *mut u8,

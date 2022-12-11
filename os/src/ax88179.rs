@@ -1,9 +1,9 @@
 extern crate alloc;
 
-use crate::arch::x86_64::paging::Mmio;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::TimeoutFuture;
+use crate::memory::Mmio;
 use crate::print::hexdump;
 use crate::println;
 use crate::usb::UsbDescriptor;

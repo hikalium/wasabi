@@ -27,6 +27,7 @@ use arch::x86_64::paging::PageAttr;
 use arch::x86_64::paging::PML4;
 use arch::x86_64::CpuidRequest;
 use core::cmp::max;
+use core::pin::Pin;
 use core::slice;
 use efi::EfiMemoryType::CONVENTIONAL_MEMORY;
 use efi::EfiMemoryType::LOADER_CODE;
@@ -39,23 +40,23 @@ pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
 
 pub struct EfiServices {
     image_handle: efi::EfiHandle,
-    efi_system_table: &'static mut efi::EfiSystemTable<'static>,
+    efi_system_table: Pin<&'static efi::EfiSystemTable>,
 }
 
 impl EfiServices {
     fn new(
         image_handle: efi::EfiHandle,
-        efi_system_table: &'static mut efi::EfiSystemTable,
+        efi_system_table: Pin<&'static efi::EfiSystemTable>,
     ) -> Self {
         Self {
             image_handle,
             efi_system_table,
         }
     }
-    fn get_loaded_image_protocol(&self) -> &'static mut efi::EfiLoadedImageProtocol<'static> {
-        let loaded_image_protocol = self
-            .efi_system_table
-            .boot_services()
+    fn get_loaded_image_protocol(&self) -> Pin<&efi::EfiLoadedImageProtocol> {
+        let boot_services = self.efi_system_table.boot_services();
+        println!("boot_services: {:#p}", boot_services);
+        let loaded_image_protocol = boot_services
             .handle_loaded_image_protocol(self.image_handle)
             .expect("Failed to get Loaded Image Protocol");
         println!(
@@ -66,15 +67,16 @@ impl EfiServices {
     }
     pub fn load_all_root_files(&self, root_files: &mut [Option<File>; 32]) -> Result<()> {
         let loaded_image_protocol = self.get_loaded_image_protocol();
-
-        let simple_fs_protocol = self
-            .efi_system_table
-            .boot_services()
+        let boot_services = self.efi_system_table.boot_services();
+        let simple_fs_protocol = boot_services
             .handle_simple_file_system_protocol(loaded_image_protocol.device_handle)
             .expect("Failed to get Simple Filesystem Protocol");
         println!("Got SimpleFileSystemProtocol.",);
-        let root_file = simple_fs_protocol.open_volume();
-        let root_fs_info = root_file.get_fs_info();
+        let root_file = simple_fs_protocol
+            .open_volume()
+            .expect("Failed to get root_file");
+        println!("Got root_file",);
+        let root_fs_info = root_file.as_ref().get_fs_info();
         println!(
             "Got root fs. volume label: {}",
             efi::CStrPtr16::from_ptr(root_fs_info.volume_label.as_ptr())
@@ -82,7 +84,7 @@ impl EfiServices {
 
         // Load all files under root dir
         let mut i = 0;
-        while let Some(file_info) = root_file.read_file_info() {
+        while let Some(file_info) = root_file.as_ref().read_file_info() {
             if file_info.is_dir() {
                 println!("DIR : {}", file_info);
                 continue;
@@ -107,12 +109,6 @@ impl EfiServices {
             i += 1;
         }
         Ok(())
-    }
-    fn clear_screen(&self) {
-        self.efi_system_table
-            .con_out()
-            .clear_screen()
-            .expect("Failed to clear screen");
     }
     fn get_vram_info(&self) -> VRAMBufferInfo {
         vram::init_vram(self.efi_system_table).unwrap()
@@ -147,22 +143,21 @@ impl EfiServices {
 
 pub fn init_with_boot_services(
     image_handle: efi::EfiHandle,
-    efi_system_table: &'static mut efi::EfiSystemTable,
+    efi_system_table: Pin<&'static efi::EfiSystemTable>,
 ) {
     serial::com_initialize(serial::IO_ADDR_COM2);
-    println!("init_basic_runtime()");
-    let kernel_stack = unsafe {
-        slice::from_raw_parts_mut(
-            efi::alloc_pages(
-                efi_system_table,
-                size_in_pages_from_bytes(KERNEL_STACK_SIZE),
-            )
-            .expect("Not enough space for the kernel stack"),
-            KERNEL_STACK_SIZE,
-        )
-    };
+    println!("efi_system_table: {:#p}", efi_system_table);
+    let kernel_stack = efi::alloc_pages(
+        efi_system_table,
+        size_in_pages_from_bytes(KERNEL_STACK_SIZE),
+    )
+    .expect("Not enough space for the kernel stack");
+    if kernel_stack.is_null() {
+        panic!("Failed to allocate kernel stack");
+    }
+    let kernel_stack = unsafe { slice::from_raw_parts_mut(kernel_stack, KERNEL_STACK_SIZE) };
+    println!("kernel_stack: {:#p}", kernel_stack);
     let efi_services = EfiServices::new(image_handle, efi_system_table);
-    efi_services.clear_screen();
     const FILE_NONE: Option<File> = None;
     let mut root_files = [FILE_NONE; 32];
     efi_services
@@ -183,7 +178,7 @@ pub fn init_with_boot_services(
 // Common initialization for a normal boot and tests
 pub fn init_basic_runtime(
     image_handle: efi::EfiHandle,
-    efi_system_table: &'static mut efi::EfiSystemTable,
+    efi_system_table: Pin<&'static efi::EfiSystemTable>,
 ) {
     init_with_boot_services(image_handle, efi_system_table);
     init_global_allocator();

@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+use core::pin::Pin;
 use os::arch;
 use os::arch::x86_64;
 use os::arch::x86_64::read_rsp;
@@ -163,7 +164,7 @@ fn stack_switched() -> ! {
 #[no_mangle]
 fn efi_main(
     image_handle: os::efi::EfiHandle,
-    efi_system_table: &'static mut os::efi::EfiSystemTable,
+    efi_system_table: Pin<&'static os::efi::EfiSystemTable>,
 ) {
     os::init::init_basic_runtime(image_handle, efi_system_table);
     println!("rsp on boot: {:#018X}", read_rsp());

@@ -1,8 +1,8 @@
 extern crate alloc;
 
-use crate::arch::x86_64::paging::Mmio;
 use crate::error::Error;
 use crate::error::Result;
+use crate::memory::Mmio;
 use crate::println;
 use crate::usb::ConfigDescriptor;
 use crate::usb::EndpointDescriptor;

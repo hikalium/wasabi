@@ -8,13 +8,13 @@ pub mod trb;
 
 use crate::allocator::ALLOCATOR;
 use crate::arch::x86_64::paging::IoBox;
-use crate::arch::x86_64::paging::Mmio;
 use crate::ax88179;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::yield_execution;
 use crate::executor::Task;
 use crate::executor::ROOT_EXECUTOR;
+use crate::memory::Mmio;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
