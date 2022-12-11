@@ -11,6 +11,7 @@ use crate::util::size_in_pages_from_bytes;
 use alloc::borrow::BorrowMut;
 use alloc::boxed::Box;
 use alloc::slice;
+use alloc::vec::Vec;
 use core::arch::asm;
 use core::fmt;
 use core::mem::size_of;
@@ -37,6 +38,7 @@ impl Page4K {
 }
 
 pub struct SegmentToLoad {
+    entry_type: u32,
     entry_vaddr: u64,
     offset: u64,
     vaddr: u64,
@@ -60,7 +62,7 @@ impl<'a> Elf<'a> {
     pub fn new(file: &'a File) -> Self {
         Self { file }
     }
-    pub fn parse(&self) -> Result<SegmentToLoad> {
+    pub fn parse(&self) -> Result<Vec<SegmentToLoad>> {
         let data = self.file.data();
         // https://wiki.osdev.org/ELF#Header
         if &data[0..4] != b"\x7fELF".as_slice() {
@@ -94,67 +96,77 @@ impl<'a> Elf<'a> {
         );
 
         // Find LOAD segmnet
-        let mut phdr_indexes = 0..num_of_phdr_entry;
-        let segment_info = loop {
-            if let Some(i) = phdr_indexes.next() {
-                let ofs = (phdr_start + i as u64 * phdr_entry_size as u64) as usize;
-                let phdr_entry = &data[ofs..(ofs + phdr_entry_size as usize)];
-                let phdr_type = read_le_u32(data, ofs)?;
-                if phdr_type != 1 {
-                    continue;
-                }
-                // type == LOAD
-                println!("type: {phdr_type}");
-                let offset = read_le_u64(phdr_entry, 8)?;
-                let vaddr = read_le_u64(phdr_entry, 16)?;
-                let fsize = read_le_u64(phdr_entry, 32)?;
-                let vsize = read_le_u64(phdr_entry, 40)?;
-                let align = read_le_u64(phdr_entry, 48)?;
-                break Some(SegmentToLoad {
-                    entry_vaddr,
-                    offset,
-                    vaddr,
-                    fsize,
-                    vsize,
-                    align,
-                });
-            } else {
-                break None;
+        let phdr_indexes = 0..num_of_phdr_entry;
+        let mut segment_info = Vec::new();
+        for i in phdr_indexes {
+            let ofs = (phdr_start + i as u64 * phdr_entry_size as u64) as usize;
+            let phdr_entry = &data[ofs..(ofs + phdr_entry_size as usize)];
+            let phdr_type = read_le_u32(phdr_entry, 0)?;
+            if phdr_type != 1 {
+                continue;
             }
+            // type == LOAD (1)
+            let entry_type = read_le_u32(phdr_entry, 4)?;
+            let offset = read_le_u64(phdr_entry, 8)?;
+            let vaddr = read_le_u64(phdr_entry, 16)?;
+            let fsize = read_le_u64(phdr_entry, 32)?;
+            let vsize = read_le_u64(phdr_entry, 40)?;
+            let align = read_le_u64(phdr_entry, 48)?;
+            segment_info.push(SegmentToLoad {
+                entry_type,
+                entry_vaddr,
+                offset,
+                vaddr,
+                fsize,
+                vsize,
+                align,
+            });
         }
-        .ok_or(Error::Failed("LOAD segment not found"))?;
+        if segment_info.len() == 0 {
+            return Err(Error::Failed("LOAD segment not found"));
+        }
 
-        println!("offset: {:#018X}", segment_info.offset);
-        println!("vaddr : {:#018X}", segment_info.vaddr);
-        println!("fsize : {:#018X}", segment_info.fsize);
-        println!("vsize : {:#018X}", segment_info.vsize);
-        println!("align : {:#018X}", segment_info.align);
+        for s in &segment_info {
+            println!("type  : (rwx) = ({:03b})", s.entry_type); // RWX
+            println!("offset: {:#018X}", s.offset);
+            println!("vaddr : {:#018X}", s.vaddr);
+            println!("fsize : {:#018X}", s.fsize);
+            println!("vsize : {:#018X}", s.vsize);
+            println!("align : {:#018X}", s.align);
+            println!("");
+        }
 
         Ok(segment_info)
     }
     pub fn exec(&self) -> Result<()> {
         let segment_to_load = self.parse()?;
 
-        let mut code_pages = Page4K::alloc_contiguous(segment_to_load.vaddr as usize);
-        let code_dst = Page4K::into_u8_slice_mut(code_pages.borrow_mut());
-        let data = self.file.data();
-        let code_src = &data[segment_to_load.src_range()];
-        code_dst[segment_to_load.dst_range()].copy_from_slice(code_src);
-        println!("run the code!");
-        let rel_code_entry_ofs = segment_to_load.entry_vaddr - segment_to_load.vaddr;
-        let retcode: i64;
-        unsafe {
-            asm!("call rax",
-                // Call exit() when it is returned
-                "mov ecx, eax",
-                "mov eax, 0 // exit",
-                "syscall",
-                "ud2",
-                in("rax") code_dst.as_ptr().add(rel_code_entry_ofs as usize),
-                lateout("rax") retcode,
-            );
+        for s in &segment_to_load {
+            if s.entry_type & 0b001 == 0 {
+                // TODO(hikalium): Impl data section loading
+                continue;
+            }
+            let mut code_pages = Page4K::alloc_contiguous(s.vaddr as usize);
+            let code_dst = Page4K::into_u8_slice_mut(code_pages.borrow_mut());
+            let data = self.file.data();
+            let code_src = &data[s.src_range()];
+            code_dst[s.dst_range()].copy_from_slice(code_src);
+            println!("run the code!");
+            let rel_code_entry_ofs = s.entry_vaddr - s.vaddr;
+            let retcode: i64;
+            unsafe {
+                asm!("call rax",
+                    // Call exit() when it is returned
+                    "mov ecx, eax",
+                    "mov eax, 0 // exit",
+                    "syscall",
+                    "ud2",
+                    in("rax") code_dst.as_ptr().add(rel_code_entry_ofs as usize),
+                    lateout("rax") retcode,
+                );
+            }
+            println!("returned from the code! retcode = {}", retcode);
         }
-        println!("returned from the code! retcode = {}", retcode);
 
         Ok(())
     }
