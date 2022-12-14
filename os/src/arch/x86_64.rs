@@ -350,7 +350,6 @@ global_asm!(
     "sysretq",
     // sysretq will do:
     // RIP <= RCX
-    // RIP <= IA32_LSTAR
     // RFLAGS <=  (R11 & 0x3C7FD7) | 2      // Clear RF, VM, reserved bits; set bit 1
     // CS <= {
     //      Selector: (IA32_STAR[48..64] + 16) | 3      // RPL = 3

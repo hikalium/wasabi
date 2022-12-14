@@ -4,7 +4,8 @@
 use noli::*;
 
 fn main() -> i64 {
-    sys_print("Hello, this is Wasabi OS!");
+    //sys_print("hello!");
+    println!("{}", 42);
     return -42;
 }
 

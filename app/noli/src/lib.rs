@@ -12,7 +12,7 @@ use core::ptr::null_mut;
 
 /*
 Wasabi OS calling convention:
-    args[0]: rax
+    args[0]: rax (syscall number)
     args[1]: rdi
     args[2]: rsi
     args[3]: rdx
@@ -63,6 +63,7 @@ pub fn sys_print(s: &str) -> i64 {
         asm!(
         "mov rax, 1",
         "syscall",
+        out("rcx") _, // will be broken by syscall
         in("rdi") s,
         in("rsi") len,
         lateout("rax") result);
@@ -75,10 +76,23 @@ pub fn sys_exit(code: i64) -> ! {
         asm!(
         "mov rax, 0",
         "syscall",
+        out("rcx") _, // will be broken by syscall
         in("rdi") code,
         )
     }
     unreachable!()
+}
+
+pub fn sys_noop() -> u64 {
+    let mut result;
+    unsafe {
+        asm!(
+        "mov rax, 3",
+        "mov rcx, 0",
+        "syscall",
+        lateout("rcx") result);
+    }
+    result
 }
 
 #[macro_export]

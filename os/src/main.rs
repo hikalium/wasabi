@@ -128,7 +128,7 @@ fn main() -> Result<()> {
     init::init_timer();
     init_syscall();
 
-    println!("Wasabi OS booted.");
+    println!("Wasabi OS booted. {:#p}", init_syscall as *const ());
 
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();

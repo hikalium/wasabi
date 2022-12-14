@@ -24,6 +24,7 @@ QEMU_ARGS=\
 		-D qemu_debug.log \
 		${MORE_QEMU_FLAGS}
 
+#		-gdb tcp::3333 -S \
 # -device usb-host,hostbus=1,hostport=1 \
 # -device usb-host,hostbus=2,hostport=1.2.1 \
 # -device usb-mouse \

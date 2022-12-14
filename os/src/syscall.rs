@@ -12,6 +12,7 @@ fn sys_print(regs: &[u64; 15]) {
 
     print!("{}", s)
 }
+fn sys_noop(_args: &[u64; 15]) {}
 
 #[no_mangle]
 pub extern "sysv64" fn syscall_handler(regs: &[u64; 15] /* rdi */) {
@@ -19,6 +20,7 @@ pub extern "sysv64" fn syscall_handler(regs: &[u64; 15] /* rdi */) {
     match regs[0] {
         0 => sys_exit(regs),
         1 => sys_print(regs),
+        3 => sys_noop(regs),
         e => {
             panic!("unimplemented syscall: {}", e)
         }

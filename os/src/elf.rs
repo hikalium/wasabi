@@ -37,9 +37,13 @@ impl Page4K {
     }
 }
 
+pub struct LoadInfo {
+    segments: Vec<SegmentToLoad>,
+    entry_vaddr: u64,
+}
+
 pub struct SegmentToLoad {
     entry_type: u32,
-    entry_vaddr: u64,
     offset: u64,
     vaddr: u64,
     fsize: u64,
@@ -48,10 +52,12 @@ pub struct SegmentToLoad {
 }
 impl SegmentToLoad {
     fn src_range(&self) -> Range<usize> {
+        // range of offset in the file
         self.offset as usize..(self.offset + self.fsize) as usize
     }
     fn dst_range(&self) -> Range<usize> {
-        0..self.fsize as usize
+        // range of (program's) virtual address
+        self.vaddr as usize..(self.vaddr + self.vsize) as usize
     }
 }
 
@@ -62,7 +68,7 @@ impl<'a> Elf<'a> {
     pub fn new(file: &'a File) -> Self {
         Self { file }
     }
-    pub fn parse(&self) -> Result<Vec<SegmentToLoad>> {
+    pub fn parse(&self) -> Result<LoadInfo> {
         let data = self.file.data();
         // https://wiki.osdev.org/ELF#Header
         if &data[0..4] != b"\x7fELF".as_slice() {
@@ -114,7 +120,6 @@ impl<'a> Elf<'a> {
             let align = read_le_u64(phdr_entry, 48)?;
             segment_info.push(SegmentToLoad {
                 entry_type,
-                entry_vaddr,
                 offset,
                 vaddr,
                 fsize,
@@ -122,7 +127,7 @@ impl<'a> Elf<'a> {
                 align,
             });
         }
-        if segment_info.len() == 0 {
+        if segment_info.is_empty() {
             return Err(Error::Failed("LOAD segment not found"));
         }
 
@@ -136,37 +141,65 @@ impl<'a> Elf<'a> {
             println!("");
         }
 
-        Ok(segment_info)
+        Ok(LoadInfo {
+            segments: segment_info,
+            entry_vaddr,
+        })
     }
     pub fn exec(&self) -> Result<()> {
-        let segment_to_load = self.parse()?;
-
-        for s in &segment_to_load {
-            if s.entry_type & 0b001 == 0 {
-                // TODO(hikalium): Impl data section loading
-                continue;
-            }
-            let mut code_pages = Page4K::alloc_contiguous(s.vaddr as usize);
-            let code_dst = Page4K::into_u8_slice_mut(code_pages.borrow_mut());
-            let data = self.file.data();
-            let code_src = &data[s.src_range()];
-            code_dst[s.dst_range()].copy_from_slice(code_src);
-            println!("run the code!");
-            let rel_code_entry_ofs = s.entry_vaddr - s.vaddr;
-            let retcode: i64;
-            unsafe {
-                asm!("call rax",
-                    // Call exit() when it is returned
-                    "mov ecx, eax",
-                    "mov eax, 0 // exit",
-                    "syscall",
-                    "ud2",
-                    in("rax") code_dst.as_ptr().add(rel_code_entry_ofs as usize),
-                    lateout("rax") retcode,
-                );
-            }
-            println!("returned from the code! retcode = {}", retcode);
+        let load_info = self.parse()?;
+        let mut load_region_start = u64::MAX;
+        let mut load_region_end = 0;
+        for s in &load_info.segments {
+            let start = s.vaddr;
+            let end = s.vaddr + s.vsize;
+            load_region_start = core::cmp::min(load_region_start, start);
+            load_region_end = core::cmp::max(load_region_end, end);
         }
+        load_region_start &= !0xFFF;
+        load_region_end = (load_region_end + 0xFFF) & !0xFFF;
+        println!("load_region_start = {load_region_start:#018X}");
+        println!("load_region_end = {load_region_end:#018X}");
+        let load_region_size = load_region_end - load_region_start;
+        let mut load_region = Page4K::alloc_contiguous(load_region_size as usize);
+        let load_region = Page4K::into_u8_slice_mut(load_region.borrow_mut());
+        unsafe {
+            core::ptr::write_bytes(load_region.as_mut_ptr(), 0, load_region.len());
+        }
+        println!("load_region @ {:#p}", load_region.as_ptr());
+
+        let data = self.file.data();
+        for s in &load_info.segments {
+            let code_src = &data[s.src_range()];
+            let dst_range = s.dst_range();
+            let dst_range = (dst_range.start - load_region_start as usize)
+                ..(dst_range.end - load_region_start as usize);
+            println!(
+                "dst_range: {:#018X} - {:#018X}",
+                dst_range.start, dst_range.end
+            );
+            load_region[dst_range].copy_from_slice(code_src);
+        }
+        println!("run the code!");
+        let entry_point = unsafe {
+            load_region
+                .as_ptr()
+                .add((load_info.entry_vaddr - load_region_start) as usize)
+        };
+        println!("entry_point = {:#p}", entry_point);
+        let retcode: i64;
+        unsafe {
+            asm!("call rax",
+                // Call exit() when it is returned
+                "mov ecx, eax",
+                "mov eax, 0 // exit",
+                "syscall",
+                "ud2",
+                in("rax") entry_point,
+                lateout("rax") retcode,
+            );
+        }
+        println!("returned from the code! retcode = {}", retcode);
 
         Ok(())
     }
