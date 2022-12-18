@@ -187,12 +187,31 @@ impl<'a> Elf<'a> {
                 .add((load_info.entry_vaddr - load_region_start) as usize)
         };
         println!("entry_point = {:#p}", entry_point);
+        /*
+            unsafe {
+                asm!(".byte 0xeb, 0xfe" /* infinite loop */,);
+            }
+        */
         let retcode: i64;
         unsafe {
-            asm!("call rax",
+            #![warn(named_asm_labels)]
+            asm!(
+                "call rax",
                 // Call exit() when it is returned
-                "mov ecx, eax",
-                "mov eax, 0 // exit",
+                /*
+                ".global app_entry_point",
+                "app_entry_point:",
+                "3:",
+                "jmp [rip+app_entry_point]",
+                "lea rcx,[rip+1f]",
+                "2:",
+                "jmp [rip+2b]",
+                "sysretq",
+                "1:",
+                "jmp [rip+1b]",
+                */
+                "mov rdi, rax", // retcode = rax
+                "mov eax, 0", // op = exit (0)
                 "syscall",
                 "ud2",
                 in("rax") entry_point,

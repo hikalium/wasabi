@@ -173,6 +173,9 @@ objdump:
 	cd os && cargo-objdump -- -d > ../objdump.txt
 	echo "Saved objdump as objdump.txt"
 
+objdump_hello:
+	`brew --prefix binutils`/bin/objdump -d -C mnt/hello
+
 crash:
 	@cat com2.log | grep -a LOADER_CODE | tee dbgutil_input.txt
 	@cat qemu_debug.log | grep -e 'check_exception old' -A 100 | grep -e check_exception -e 'RIP' -e 'fault' -e 'CR2' -e 'e=' | tee -a dbgutil_input.txt

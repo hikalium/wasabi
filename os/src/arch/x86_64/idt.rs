@@ -222,25 +222,24 @@ inthandler_common:
 
 #[no_mangle]
 extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
-    // Silent
     if index == 32 {
         let bsp_local_apic = BootInfo::take().bsp_local_apic();
         bsp_local_apic.notify_end_of_interrupt();
         return;
     }
-    // Informational
     println!("Interrupt Info: {:?}", info);
-    if index == 3 {
-        println!("Exception {index:#04X}: Breakpoint");
-        return;
+    match index {
+        3 => {
+            println!("Exception {index:#04X}: Breakpoint");
+        }
+        6 => {
+            println!("Exception {index:#04X}: Invalid Opcode");
+        }
+        _ => {
+            println!("Exception {index:#04X}: Not handled");
+        }
     }
-    // Fatal
-    if index == 6 {
-        println!("Exception {index:#04X}: Invalid Opcode");
-    } else {
-        println!("Exception {index:#04X}: Not handled");
-    }
-    panic!();
+    panic!("fatal exception");
 }
 
 #[no_mangle]
