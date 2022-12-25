@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![feature(alloc_error_handler)]
 #![feature(core_intrinsics)]
 

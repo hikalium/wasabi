@@ -1,0 +1,6 @@
+[toolchain]
+channel = "nightly-2022-12-01"
+components = [ "rustfmt"]
+# https://doc.rust-lang.org/nightly/rustc/platform-support.html
+targets = [ "x86_64-unknown-linux-gnu"]
+profile = "default"

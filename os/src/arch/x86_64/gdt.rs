@@ -1,6 +1,13 @@
+extern crate alloc;
+
+use crate::arch::x86_64::idt::TaskStateSegment64;
+use crate::error::Result;
+use crate::println;
+use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
 use core::mem::size_of;
+use core::pin::Pin;
 
 pub const BIT_TYPE_DATA: u64 = 0b10u64 << 43;
 pub const BIT_TYPE_CODE: u64 = 0b11u64 << 43;
@@ -24,7 +31,7 @@ enum GdtAttr {
 #[repr(packed)]
 struct GdtrParameters {
     limit: u16,
-    base: &'static Gdt,
+    base: *const Gdt,
 }
 
 #[allow(dead_code)]
@@ -36,31 +43,45 @@ pub struct Gdt {
     user_code_segment_32: GdtSegmentDescriptor,
     user_data_segment: GdtSegmentDescriptor,
     user_code_segment_64: GdtSegmentDescriptor,
+    task_state_segment: TaskStateSegment64Descriptor,
 }
-const _: () = assert!(size_of::<Gdt>() / 8 == 6);
+const _: () = assert!(size_of::<Gdt>() == 64);
+
 impl Gdt {
-    /// # Safety
-    /// Anything can happen if the GDT given is invalid
-    /// and latter segment register modification does something
-    /// that is not matched with the GDT.
-    pub unsafe fn load(&'static self) {
+    pub fn new(tss64: &Pin<Box<TaskStateSegment64>>) -> Result<Pin<Box<Gdt>>> {
+        let gdt = Self {
+            null_segment: GdtSegmentDescriptor::null(),
+            kernel_code_segment: GdtSegmentDescriptor::new(GdtAttr::KernelCode),
+            kernel_data_segment: GdtSegmentDescriptor::new(GdtAttr::KernelData),
+            user_code_segment_32: GdtSegmentDescriptor::null(),
+            user_data_segment: GdtSegmentDescriptor::new(GdtAttr::UserData),
+            user_code_segment_64: GdtSegmentDescriptor::new(GdtAttr::User64Code),
+            task_state_segment: TaskStateSegment64Descriptor::new(tss64.as_ref().get_ref()
+                as *const TaskStateSegment64
+                as u64),
+        };
+        let gdt = Box::pin(gdt);
         let params = GdtrParameters {
             limit: (size_of::<Gdt>() - 1) as u16,
-            base: self,
+            base: gdt.as_ref().get_ref() as *const Gdt,
         };
-        asm!("lgdt [rcx]",
-                in("rcx") &params)
+        println!("Loading GDT @ {:#018X}", params.base as u64);
+        // SAFETY: This is safe since it is loading a valid GDT just constructed in the above
+        unsafe {
+            asm!("lgdt [rcx]",
+                in("rcx") &params);
+        }
+        println!(
+            "Loading TSS ( selector = {:#X} )",
+            crate::arch::x86_64::TSS64_SEL
+        );
+        unsafe {
+            asm!("ltr cx",
+                in("cx") crate::arch::x86_64::TSS64_SEL);
+        }
+        Ok(gdt)
     }
 }
-
-pub static GDT: Gdt = Gdt {
-    null_segment: GdtSegmentDescriptor::null(),
-    kernel_code_segment: GdtSegmentDescriptor::new(GdtAttr::KernelCode),
-    kernel_data_segment: GdtSegmentDescriptor::new(GdtAttr::KernelData),
-    user_code_segment_32: GdtSegmentDescriptor::null(),
-    user_data_segment: GdtSegmentDescriptor::new(GdtAttr::UserData),
-    user_code_segment_64: GdtSegmentDescriptor::new(GdtAttr::User64Code),
-};
 
 pub struct GdtSegmentDescriptor {
     value: u64,
@@ -78,3 +99,29 @@ impl fmt::Display for GdtSegmentDescriptor {
         write!(f, "{:#18X}", self.value)
     }
 }
+
+#[repr(packed)]
+#[allow(dead_code)]
+struct TaskStateSegment64Descriptor {
+    limit_low: u16,
+    base_low: u16,
+    base_mid_low: u8,
+    attr: u16,
+    base_mid_high: u8,
+    base_high: u32,
+    reserved: u32,
+}
+impl TaskStateSegment64Descriptor {
+    const fn new(base_addr: u64) -> Self {
+        Self {
+            limit_low: size_of::<TaskStateSegment64>() as u16,
+            base_low: (base_addr & 0xffff) as u16,
+            base_mid_low: ((base_addr >> 16) & 0xff) as u8,
+            attr: 0b1000_0000_1000_1001,
+            base_mid_high: ((base_addr >> 24) & 0xff) as u8,
+            base_high: ((base_addr >> 32) & 0xffffffff) as u32,
+            reserved: 0,
+        }
+    }
+}
+const _: () = assert!(size_of::<TaskStateSegment64Descriptor>() == 16);

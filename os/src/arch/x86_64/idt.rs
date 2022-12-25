@@ -1,14 +1,17 @@
+extern crate alloc;
+
 use crate::boot_info::BootInfo;
+use crate::error::Result;
+use crate::memory::alloc_pages;
 use crate::println;
+use alloc::boxed::Box;
 use attr_bits::BIT_FLAGS_INTGATE;
 use attr_bits::BIT_FLAGS_PRESENT;
 use core::arch::asm;
 use core::arch::global_asm;
-use core::cell::RefCell;
 use core::fmt;
 use core::mem::size_of;
-use core::mem::size_of_val;
-use core::mem::MaybeUninit;
+use core::pin::Pin;
 
 // System V AMD64 (sysv64) ABI:
 //   args: RDI, RSI, RDX, RCX, R8, R9
@@ -254,6 +257,7 @@ mod attr_bits {
 }
 
 #[repr(u8)]
+#[derive(Copy, Clone)]
 enum IdtAttr {
     // Without _NotPresent value, MaybeUninit::zeroed() on
     // this struct will be undefined behavior.
@@ -263,6 +267,7 @@ enum IdtAttr {
 
 #[repr(packed)]
 #[allow(dead_code)]
+#[derive(Copy, Clone)]
 pub struct IdtDescriptor {
     offset_low: u16,
     segment_selector: u16,
@@ -301,72 +306,91 @@ struct IdtrParameters<'a> {
 }
 
 pub struct Idt {
-    entries: RefCell<[IdtDescriptor; 0x100]>,
+    entries: [IdtDescriptor; 0x100],
 }
 impl Idt {
-    const fn new() -> Self {
-        // This is safe since it does not contain any references
-        // and it will be valid IDT with non-present entries.
-        Self {
-            entries: RefCell::new(unsafe { MaybeUninit::zeroed().assume_init() }),
-        }
-    }
-    pub fn init(&self, segment_selector: u16) {
-        let entries = &mut *self.entries.borrow_mut();
-        for e in entries.iter_mut() {
-            *e = IdtDescriptor::new(
+    pub fn new(segment_selector: u16) -> Result<Pin<Box<Self>>> {
+        let mut idt = Idt {
+            entries: [IdtDescriptor::new(
                 segment_selector,
                 0,
                 IdtAttr::IntGateDPL0,
                 int_handler_unimplemented,
-            );
-        }
-        entries[3] = IdtDescriptor::new(
+            ); 0x100],
+        };
+        idt.entries[3] = IdtDescriptor::new(
             segment_selector,
             0,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint3,
         );
-        entries[6] = IdtDescriptor::new(
+        idt.entries[6] = IdtDescriptor::new(
             segment_selector,
             0,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint6,
         );
-        entries[13] = IdtDescriptor::new(
+        idt.entries[13] = IdtDescriptor::new(
             segment_selector,
             0,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint13,
         );
-        entries[14] = IdtDescriptor::new(
+        idt.entries[14] = IdtDescriptor::new(
             segment_selector,
             0,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint14,
         );
-        entries[32] = IdtDescriptor::new(
+        idt.entries[32] = IdtDescriptor::new(
             segment_selector,
             0,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint32,
         );
-    }
-    /// # Safety
-    /// It is programmer's responsibility to call this method
-    /// with a valid, correct IDT.
-    pub unsafe fn load(&'static self) {
-        let entries = &*self.entries.borrow();
+        let idt = Box::pin(idt);
         let params = IdtrParameters {
-            limit: (size_of_val(entries) - 1) as u16,
-            base: entries,
+            limit: size_of::<Self>() as u16 - 1,
+            base: &idt.entries,
         };
-        asm!("lidt [rcx]",
+        println!("Loading IDT @ {:#018X}", params.base.as_ptr() as u64);
+        // SAFETY: This is safe since it loads a valid IDT that is constructed in the code just above
+        unsafe {
+            asm!("lidt [rcx]",
                 in("rcx") &params);
-        println!("LDT @ {:#p} loaded.", entries);
+        }
+        Ok(idt)
     }
 }
-// This impl is safe as far as the OS is running in a single thread.
-unsafe impl Sync for Idt {}
 
-pub static IDT: Idt = Idt::new();
+// 7.7 TASK MANAGEMENT IN 64-BIT MODE
+#[repr(packed)]
+struct TaskStateSegment64Inner {
+    _reserved0: u32,
+    _rsp: [u64; 3], // for switch into ring0-2
+    _ist: [u64; 8], // ist[1]~ist[7] (ist[0] is reserved)
+    _reserved1: [u16; 5],
+    _io_map_base_addr: u16,
+}
+const _: () = assert!(size_of::<TaskStateSegment64Inner>() == 104);
+
+pub struct TaskStateSegment64 {
+    _tss64: TaskStateSegment64Inner,
+    _rsp0: Pin<Box<[u8]>>,
+}
+impl TaskStateSegment64 {
+    pub fn new() -> Result<Pin<Box<Self>>> {
+        let rsp0 = alloc_pages(16)?;
+        let tss64 = TaskStateSegment64Inner {
+            _reserved0: 0,
+            _rsp: [rsp0.as_ptr() as u64, 0, 0],
+            _ist: [0; 8],
+            _reserved1: [0; 5],
+            _io_map_base_addr: 0,
+        };
+        Ok(Box::pin(Self {
+            _tss64: tss64,
+            _rsp0: rsp0,
+        }))
+    }
+}

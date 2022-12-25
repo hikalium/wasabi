@@ -174,7 +174,7 @@ objdump:
 	echo "Saved objdump as objdump.txt"
 
 objdump_hello:
-	`brew --prefix binutils`/bin/objdump -d -C mnt/hello
+	`brew --prefix binutils`/bin/objdump -d -C mnt/hello | tee objdump_hello.txt
 
 crash:
 	@cat com2.log | grep -a LOADER_CODE | tee dbgutil_input.txt

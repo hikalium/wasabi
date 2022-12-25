@@ -8,8 +8,4 @@ edition = "2021"
 [lib]
 test=false
 
-[[bin]]
-name="noli"
-test=false
-
 [dependencies]

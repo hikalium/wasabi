@@ -13,9 +13,10 @@ use core::fmt;
 pub const NULL_SELECTOR: u16 = 0 << 3;
 pub const KERNEL_CS: u16 = 1 << 3;
 pub const KERNEL_DS: u16 = 2 << 3;
-pub const USER32_CS: u16 = 3 << 3;
-pub const USER_DS: u16 = 4 << 3;
-pub const USER64_CS: u16 = 5 << 3;
+pub const USER32_CS: u16 = 3 << 3 | 0b11 /* RPL=3 */;
+pub const USER_DS: u16 = 4 << 3 | 0b11 /* RPL=3 */;
+pub const USER64_CS: u16 = 5 << 3 | 0b11 /* RPL=3 */;
+pub const TSS64_SEL: u16 = 6 << 3;
 
 pub const MSR_IA32_APIC_BASE: u32 = 0x1b;
 pub const MSR_FSB_FREQ: u32 = 0xcd;
@@ -369,7 +370,7 @@ extern "C" {
 }
 
 pub fn init_syscall() {
-    let star = (KERNEL_CS as u64) << 32 | (USER64_CS as u64) << 48;
+    let star = (KERNEL_CS as u64) << 32 | (USER32_CS as u64) << 48;
     // SAFETY: This is safe since we believe we provide appropriate star value.
     unsafe {
         write_msr(MSR_STAR, star);

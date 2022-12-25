@@ -24,3 +24,6 @@ Cargo.lock
 
 # generated files
 generated/
+
+# binary files
+*.bin

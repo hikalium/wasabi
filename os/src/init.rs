@@ -21,7 +21,9 @@ use crate::vram::VRAMBufferInfo;
 use alloc::boxed::Box;
 use arch::x86_64;
 use arch::x86_64::apic::IoApic;
-use arch::x86_64::gdt::GDT;
+use arch::x86_64::gdt::Gdt;
+use arch::x86_64::idt::Idt;
+use arch::x86_64::idt::TaskStateSegment64;
 use arch::x86_64::paging::write_cr3;
 use arch::x86_64::paging::PageAttr;
 use arch::x86_64::paging::PML4;
@@ -199,7 +201,6 @@ pub fn init_graphical_terminal() {
 
 pub fn init_paging() -> Result<()> {
     println!("init_paging");
-    println!("Initial rsp = {:#018X}", x86_64::read_rsp());
     let mut table = PML4::new();
     let memory_map = BootInfo::take().memory_map();
     let mut end_of_mem = 0x1_0000_0000u64;
@@ -214,7 +215,6 @@ pub fn init_paging() -> Result<()> {
             _ => (),
         }
     }
-    // TODO(hikalium): Use ReadWriteKernel
     table.create_mapping(0, end_of_mem, 0, PageAttr::ReadWriteUser)?;
     println!("{:?}", table);
     unsafe {
@@ -223,26 +223,32 @@ pub fn init_paging() -> Result<()> {
     Ok(())
 }
 
-pub fn init_interrupts() {
+#[allow(dead_code)]
+pub struct InterruptConfiguration {
+    tss64: Pin<Box<TaskStateSegment64>>,
+    gdt: Pin<Box<Gdt>>,
+    idt: Pin<Box<Idt>>,
+}
+
+pub fn init_interrupts() -> Result<InterruptConfiguration> {
     println!("init_interrupts()");
-    println!("Initial rsp = {:#018X}", x86_64::read_rsp());
+    let tss64 = TaskStateSegment64::new()?;
+    let gdt = Gdt::new(&tss64)?;
+    println!("Updating segment registers");
     unsafe {
-        GDT.load();
         x86_64::write_cs(x86_64::KERNEL_CS);
         x86_64::write_ss(x86_64::KERNEL_DS);
-        // TODO(hikalium): Use KERNEL_DS
-        x86_64::write_es(x86_64::USER_DS);
-        x86_64::write_ds(x86_64::USER_DS);
-        x86_64::write_fs(x86_64::USER_DS);
-        x86_64::write_gs(x86_64::USER_DS);
+        x86_64::write_es(x86_64::KERNEL_DS);
+        x86_64::write_ds(x86_64::KERNEL_DS);
+        x86_64::write_fs(x86_64::KERNEL_DS);
+        x86_64::write_gs(x86_64::KERNEL_DS);
     }
+    println!("Disabling legacy PIC");
     x86_64::disable_legacy_pic();
     let bsp_local_apic = BootInfo::take().bsp_local_apic();
     IoApic::init(bsp_local_apic).expect("Failed to init I/O APIC");
-    unsafe {
-        x86_64::idt::IDT.init(x86_64::KERNEL_CS);
-        x86_64::idt::IDT.load();
-    }
+    let idt = x86_64::idt::Idt::new(x86_64::KERNEL_CS)?;
+    Ok(InterruptConfiguration { tss64, gdt, idt })
 }
 
 pub fn detect_fsb_freq() -> Option<u64> {

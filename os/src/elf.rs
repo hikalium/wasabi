@@ -170,7 +170,12 @@ impl<'a> Elf<'a> {
 
         let data = self.file.data();
         for s in &load_info.segments {
-            let code_src = &data[s.src_range()];
+            let src_range = s.src_range();
+            println!(
+                "src_range: {:#018X} - {:#018X}",
+                src_range.start, src_range.end
+            );
+            let src = &data[src_range];
             let dst_range = s.dst_range();
             let dst_range = (dst_range.start - load_region_start as usize)
                 ..(dst_range.end - load_region_start as usize);
@@ -178,7 +183,7 @@ impl<'a> Elf<'a> {
                 "dst_range: {:#018X} - {:#018X}",
                 dst_range.start, dst_range.end
             );
-            load_region[dst_range].copy_from_slice(code_src);
+            load_region[dst_range].copy_from_slice(src);
         }
         println!("run the code!");
         let entry_point = unsafe {
@@ -196,6 +201,22 @@ impl<'a> Elf<'a> {
         unsafe {
             #![warn(named_asm_labels)]
             asm!(
+                // Set data segments to USER_DS
+                "mov es, dx",
+                "mov ds, dx",
+                "mov fs, dx",
+                "mov gs, dx",
+
+                // Use sysretq to switch RIP, CS and SS to the user mode values
+                "call 1f",
+                "1:",
+                "pop rdx",
+                "lea rcx, [rip+1f]",
+                //".byte 0xeb, 0xfe",
+                "sysretq",
+                "1:",
+                //".byte 0xeb, 0xfe",
+                "int3",
                 "call rax",
                 // Call exit() when it is returned
                 /*
@@ -214,7 +235,8 @@ impl<'a> Elf<'a> {
                 "mov eax, 0", // op = exit (0)
                 "syscall",
                 "ud2",
-                in("rax") entry_point,
+                in("rcx") entry_point,
+                in("rdx") crate::arch::x86_64::USER_DS,
                 lateout("rax") retcode,
             );
         }

@@ -123,7 +123,7 @@ fn main() -> Result<()> {
     paint_wasabi_logo();
 
     unsafe { core::arch::asm!("cli") }
-    init::init_interrupts();
+    let _interrupt_config = init::init_interrupts()?;
     init::init_paging()?;
     init::init_timer();
     init_syscall();

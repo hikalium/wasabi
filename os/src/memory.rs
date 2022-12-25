@@ -1,8 +1,24 @@
 extern crate alloc;
 
+use crate::allocator::ALLOCATOR;
+use crate::error::Error;
+use crate::error::Result;
+use crate::util::PAGE_SIZE;
 use alloc::boxed::Box;
+use core::alloc::Layout;
 use core::mem::ManuallyDrop;
 use core::pin::Pin;
+use core::slice;
+
+pub fn alloc_pages(num_pages: usize) -> Result<Pin<Box<[u8]>>> {
+    let size = PAGE_SIZE * num_pages;
+    let scratchpad_buffers = ALLOCATOR.alloc_with_options(
+        Layout::from_size_align(size, PAGE_SIZE)
+            .map_err(|_| Error::Failed("could not allocate pages"))?,
+    );
+    let scratchpad_buffers = unsafe { slice::from_raw_parts(scratchpad_buffers as *mut u8, size) };
+    Ok(Pin::new(Box::<[u8]>::from(scratchpad_buffers)))
+}
 
 pub struct Mmio<T: Sized> {
     inner: ManuallyDrop<Pin<Box<T>>>,
