@@ -1,3 +1,4 @@
+use anyhow::Result;
 use pdb::FallibleIterator;
 use regex::Regex;
 use rustc_demangle::demangle;
@@ -8,17 +9,15 @@ use std::io::Read;
 use std::ops::Bound;
 use std::process::Command;
 
-fn main() -> io::Result<()> {
+fn main() -> Result<()> {
     let find_pdb_path_output = Command::new("bash")
         .arg("-c")
         .arg("ls -1t target/x86_64-unknown-uefi/*/deps/os-*.pdb | head -1")
         .output()
         .expect("failed to execute objdump");
     println!("{:?}", find_pdb_path_output.stdout);
-    let pdb_path = String::from_utf8(find_pdb_path_output.stdout)
-        .unwrap()
-        .to_string();
-    let pdb_path = pdb_path.trim();
+    let pdb_path = String::from_utf8(find_pdb_path_output.stdout)?;
+    let pdb_path = pdb_path.as_str().trim();
     println!("Latest pdb: {}", pdb_path);
     let file = File::open(pdb_path)?;
     let mut pdb = pdb::PDB::open(file).unwrap();
@@ -46,34 +45,29 @@ fn main() -> io::Result<()> {
     let input = String::from_utf8_lossy(&buf);
     let input = input.trim();
     let lines: Vec<&str> = input.split('\n').collect();
+    let objdump_output = Command::new("objdump")
+        .arg("-d")
+        .arg("target/x86_64-unknown-uefi/debug/os.efi")
+        .output()
+        .expect("failed to execute objdump");
+    let input = String::from_utf8(objdump_output.stdout).unwrap();
+    let objdump_lines: Vec<&str> = input.split('\n').collect();
     if lines.len() > 1 {
+        let mut lines = lines.iter();
         let re_loader_code = Regex::new(r"\[0x(.*)-0x(.*)\).*type: LOADER_CODE").unwrap();
         let re_qemu_exception_info = Regex::new(r"v=.* cpl=.* IP=.*:(.*) pc=.*").unwrap();
         let mmap_loader_code = lines
-            .iter()
-            .map(|&line| re_loader_code.captures(line))
-            .find(|line| line.is_some())
-            .expect("LOADER_CODE memory map entry is not found")
-            .unwrap();
+            .find_map(|line| re_loader_code.captures(line))
+            .expect("LOADER_CODE memory map entry is not found");
         let qemu_exception = lines
-            .iter()
-            .map(|&line| re_qemu_exception_info.captures(line))
-            .find(|line| line.is_some())
-            .expect("QEMU exception info not found")
-            .unwrap();
+            .find_map(|line| re_qemu_exception_info.captures(line))
+            .expect("QEMU exception info not found");
         let loader_base = u64::from_str_radix(&mmap_loader_code[1], 16)
             .expect("failed to parse LOADER_CODE base");
         let rip = u64::from_str_radix(&qemu_exception[1], 16).expect("failed to parse RIP");
 
         let re_objdump_section_text = Regex::new(r"([a-zA-Z0-9]+) <.text>").unwrap();
-        let objdump_output = Command::new("objdump")
-            .arg("-d")
-            .arg("target/x86_64-unknown-uefi/debug/os.efi")
-            .output()
-            .expect("failed to execute objdump");
-        let input = String::from_utf8(objdump_output.stdout).unwrap();
-        let lines: Vec<&str> = input.split('\n').collect();
-        let objdump_line_text = lines
+        let objdump_line_text = objdump_lines
             .iter()
             .map(|&line| re_objdump_section_text.captures(line))
             .find(|line| line.is_some())

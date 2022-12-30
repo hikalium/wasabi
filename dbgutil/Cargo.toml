@@ -9,4 +9,5 @@ edition = "2021"
 regex = "1"
 pdb="0.7.0"
 rustc-demangle = "0.1"
-
+anyhow = "1.0.68"
+argh = "0.1.9"
