@@ -4,6 +4,7 @@ use crate::boot_info::BootInfo;
 use crate::error::Result;
 use crate::memory::alloc_pages;
 use crate::println;
+use crate::util::PAGE_SIZE;
 use alloc::boxed::Box;
 use attr_bits::BIT_FLAGS_INTGATE;
 use attr_bits::BIT_FLAGS_PRESENT;
@@ -375,22 +376,42 @@ struct TaskStateSegment64Inner {
 const _: () = assert!(size_of::<TaskStateSegment64Inner>() == 104);
 
 pub struct TaskStateSegment64 {
-    _tss64: TaskStateSegment64Inner,
-    _rsp0: Pin<Box<[u8]>>,
+    tss64: TaskStateSegment64Inner,
+    _stack_for_ring0: Pin<Box<[u8]>>,
 }
 impl TaskStateSegment64 {
+    pub fn phys_addr(&self) -> u64 {
+        &self.tss64 as *const TaskStateSegment64Inner as u64
+    }
     pub fn new() -> Result<Pin<Box<Self>>> {
-        let rsp0 = alloc_pages(16)?;
+        const RING0_STACK_NUM_PAGES: usize = 16;
+        let stack_for_ring0 = alloc_pages(RING0_STACK_NUM_PAGES)?;
+        let rsp0 = unsafe {
+            stack_for_ring0
+                .as_ptr()
+                .add(RING0_STACK_NUM_PAGES * PAGE_SIZE) as u64
+        };
         let tss64 = TaskStateSegment64Inner {
             _reserved0: 0,
-            _rsp: [rsp0.as_ptr() as u64, 0, 0],
+            _rsp: [rsp0, 0, 0],
             _ist: [0; 8],
             _reserved1: [0; 5],
             _io_map_base_addr: 0,
         };
-        Ok(Box::pin(Self {
-            _tss64: tss64,
-            _rsp0: rsp0,
-        }))
+        let this = Box::pin(Self {
+            tss64,
+            _stack_for_ring0: stack_for_ring0,
+        });
+        println!(
+            "TSS64 created @ {:#p}, with rsp0 = {:#018X}",
+            this.as_ref().get_ref(),
+            rsp0
+        );
+        Ok(this)
+    }
+}
+impl Drop for TaskStateSegment64 {
+    fn drop(&mut self) {
+        panic!("TSS64 being dropped!");
     }
 }

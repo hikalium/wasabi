@@ -56,9 +56,7 @@ impl Gdt {
             user_code_segment_32: GdtSegmentDescriptor::null(),
             user_data_segment: GdtSegmentDescriptor::new(GdtAttr::UserData),
             user_code_segment_64: GdtSegmentDescriptor::new(GdtAttr::User64Code),
-            task_state_segment: TaskStateSegment64Descriptor::new(tss64.as_ref().get_ref()
-                as *const TaskStateSegment64
-                as u64),
+            task_state_segment: TaskStateSegment64Descriptor::new(tss64.phys_addr()),
         };
         let gdt = Box::pin(gdt);
         let params = GdtrParameters {
