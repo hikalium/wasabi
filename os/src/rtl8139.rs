@@ -1,11 +1,5 @@
 extern crate alloc;
 
-use crate::arch::x86_64::busy_loop_hint;
-use crate::arch::x86_64::read_io_port_u32;
-use crate::arch::x86_64::read_io_port_u8;
-use crate::arch::x86_64::write_io_port_u16;
-use crate::arch::x86_64::write_io_port_u32;
-use crate::arch::x86_64::write_io_port_u8;
 use crate::error::Result;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
@@ -21,6 +15,12 @@ use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::println;
+use crate::x86_64::busy_loop_hint;
+use crate::x86_64::read_io_port_u32;
+use crate::x86_64::read_io_port_u8;
+use crate::x86_64::write_io_port_u16;
+use crate::x86_64::write_io_port_u32;
+use crate::x86_64::write_io_port_u8;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;

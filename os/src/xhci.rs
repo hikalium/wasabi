@@ -7,7 +7,6 @@ pub mod ring;
 pub mod trb;
 
 use crate::allocator::ALLOCATOR;
-use crate::arch::x86_64::paging::IoBox;
 use crate::ax88179;
 use crate::error::Error;
 use crate::error::Result;
@@ -31,6 +30,7 @@ use crate::usb::UsbDescriptor;
 use crate::usb_hid_keyboard;
 use crate::util::IntoPinnedMutableSlice;
 use crate::util::PAGE_SIZE;
+use crate::x86_64::paging::IoBox;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::fmt::Debug;

@@ -1,6 +1,5 @@
 extern crate alloc;
 
-use crate::arch::x86_64::busy_loop_hint;
 use crate::error::Error;
 use crate::error::Result;
 use crate::pci::BarMem64;
@@ -9,6 +8,7 @@ use crate::println;
 use crate::util::extract_bits;
 use crate::util::PAGE_SIZE;
 use crate::volatile::Volatile;
+use crate::x86_64::busy_loop_hint;
 use crate::xhci::ring::CommandRing;
 use crate::xhci::ring::EventRing;
 use crate::xhci::DeviceContextBaseAddressArray;

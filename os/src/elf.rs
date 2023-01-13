@@ -236,7 +236,7 @@ impl<'a> Elf<'a> {
                 "syscall",
                 "ud2",
                 in("rcx") entry_point,
-                in("rdx") crate::arch::x86_64::USER_DS,
+                in("rdx") crate::x86_64::USER_DS,
                 lateout("rax") retcode,
             );
         }

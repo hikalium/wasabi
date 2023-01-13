@@ -8,11 +8,7 @@
 
 extern crate alloc;
 
-use arch::x86_64::init_syscall;
 use core::pin::Pin;
-use os::arch;
-use os::arch::x86_64;
-use os::arch::x86_64::read_rsp;
 use os::boot_info::BootInfo;
 use os::elf::Elf;
 use os::error::Result;
@@ -26,6 +22,9 @@ use os::graphics::BitmapImageBuffer;
 use os::init;
 use os::network::network_manager_thread;
 use os::println;
+use os::x86_64;
+use os::x86_64::init_syscall;
+use os::x86_64::read_rsp;
 
 fn paint_wasabi_logo() {
     const SIZE: i64 = 256;
@@ -119,7 +118,7 @@ fn run_tasks() -> Result<()> {
 fn main() -> Result<()> {
     init::init_graphical_terminal();
     os::println!("Booting Wasabi OS!!!");
-    println!("Initial rsp = {:#018X}", arch::x86_64::read_rsp());
+    println!("Initial rsp = {:#018X}", x86_64::read_rsp());
     paint_wasabi_logo();
 
     unsafe { core::arch::asm!("cli") }

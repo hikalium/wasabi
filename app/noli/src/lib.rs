@@ -4,7 +4,8 @@
 
 extern crate alloc;
 
-use alloc::alloc::{GlobalAlloc, Layout};
+use alloc::alloc::GlobalAlloc;
+use alloc::alloc::Layout;
 use core::arch::asm;
 use core::fmt;
 use core::panic::PanicInfo;

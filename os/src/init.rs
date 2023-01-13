@@ -1,7 +1,6 @@
 extern crate alloc;
 
 use crate::acpi::Acpi;
-use crate::arch;
 use crate::boot_info::BootInfo;
 use crate::boot_info::File;
 use crate::efi;
@@ -18,16 +17,16 @@ use crate::util;
 use crate::util::size_in_pages_from_bytes;
 use crate::vram;
 use crate::vram::VRAMBufferInfo;
+use crate::x86_64;
+use crate::x86_64::apic::IoApic;
+use crate::x86_64::gdt::Gdt;
+use crate::x86_64::idt::Idt;
+use crate::x86_64::idt::TaskStateSegment64;
+use crate::x86_64::paging::write_cr3;
+use crate::x86_64::paging::PageAttr;
+use crate::x86_64::paging::PML4;
+use crate::x86_64::CpuidRequest;
 use alloc::boxed::Box;
-use arch::x86_64;
-use arch::x86_64::apic::IoApic;
-use arch::x86_64::gdt::Gdt;
-use arch::x86_64::idt::Idt;
-use arch::x86_64::idt::TaskStateSegment64;
-use arch::x86_64::paging::write_cr3;
-use arch::x86_64::paging::PageAttr;
-use arch::x86_64::paging::PML4;
-use arch::x86_64::CpuidRequest;
 use core::cmp::max;
 use core::pin::Pin;
 use core::slice;
@@ -247,7 +246,7 @@ pub fn init_interrupts() -> Result<InterruptConfiguration> {
     x86_64::disable_legacy_pic();
     let bsp_local_apic = BootInfo::take().bsp_local_apic();
     IoApic::init(bsp_local_apic).expect("Failed to init I/O APIC");
-    let idt = x86_64::idt::Idt::new(x86_64::KERNEL_CS)?;
+    let idt = Idt::new(x86_64::KERNEL_CS)?;
     Ok(InterruptConfiguration { tss64, gdt, idt })
 }
 

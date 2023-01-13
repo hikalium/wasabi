@@ -1,13 +1,13 @@
 extern crate alloc;
 
 use crate::acpi::Mcfg;
-use crate::arch::x86_64::paging::with_current_page_table;
-use crate::arch::x86_64::paging::PageAttr;
 use crate::error::Error;
 use crate::error::Result;
 use crate::print::hexdump;
 use crate::println;
 use crate::rtl8139::Rtl8139Driver;
+use crate::x86_64::paging::with_current_page_table;
+use crate::x86_64::paging::PageAttr;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;

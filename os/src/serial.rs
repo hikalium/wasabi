@@ -1,4 +1,4 @@
-use crate::arch::x86_64;
+use crate::x86_64;
 use core::arch::asm;
 use core::convert::TryInto;
 use core::fmt;

@@ -21,7 +21,6 @@
 
 pub mod acpi;
 pub mod allocator;
-pub mod arch;
 pub mod ax88179;
 pub mod boot_info;
 pub mod debug_exit;
@@ -49,6 +48,7 @@ pub mod usb_hid_keyboard;
 pub mod util;
 pub mod volatile;
 pub mod vram;
+pub mod x86_64;
 pub mod xhci;
 
 #[cfg(test)]

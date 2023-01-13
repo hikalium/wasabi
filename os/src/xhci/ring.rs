@@ -1,11 +1,11 @@
 extern crate alloc;
 
 use crate::allocator::ALLOCATOR;
-use crate::arch::x86_64::paging::disable_cache;
-use crate::arch::x86_64::paging::IoBox;
 use crate::error::Error;
 use crate::error::Result;
 use crate::println;
+use crate::x86_64::paging::disable_cache;
+use crate::x86_64::paging::IoBox;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;

@@ -1,8 +1,9 @@
 extern crate alloc;
 
-use crate::arch::x86_64::idt::TaskStateSegment64;
 use crate::error::Result;
 use crate::println;
+use crate::x86_64::idt::TaskStateSegment64;
+use crate::x86_64::TSS64_SEL;
 use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
@@ -69,13 +70,10 @@ impl Gdt {
             asm!("lgdt [rcx]",
                 in("rcx") &params);
         }
-        println!(
-            "Loading TSS ( selector = {:#X} )",
-            crate::arch::x86_64::TSS64_SEL
-        );
+        println!("Loading TSS ( selector = {:#X} )", TSS64_SEL);
         unsafe {
             asm!("ltr cx",
-                in("cx") crate::arch::x86_64::TSS64_SEL);
+                in("cx") TSS64_SEL);
         }
         Ok(gdt)
     }

@@ -1,8 +1,8 @@
-use crate::arch::x86_64;
-use crate::arch::x86_64::CpuidRequest;
 use crate::error::Error;
 use crate::error::Result;
 use crate::println;
+use crate::x86_64;
+use crate::x86_64::CpuidRequest;
 use core::ptr::write_volatile;
 
 #[derive(Debug)]

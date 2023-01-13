@@ -1,4 +1,4 @@
-use crate::arch::x86_64;
+use crate::x86_64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
