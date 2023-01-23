@@ -170,6 +170,12 @@ global_asm!(
 .global inthandler_common
 inthandler_common:
     // General purpose registers (except rsp and rcx)
+    mov ax,16 // KERNEL_DS == 2 << 3
+    mov es,ax
+    mov ds,ax
+    mov fs,ax
+    mov gs,ax
+    mov ss,ax
     push r15
     push r14
     push r13
@@ -217,10 +223,9 @@ inthandler_common:
     pop r14
     pop r15
     //
-	pop rcx
-	add rsp, 8 // for Error Code
-	iretq
-
+    pop rcx
+    add rsp, 8 // for Error Code
+    iretq
 "#
 );
 
@@ -314,38 +319,38 @@ impl Idt {
         let mut idt = Idt {
             entries: [IdtDescriptor::new(
                 segment_selector,
-                0,
+                1,
                 IdtAttr::IntGateDPL0,
                 int_handler_unimplemented,
             ); 0x100],
         };
         idt.entries[3] = IdtDescriptor::new(
             segment_selector,
-            0,
+            1,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint3,
         );
         idt.entries[6] = IdtDescriptor::new(
             segment_selector,
-            0,
+            1,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint6,
         );
         idt.entries[13] = IdtDescriptor::new(
             segment_selector,
-            0,
+            1,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint13,
         );
         idt.entries[14] = IdtDescriptor::new(
             segment_selector,
-            0,
+            1,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint14,
         );
         idt.entries[32] = IdtDescriptor::new(
             segment_selector,
-            0,
+            1,
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint32,
         );
@@ -394,7 +399,7 @@ impl TaskStateSegment64 {
         let tss64 = TaskStateSegment64Inner {
             _reserved0: 0,
             _rsp: [rsp0, 0, 0],
-            _ist: [0; 8],
+            _ist: [rsp0; 8],
             _reserved1: [0; 5],
             _io_map_base_addr: 0,
         };
