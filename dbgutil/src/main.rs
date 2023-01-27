@@ -1,8 +1,8 @@
+use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
 use argh::FromArgs;
 use lazy_static::lazy_static;
-use pdb::FallibleIterator;
 use regex::Regex;
 use rustc_demangle::demangle;
 use std::collections::BTreeMap;
@@ -48,8 +48,6 @@ struct SymbolArgs {}
 lazy_static! {
     static ref RE: Regex = Regex::new("...").unwrap();
     static ref RE_LOADER_CODE: Regex = Regex::new(r"\[0x(.*)-0x(.*)\).*type: LOADER_CODE").unwrap();
-    static ref RE_QEMU_EXCEPTION_INFO: Regex =
-        Regex::new(r"IP=[0-9a-fA-F]+:([0-9a-fA-F]+)").unwrap();
     static ref RE_OBJDUMP_SECTION_TEXT: Regex = Regex::new(r"([a-zA-Z0-9]+) <.text>").unwrap();
     static ref RE_WASABI_BOOTED: Regex =
         Regex::new(r"^Wasabi OS booted\. efi_main = 0x([a-fA-F0-9]+)$").unwrap();
@@ -82,17 +80,20 @@ fn main() -> Result<()> {
     let address_map = pdb.address_map().unwrap();
     let mut sorted_symbols = BTreeMap::new();
     let mut symbol_table = HashMap::<String, u64>::new();
-    while let Some(symbol) = symbols.next().unwrap() {
-        match symbol.parse() {
-            Ok(pdb::SymbolData::Public(data)) if data.function => {
-                // we found the location of a function!
-                let rva = data.offset.to_rva(&address_map).unwrap_or_default();
-                let ofs_in_file = rva.0 as u64;
-                let name = demangle(&data.name.to_string()).to_string();
-                sorted_symbols.insert(ofs_in_file, name.clone());
-                symbol_table.insert(name, ofs_in_file);
+    {
+        use pdb::FallibleIterator;
+        while let Some(symbol) = symbols.next().unwrap() {
+            match symbol.parse() {
+                Ok(pdb::SymbolData::Public(data)) if data.function => {
+                    // we found the location of a function!
+                    let rva = data.offset.to_rva(&address_map).unwrap_or_default();
+                    let ofs_in_file = rva.0 as u64;
+                    let name = demangle(&data.name.to_string()).to_string();
+                    sorted_symbols.insert(ofs_in_file, name.clone());
+                    symbol_table.insert(name, ofs_in_file);
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 
@@ -144,10 +145,15 @@ fn main() -> Result<()> {
             }
 
             if let Some(qemu_debug_log) = args.qemu_debug_log {
-                let qemu_debug_log = std::fs::read_to_string(qemu_debug_log)?;
-                for qemu_exception in RE_QEMU_EXCEPTION_INFO.captures_iter(&qemu_debug_log) {
-                    let rip =
-                        u64::from_str_radix(&qemu_exception[1], 16).expect("failed to parse RIP");
+                let qemu_log = std::fs::read_to_string(qemu_debug_log)?;
+                for exception_info in qemu_log
+                    .split('\n')
+                    .flat_map(|s| s.strip_prefix("hikalium_exception:"))
+                    .flat_map(serde_json::from_str::<serde_json::Value>)
+                {
+                    println!("{:?}", exception_info);
+                    let rip = u64::from_str_radix(&exception_info["rip"].to_string(), 16)
+                        .expect("failed to parse RIP");
 
                     let rip_file_offset = rip - efi_main_runtime_addr + efi_main_file_offset;
                     println!("rip_file_offset ={:#018X}", rip_file_offset);
