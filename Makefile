@@ -58,6 +58,7 @@ clippy: font
 	rustup component add clippy
 	cd font && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
+	cd dbgutil && cargo clippy
 	# Following ones will run clippy on examples as well, but disabled for now
 	# cd font && cargo clippy --all-features --all-targets -- -D warnings
 	# cd os && cargo clippy --all-features --all-targets -- -D warnings
@@ -177,6 +178,8 @@ objdump_hello:
 	`brew --prefix binutils`/bin/objdump -d -C mnt/hello | tee objdump_hello.txt
 
 crash:
-	@cat com2.log | grep -a LOADER_CODE | tee dbgutil_input.txt
-	@cat qemu_debug.log | grep -e 'check_exception old' -A 100 | grep -e check_exception -e 'RIP' -e 'fault' -e 'CR2' -e 'e=' | tee -a dbgutil_input.txt
-	cargo run --bin=dbgutil < dbgutil_input.txt
+	#@cat com2.log | grep -a LOADER_CODE | tee dbgutil_input.txt
+	#@cat qemu_debug.log | grep -e 'check_exception old' -A 100 | grep -e check_exception -e 'RIP' -e 'fault' -e 'CR2' -e 'e=' | tee -a dbgutil_input.txt
+	cargo run --bin=dbgutil crash \
+		--qemu-debug-log $$(readlink -f qemu_debug.log) \
+		--serial-log $$(readlink -f com2.log)
