@@ -160,9 +160,6 @@ fn main() -> Result<()> {
     let file = File::open(files.pdb_path)?;
     let mut pdb = pdb::PDB::open(file).unwrap();
     let sections = pdb.sections().unwrap().unwrap();
-    for s in &sections {
-        println!("{:?}", s);
-    }
     println!(
         "{:8} {:10} {:10} {:10} {:10} {:10}",
         "text", "paddr", "vaddr", "raw_ofs", "raw_size", "raw_ofs_end"
@@ -211,17 +208,6 @@ fn main() -> Result<()> {
         .unwrap()
         .to_vec()
         .into_boxed_slice();
-    println!("First 16 bytes of .text:");
-    println!(
-        "{}",
-        text_section_bytes
-            .iter()
-            .take(16)
-            .map(|v| format!("{v:02X}"))
-            .collect::<Vec<String>>()
-            .join(" ")
-    );
-
     let objdump_lines = Command::new("objdump")
         .arg("-d")
         .arg(&files.efi_path)
@@ -236,17 +222,6 @@ fn main() -> Result<()> {
         .unwrap();
     let text_base_in_objdump = u64::from_str_radix(&text_base_in_objdump["addr"], 16)
         .expect("failed to parse objdump for text section");
-    println!("text_base_in_objdump: {text_base_in_objdump:#018X}");
-    println!(
-        "{}",
-        objdump_lines
-            .iter()
-            .skip_while(|line| !RE_OBJDUMP_SECTION_TEXT.is_match(line))
-            .take(10)
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>()
-            .join("\n")
-    );
 
     match args.nested {
         SubCommand::Crash(args) => {
@@ -259,28 +234,10 @@ fn main() -> Result<()> {
                 .expect("'Wasabi OS booted' message is not found");
             let efi_main_runtime_addr = u64::from_str_radix(&efi_main_runtime_addr["addr"], 16)
                 .expect("failed to parse efi_main_runtime_addr");
-            let write_cr3_runtime_addr = serial_log
-                .iter()
-                .find_map(|line| RE_DEBUG_INFO_ADDR_WRITE_CR3.captures(line))
-                .expect("'Wasabi OS booted' message is not found");
-            let write_cr3_runtime_addr = u64::from_str_radix(&write_cr3_runtime_addr["addr"], 16)
-                .expect("failed to parse efi_main_runtime_addr");
-            let write_cr3_symbol = symbol_table
-                .iter()
-                .find(|(k, _)| k.contains("write_cr3"))
-                .context("write_cr3 not found in symbol_table")?;
-            let efi_main_symbol = symbol_table
-                .iter()
-                .find(|(k, _)| k.contains("efi_main"))
-                .context("efi_main not found in symbol_table")?;
             let efi_main_text_ofs = symbol_text_ofs_table
                 .get("efi_main")
                 .context("efi_main not found in symbol_text_ofs_table")?;
             let text_ofs_to_runtime_addr = efi_main_runtime_addr - efi_main_text_ofs;
-            println!(
-                "text_ofs_to_runtime_addr = 0x{:018X}",
-                text_ofs_to_runtime_addr
-            );
 
             // *_runtime_addr: actual address (e.g. RIP values) at runtime
             // *_text_ofs: offset in the .text section
@@ -294,22 +251,10 @@ fn main() -> Result<()> {
                 text_base_in_objdump,
                 objdump_lines,
             };
-            println!("\nefi_main_runtime_addr = {:#018X}", efi_main_runtime_addr);
-            println!("efi_main symbol from pdb: {:?}", efi_main_symbol);
-            println!("efi_main_text_ofs: {:#018X}", efi_main_text_ofs);
-            dump_rip(efi_main_runtime_addr, &params)?;
-            println!(
-                "\nwrite_cr3_runtime_addr = {:#018X}",
-                write_cr3_runtime_addr
-            );
-            println!("write_cr3 symbol from pdb: {:?}", write_cr3_symbol);
-            dump_rip(write_cr3_runtime_addr, &params)?;
-
             if let Some(phys_addr) = args.phys_addr {
                 let rip = u64::from_str_radix(&phys_addr, 16).expect("failed to parse RIP");
                 return dump_rip(rip, &params);
             }
-
             if let Some(qemu_debug_log) = args.qemu_debug_log {
                 let qemu_log = std::fs::read_to_string(qemu_debug_log)?;
                 for exception_info in qemu_log
@@ -327,7 +272,7 @@ fn main() -> Result<()> {
                         continue;
                     }
                     println!(
-                        "\nException #{:5}: INT 0x{:02X} op_bytes: {}",
+                        "\nException #{:5}: INT 0x{:02X} op_bytes_from_qemu_log: {}",
                         &exception_info.count, &exception_info.intno, exception_info.op_bytes
                     );
                     dump_rip(rip, &params)?;
