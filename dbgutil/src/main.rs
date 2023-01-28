@@ -64,7 +64,6 @@ lazy_static! {
 struct CodeParams {
     text_ofs_to_runtime_addr: u64,
     sorted_symbol_names: BTreeMap<u64, String>,
-    text_section_bytes: Box<[u8]>,
     text_section: ImageSectionHeader,
     text_base_in_objdump: u64,
     objdump_lines: Vec<String>,
@@ -88,21 +87,6 @@ fn dump_rip(rip: u64, params: &CodeParams) -> Result<()> {
     let text_ofs = rip - params.text_ofs_to_runtime_addr;
     let rip_in_objdump = text_ofs + params.text_base_in_objdump;
     let rip_in_objdump_str = format!("{rip_in_objdump:x}");
-    println!("RIP      : {:#018X}", rip);
-    if let Some(op_bytes) = params
-        .text_section_bytes
-        .as_ref()
-        .get(text_ofs as usize..text_ofs as usize + 16)
-    {
-        println!(
-            "op_bytes : {}",
-            op_bytes
-                .iter()
-                .map(|v| format!("{v:02X}"))
-                .collect::<Vec<String>>()
-                .join(" ")
-        );
-    }
 
     if text_ofs < params.text_section.size_of_raw_data as u64 {
         let symbol_entry = params
@@ -197,15 +181,6 @@ fn main() -> Result<()> {
         }
     }
 
-    let efi_bytes = std::fs::read(&files.efi_path)?;
-    let text_section_bytes = efi_bytes
-        .get(
-            text_section.pointer_to_raw_data as usize
-                ..(text_section.pointer_to_raw_data + text_section.size_of_raw_data) as usize,
-        )
-        .unwrap()
-        .to_vec()
-        .into_boxed_slice();
     let objdump_lines = Command::new("objdump")
         .arg("-d")
         .arg(&files.efi_path)
@@ -244,7 +219,6 @@ fn main() -> Result<()> {
             let params = CodeParams {
                 text_ofs_to_runtime_addr,
                 sorted_symbol_names,
-                text_section_bytes,
                 text_section,
                 text_base_in_objdump,
                 objdump_lines,
@@ -270,8 +244,8 @@ fn main() -> Result<()> {
                         continue;
                     }
                     println!(
-                        "\nException #{:5}: INT 0x{:02X} op_bytes_from_qemu_log: {}",
-                        &exception_info.count, &exception_info.intno, exception_info.op_bytes
+                        "\nException {:#04X} @ {:#018X}: op_bytes = {}",
+                        &exception_info.intno, rip, exception_info.op_bytes
                     );
                     dump_rip(rip, &params)?;
                 }
