@@ -88,9 +88,21 @@ fn dump_rip(rip: u64, params: &CodeParams) -> Result<()> {
     let text_ofs = rip - params.text_ofs_to_runtime_addr;
     let rip_in_objdump = text_ofs + params.text_base_in_objdump;
     let rip_in_objdump_str = format!("{rip_in_objdump:x}");
-    println!("RIP             ={:#018X}", rip);
-    println!("text_ofs        ={:#018X}", text_ofs);
-    println!("rip_in_objdump  ={:#018X}", rip_in_objdump);
+    println!("RIP      : {:#018X}", rip);
+    if let Some(op_bytes) = params
+        .text_section_bytes
+        .as_ref()
+        .get(text_ofs as usize..text_ofs as usize + 16)
+    {
+        println!(
+            "op_bytes : {}",
+            op_bytes
+                .iter()
+                .map(|v| format!("{v:02X}"))
+                .collect::<Vec<String>>()
+                .join(" ")
+        );
+    }
 
     if text_ofs < params.text_section.size_of_raw_data as u64 {
         let symbol_entry = params
@@ -98,21 +110,7 @@ fn dump_rip(rip: u64, params: &CodeParams) -> Result<()> {
             .range((Bound::Unbounded, Bound::Included(text_ofs)))
             .next_back()
             .expect("Symbol not found");
-        println!(".text+{:#018X}: {}", symbol_entry.0, symbol_entry.1);
-    }
-    if let Some(op_bytes) = params
-        .text_section_bytes
-        .as_ref()
-        .get(text_ofs as usize..text_ofs as usize + 16)
-    {
-        println!(
-            "op_bytes        = {}",
-            op_bytes
-                .iter()
-                .map(|v| format!("{v:02X}"))
-                .collect::<Vec<String>>()
-                .join(" ")
-        );
+        println!("\n.text + {:#018X}: {}", symbol_entry.0, symbol_entry.1);
     }
     let lines: Vec<&String> = params
         .objdump_lines
