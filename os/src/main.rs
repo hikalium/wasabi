@@ -24,6 +24,7 @@ use os::network::network_manager_thread;
 use os::println;
 use os::x86_64;
 use os::x86_64::init_syscall;
+use os::x86_64::paging::write_cr3;
 use os::x86_64::read_rsp;
 
 fn paint_wasabi_logo() {
@@ -127,7 +128,17 @@ fn main() -> Result<()> {
     init::init_timer();
     init_syscall();
 
-    println!("Wasabi OS booted. efi_main = {:#p}", efi_main as *const ());
+    println!(
+        "Wasabi OS booted. efi_main = {:#018p}",
+        efi_main as *const ()
+    );
+    os::print::hexdump(unsafe {
+        core::slice::from_raw_parts(efi_main as *const () as *const u8, 16)
+    });
+    println!("debug_info: write_cr3 = {:#018p}", write_cr3 as *const ());
+    os::print::hexdump(unsafe {
+        core::slice::from_raw_parts(write_cr3 as *const () as *const u8, 16)
+    });
 
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();

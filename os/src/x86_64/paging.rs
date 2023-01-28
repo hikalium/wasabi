@@ -84,6 +84,7 @@ pub fn read_cr3() -> *mut PML4 {
 /// # Safety
 /// Writing to CR3 can causes any exceptions so it is
 /// programmer's responsibility to setup correct page tables.
+#[no_mangle]
 pub unsafe fn write_cr3(table: *const PML4) {
     asm!("mov cr3, rax",
             in("rax") table)
