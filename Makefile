@@ -1,7 +1,9 @@
 PROJECT_ROOT:=$(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 OVMF=${PROJECT_ROOT}/third_party/ovmf/RELEASEX64_OVMF.fd
 QEMU=qemu-system-x86_64
-PORT_MONITOR?=2222
+PORT_MONITOR?=2345
+PORT_OFFSET_VNC?=5
+VNC_PASSWORD?=wasabi
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
@@ -22,6 +24,7 @@ QEMU_ARGS=\
 		--no-reboot \
 		-d int,cpu_reset \
 		-D qemu_debug.log \
+		-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on \
 		${MORE_QEMU_FLAGS}
 
 #		-gdb tcp::3333 -S \
@@ -181,3 +184,12 @@ crash:
 	cargo run --bin=dbgutil crash \
 		--qemu-debug-log $$(readlink -f qemu_debug.log) \
 		--serial-log $$(readlink -f com2.log)
+
+NOVNC_VERSION=1.4.0
+
+generated/noVNC-% : 
+	wget -O generated/novnc.tar.gz https://github.com/novnc/noVNC/archive/refs/tags/v$*.tar.gz
+	cd generated && tar -xvf novnc.tar.gz
+vnc: generated/noVNC-$(NOVNC_VERSION)
+	( echo 'change vnc password $(VNC_PASSWORD)' | while ! nc localhost $(PORT_MONITOR) ; do sleep 1 ; done ) &
+	generated/noVNC-$(NOVNC_VERSION)/utils/novnc_proxy --vnc localhost:$$((5900+${PORT_OFFSET_VNC}))
