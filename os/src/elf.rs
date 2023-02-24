@@ -198,53 +198,35 @@ impl<'a> Elf<'a> {
             }
         */
         unsafe {
-            #![allow(named_asm_labels)]
+            let retcode: i64;
             asm!(
                 // Set data segments to USER_DS
-                "int3", "sysretq",
-            );
-            /*
-                let retcode: i64;
-                    #![warn(named_asm_labels)]
-                    asm!(
-                        // Set data segments to USER_DS
-                        "mov es, dx",
-                        "mov ds, dx",
-                        "mov fs, dx",
-                        "mov gs, dx",
+                "mov es, dx",
+                "mov ds, dx",
+                "mov fs, dx",
+                "mov gs, dx",
 
-                        // Use sysretq to switch RIP, CS and SS to the user mode values
-                        "call 1f",
-                        "1:",
-                        "pop rdx",
-                        "lea rcx, [rip+1f]",
-                        //".byte 0xeb, 0xfe",
-                        "sysretq",
-                        "1:",
-                        //".byte 0xeb, 0xfe",
-                        "int3",
-                        "call rax",
-                        // Call exit() when it is returned
-                        ".global app_entry_point",
-                        "app_entry_point:",
-                        "3:",
-                        "jmp [rip+app_entry_point]",
-                        "lea rcx,[rip+1f]",
-                        "2:",
-                        "jmp [rip+2b]",
-                        "sysretq",
-                        "1:",
-                        "jmp [rip+1b]",
-                        "mov rdi, rax", // retcode = rax
-                        "mov eax, 0", // op = exit (0)
-                        "syscall",
-                        "ud2",
-                        in("rcx") entry_point,
-                        in("rdx") crate::x86_64::USER_DS,
-                        lateout("rax") retcode,
-                    );
+                // Use sysretq to switch RIP, CS and SS to the user mode values
+                "call 1f",
+                "1:",
+                "pop rdx",
+                //"lea rcx, [rip+1f]",
+                //".byte 0xeb, 0xfe",
+                "sysretq",
+                "1:",
+                //".byte 0xeb, 0xfe",
+                "int3",
+                "call rax",
+                // Call exit() when it is returned
+                "mov rdi, rax", // retcode = rax
+                "mov eax, 0", // op = exit (0)
+                "syscall",
+                "ud2",
+                in("rcx") entry_point,
+                in("rdx") crate::x86_64::USER_DS,
+                lateout("rax") retcode,
+            );
             println!("returned from the code! retcode = {}", retcode);
-                        */
         }
 
         Ok(())

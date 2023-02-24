@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::memory::alloc_pages;
 use crate::println;
 use crate::util::PAGE_SIZE;
+use crate::x86_64::read_cr2;
 use alloc::boxed::Box;
 use attr_bits::BIT_FLAGS_INTGATE;
 use attr_bits::BIT_FLAGS_PRESENT;
@@ -62,6 +63,8 @@ const _: () = assert!(size_of::<InterruptContext>() == 8 * 5);
 #[derive(Clone, Copy)]
 struct InterruptInfo {
     // This struct is placed at top of the interrupt stack.
+    // Should be aligned on 16-byte boundaries to pass the
+    // alignment checks done by FXSAVE / FXRSTOR
     fpu_context: FPUContenxt, // used by FXSAVE / FXRSTOR
     _dummy: u64,
     greg: GeneralRegisterContext,
@@ -150,11 +153,28 @@ macro_rules! interrupt_entrypoint {
         ));
     };
 }
+macro_rules! interrupt_entrypoint_with_ecode {
+    ($index:literal) => {
+        global_asm!(concat!(
+            ".global interrupt_entrypoint",
+            stringify!($index),
+            "\n",
+            "interrupt_entrypoint",
+            stringify!($index),
+            ":\n",
+            "push rcx // Save rcx first to reuse\n",
+            "mov rcx, ",
+            stringify!($index),
+            "\n",
+            "jmp inthandler_common"
+        ));
+    };
+}
 
 interrupt_entrypoint!(3);
 interrupt_entrypoint!(6);
-interrupt_entrypoint!(13);
-interrupt_entrypoint!(14);
+interrupt_entrypoint_with_ecode!(13);
+interrupt_entrypoint_with_ecode!(14);
 interrupt_entrypoint!(32);
 
 extern "sysv64" {
@@ -243,6 +263,10 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
         }
         6 => {
             println!("Exception {index:#04X}: Invalid Opcode");
+        }
+        14 => {
+            println!("Exception {index:#04X}: Page Fault");
+            println!("CR2={:#018X}", read_cr2());
         }
         _ => {
             println!("Exception {index:#04X}: Not handled");

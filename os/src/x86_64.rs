@@ -229,6 +229,14 @@ pub fn write_io_port_u32(port: u16, data: u32) {
     }
 }
 
+pub fn read_cr2() -> u64 {
+    let mut cr2: u64;
+    unsafe {
+        asm!("mov rax, cr2",
+            out("rax") cr2)
+    }
+    cr2
+}
 pub fn read_io_port_u8(port: u16) -> u8 {
     let mut data: u8;
     unsafe {
