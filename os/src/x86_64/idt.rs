@@ -267,6 +267,24 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
         14 => {
             println!("Exception {index:#04X}: Page Fault");
             println!("CR2={:#018X}", read_cr2());
+            println!(
+                "Caused by: {} mode {} access to a {} page",
+                if info.error_code & 0b0100 != 0 {
+                    "user"
+                } else {
+                    "supervisor"
+                },
+                if info.error_code & 0b0010 != 0 {
+                    "write"
+                } else {
+                    "read"
+                },
+                if info.error_code & 0b0001 != 0 {
+                    "present"
+                } else {
+                    "non-present"
+                },
+            );
         }
         _ => {
             println!("Exception {index:#04X}: Not handled");
