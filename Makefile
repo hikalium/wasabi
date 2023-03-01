@@ -127,7 +127,7 @@ pxe :
 
 app :
 	-rm -r generated/bin
-	make -C app/hello
+	make -C app/hello0
 
 run_deps : app
 	-rm -rf mnt

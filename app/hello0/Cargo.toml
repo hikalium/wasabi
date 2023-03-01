@@ -1,10 +1,10 @@
 [package]
-name = "hello"
+name = "hello0"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name="hello"
+name="hello0"
 test=false
 
 [dependencies]

@@ -3,6 +3,6 @@ members = [
     "font",
     "dbgutil",
     "os",
-    "app/hello",
+    "app/hello0",
     "app/noli",
 ]
