@@ -24,7 +24,7 @@ rustflags = [
 
 [profile.release]
 strip = true
-lto = true
+lto=true
 
 [lib]
 target = "x86_64-unknown-elf.json"

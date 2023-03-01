@@ -4,8 +4,8 @@
 use noli::*;
 
 fn main() -> i64 {
-    sys_print("hello!");
-    //println!("{}", 42);
+    sys_print("**** Hello from an app!\n");
+    //println!("hello{}", 42);
     return 42;
 }
 
