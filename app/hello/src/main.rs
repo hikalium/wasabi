@@ -4,7 +4,7 @@
 use noli::*;
 
 fn main() -> i64 {
-    //sys_print("hello!");
+    sys_print("hello!");
     //println!("{}", 42);
     return 42;
 }
