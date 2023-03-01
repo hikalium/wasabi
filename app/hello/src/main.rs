@@ -5,7 +5,6 @@ use noli::*;
 
 fn main() -> i64 {
     sys_print("**** Hello from an app!\n");
-    //println!("hello{}", 42);
     return 42;
 }
 

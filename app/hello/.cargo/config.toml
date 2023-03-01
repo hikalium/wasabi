@@ -6,25 +6,15 @@ build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
 
 [build]
+# See this json for rustflags
 target = "x86_64-unknown-elf.json"
 # c.f. https://users.rust-lang.org/t/how-to-pass-cargo-linker-args/3163/3
 # c.f. https://darkcoding.net/software/a-very-small-rust-binary-indeed/
 # c.f. https://doc.rust-lang.org/rustc/codegen-options/index.html
-rustflags = [
-    "-C", "relocation-model=pie",
-    "-C", "code-model=large",
-    "-C", "prefer-dynamic=no",
-    "-C", "link-args=-n",
-    "-C", "link-args=-N",
-    "-C", "link-args=--no-dynamic-linker",
-    "-C", "link-args=--pie",
-    "-C", "link-args=-static",
-    "-C", "link-args=--build-id=none"
-]
 
 [profile.release]
 strip = true
-lto=true
+lto = true
 
 [lib]
 target = "x86_64-unknown-elf.json"
