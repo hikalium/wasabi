@@ -74,7 +74,7 @@ impl<'a> Elf<'a> {
         if &data[0..4] != b"\x7fELF".as_slice() {
             return Err(Error::Failed("No ELF signature found"));
         }
-        if data[4] != 2 {
+        if data[4] != 2 /* ET_EXEC */ && data[4] != 3 /*ET_DYN*/ {
             return Err(Error::Failed("Not a 64-bit ELF"));
         }
         if data[5] != 1 {
@@ -83,7 +83,8 @@ impl<'a> Elf<'a> {
         if data[7] != 0 {
             return Err(Error::Failed("ABI is not SystemV"));
         }
-        if read_le_u16(data, 16)? != 2 {
+        let elf_type = read_le_u16(data, 16)?;
+        if elf_type != 2 /* ET_EXEC */ && elf_type != 3 /*ET_DYN*/ {
             return Err(Error::Failed("Not an executable ELF"));
         }
         if read_le_u16(data, 18)? != 0x3E {
