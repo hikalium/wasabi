@@ -3,12 +3,11 @@ extern crate alloc;
 use crate::boot_info::BootInfo;
 use crate::error::Result;
 use crate::memory::alloc_pages;
+use crate::print;
 use crate::println;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::read_cr2;
 use alloc::boxed::Box;
-use attr_bits::BIT_FLAGS_INTGATE;
-use attr_bits::BIT_FLAGS_PRESENT;
 use core::arch::asm;
 use core::arch::global_asm;
 use core::fmt;
@@ -257,15 +256,19 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
         return;
     }
     println!("Interrupt Info: {:?}", info);
+    print!("Exception {index:#04X}: ");
     match index {
         3 => {
-            println!("Exception {index:#04X}: Breakpoint");
+            println!("Breakpoint");
         }
         6 => {
-            println!("Exception {index:#04X}: Invalid Opcode");
+            println!("Invalid Opcode");
+        }
+        13 => {
+            println!("General Protection Fault");
         }
         14 => {
-            println!("Exception {index:#04X}: Page Fault");
+            println!("Page Fault");
             println!("CR2={:#018X}", read_cr2());
             println!(
                 "Caused by: {} mode {} access to a {} page",
@@ -287,7 +290,7 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
             );
         }
         _ => {
-            println!("Exception {index:#04X}: Not handled");
+            println!("Not handled");
         }
     }
     panic!("fatal exception");
@@ -298,11 +301,11 @@ extern "sysv64" fn int_handler_unimplemented() {
     panic!("unexpected interrupt!");
 }
 
-mod attr_bits {
-    // PDDRTTTT (TTTT: type, R: reserved, D: DPL, P: present)
-    pub const BIT_FLAGS_INTGATE: u8 = 0b0000_1110u8;
-    pub const BIT_FLAGS_PRESENT: u8 = 0b1000_0000u8;
-}
+// PDDRTTTT (TTTT: type, R: reserved, D: DPL, P: present)
+pub const BIT_FLAGS_INTGATE: u8 = 0b0000_1110u8;
+pub const BIT_FLAGS_PRESENT: u8 = 0b1000_0000u8;
+pub const BIT_FLAGS_DPL0: u8 = 0 << 5;
+pub const BIT_FLAGS_DPL3: u8 = 3 << 5;
 
 #[repr(u8)]
 #[derive(Copy, Clone)]
@@ -310,7 +313,8 @@ enum IdtAttr {
     // Without _NotPresent value, MaybeUninit::zeroed() on
     // this struct will be undefined behavior.
     _NotPresent = 0,
-    IntGateDPL0 = BIT_FLAGS_INTGATE | BIT_FLAGS_PRESENT,
+    IntGateDPL0 = BIT_FLAGS_INTGATE | BIT_FLAGS_PRESENT | BIT_FLAGS_DPL0,
+    IntGateDPL3 = BIT_FLAGS_INTGATE | BIT_FLAGS_PRESENT | BIT_FLAGS_DPL3,
 }
 
 #[repr(packed)]
@@ -369,7 +373,8 @@ impl Idt {
         idt.entries[3] = IdtDescriptor::new(
             segment_selector,
             1,
-            IdtAttr::IntGateDPL0,
+            // Set DPL=3 to allow user land to make this interrupt (e.g. via int3 op)
+            IdtAttr::IntGateDPL3,
             interrupt_entrypoint3,
         );
         idt.entries[6] = IdtDescriptor::new(

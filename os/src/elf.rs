@@ -74,7 +74,9 @@ impl<'a> Elf<'a> {
         if &data[0..4] != b"\x7fELF".as_slice() {
             return Err(Error::Failed("No ELF signature found"));
         }
-        if data[4] != 2 /* ET_EXEC */ && data[4] != 3 /*ET_DYN*/ {
+        if data[4] != 2 /* ET_EXEC */ && data[4] != 3
+        /*ET_DYN*/
+        {
             return Err(Error::Failed("Not a 64-bit ELF"));
         }
         if data[5] != 1 {
@@ -84,7 +86,9 @@ impl<'a> Elf<'a> {
             return Err(Error::Failed("ABI is not SystemV"));
         }
         let elf_type = read_le_u16(data, 16)?;
-        if elf_type != 2 /* ET_EXEC */ && elf_type != 3 /*ET_DYN*/ {
+        if elf_type != 2 /* ET_EXEC */ && elf_type != 3
+        /*ET_DYN*/
+        {
             return Err(Error::Failed("Not an executable ELF"));
         }
         if read_le_u16(data, 18)? != 0x3E {
@@ -193,11 +197,6 @@ impl<'a> Elf<'a> {
                 .add((load_info.entry_vaddr - load_region_start) as usize)
         };
         println!("entry_point = {:#p}", entry_point);
-        /*
-            unsafe {
-                asm!(".byte 0xeb, 0xfe" /* infinite loop */,);
-            }
-        */
         unsafe {
             let retcode: i64;
             asm!(
@@ -208,22 +207,18 @@ impl<'a> Elf<'a> {
                 "mov gs, dx",
 
                 // Use sysretq to switch RIP, CS and SS to the user mode values
-                "call 1f",
+                "lea rcx, [rip+1f]",
+                "sysretq", // sysretq will "jump" to rcx, which is the next line
                 "1:",
-                "pop rdx",
-                //"lea rcx, [rip+1f]",
-                //".byte 0xeb, 0xfe",
-                "sysretq",
-                "1:",
-                //".byte 0xeb, 0xfe",
-                "int3",
+                // Now, the CPU is in the user mode. Call the apps entry pointer
+                // (rax is set by rust, via the asm macro params)
                 "call rax",
                 // Call exit() when it is returned
                 "mov rdi, rax", // retcode = rax
                 "mov eax, 0", // op = exit (0)
                 "syscall",
                 "ud2",
-                in("rcx") entry_point,
+                in("rax") entry_point,
                 in("rdx") crate::x86_64::USER_DS,
                 lateout("rax") retcode,
             );

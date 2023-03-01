@@ -1,8 +1,12 @@
 use crate::print;
 use crate::println;
+use core::arch::asm;
 
-fn sys_exit(_regs: &[u64; 15]) {
-    panic!("program exited (sorry going back to os is not yet supported...)")
+fn sys_exit(regs: &[u64; 15]) {
+    println!("program exited with code {}", regs[1]);
+    unsafe {
+        asm!("int3");
+    }
 }
 
 fn sys_print(regs: &[u64; 15]) {
