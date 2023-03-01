@@ -4,5 +4,6 @@ members = [
     "dbgutil",
     "os",
     "app/hello0",
+    "app/hello1",
     "app/noli",
 ]

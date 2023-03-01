@@ -9,7 +9,9 @@
 extern crate alloc;
 
 use core::pin::Pin;
+use core::str::FromStr;
 use os::boot_info::BootInfo;
+use os::efi::EfiFileName;
 use os::elf::Elf;
 use os::error::Result;
 use os::executor::yield_execution;
@@ -148,7 +150,10 @@ fn main() -> Result<()> {
     for (i, f) in root_files.iter().enumerate() {
         println!("root_files[{}]: {}", i, f.name());
     }
-    let elf = root_files.iter().find(|&e| e.has_name("hello"));
+    let startup_app_file_name = EfiFileName::from_str("hello1")?;
+    let elf = root_files
+        .iter()
+        .find(|&e| e.name() == &startup_app_file_name);
     if let Some(elf) = elf {
         let elf = Elf::new(elf);
         println!("Executable found: {:?} ", elf);

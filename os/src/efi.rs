@@ -236,7 +236,7 @@ impl fmt::Display for EfiTime {
 }
 
 #[repr(C)]
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub struct EfiFileName {
     name: [u16; 32],
 }
@@ -248,6 +248,21 @@ impl EfiFileName {
 impl fmt::Display for EfiFileName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", CStrPtr16::from_ptr(self.name.as_ptr()),)
+    }
+}
+impl core::str::FromStr for EfiFileName {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        let src = s.encode_utf16();
+        let mut dst = [0u16; 32];
+        if src.clone().into_iter().count() > dst.len() {
+            Err(Error::Failed("too long for EfiFileName"))
+        } else {
+            dst.iter_mut()
+                .zip(src.into_iter())
+                .for_each(|(d, s)| *d = s);
+            Ok(Self { name: dst })
+        }
     }
 }
 
