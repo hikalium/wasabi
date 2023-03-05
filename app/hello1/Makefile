@@ -4,7 +4,7 @@ BINPATH=$(ROOT)/bin/$(NAME)
 
 .PHONY : bulid
 build:
-	cargo install --path . --root $(ROOT)
+	cargo -vvv install --path . --root $(ROOT)
 
 .PHONY : objdump
 objdump: build

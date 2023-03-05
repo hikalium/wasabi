@@ -9,16 +9,11 @@
   "panic-strategy": "abort",
   "pre-link-args": {
     "ld.lld": [
-      "-n",
-      "-N",
       "-e", "entry",
-      "--static",
-      "--no-rosegment",
-      "--no-dynamic-linker",
-      "--build-id=none"
+      "--no-rosegment"
     ]
   },
-  "relocation-model": "pie",
+  "relocation-model": "pic",
   "relro-level": "off",
   "target-pointer-width": "64"
 }

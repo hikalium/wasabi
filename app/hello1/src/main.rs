@@ -3,9 +3,19 @@
 
 use noli::*;
 
+static mut A: i64 = 1;
+
+fn f<F: FnOnce() -> i64>(g: F) {
+    unsafe {
+        println!("A");
+        A *= g();
+    }
+}
+
 fn main() -> i64 {
-    sys_print("**** Hello from an app!\n");
-    return 42;
+    f(|| 3);
+    f(|| 5);
+    return unsafe { A };
 }
 
 entry_point!(main);

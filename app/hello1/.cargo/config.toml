@@ -13,7 +13,8 @@ target = "x86_64-wasabi-elf.json"
 # c.f. https://doc.rust-lang.org/rustc/codegen-options/index.html
 
 [profile.release]
-strip = true
+strip = false
+opt-level = 0
 
 [lib]
 target = "x86_64-wasabi-elf.json"
