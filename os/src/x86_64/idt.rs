@@ -392,7 +392,7 @@ impl Idt {
         idt.entries[14] = IdtDescriptor::new(
             segment_selector,
             1,
-            IdtAttr::IntGateDPL0,
+            IdtAttr::IntGateDPL3,
             interrupt_entrypoint14,
         );
         idt.entries[32] = IdtDescriptor::new(
@@ -445,7 +445,7 @@ impl TaskStateSegment64 {
         };
         let tss64 = TaskStateSegment64Inner {
             _reserved0: 0,
-            _rsp: [rsp0, 0, 0],
+            _rsp: [rsp0; 3],
             _ist: [rsp0; 8],
             _reserved1: [0; 5],
             _io_map_base_addr: 0,

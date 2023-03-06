@@ -9,6 +9,8 @@ use crate::util::read_le_u16;
 use crate::util::read_le_u32;
 use crate::util::read_le_u64;
 use crate::util::size_in_pages_from_bytes;
+use crate::x86_64::paging::with_current_page_table;
+use crate::x86_64::paging::PageAttr;
 use alloc::borrow::BorrowMut;
 use alloc::boxed::Box;
 use alloc::slice;
@@ -207,6 +209,12 @@ impl<'a> Elf<'a> {
             print!(", vaddr: {:#018X}", s.vaddr);
             print!(", align: {:#018X}", s.align);
             println!("");
+            if section_name == ".got" {
+                let got_data = &data[s.offset as usize..(s.offset + s.size) as usize];
+                for i in 0..(s.size as usize) / 8 {
+                    println!(" GOT[{:#04X}]: {:#18X}", i, read_le_u64(got_data, i * 8)?);
+                }
+            }
         }
 
         Ok(LoadInfo {
@@ -235,6 +243,24 @@ impl<'a> Elf<'a> {
             core::ptr::write_bytes(load_region.as_mut_ptr(), 0, load_region.len());
         }
         println!("load_region @ {:#p}", load_region.as_ptr());
+        let app_mem_start = load_region.as_ptr() as u64;
+        let app_mem_end = app_mem_start + load_region.len() as u64;
+        println!(
+            "Making {:#018X} - {:#018X} accessible to user mode",
+            app_mem_start, app_mem_end
+        );
+        unsafe {
+            with_current_page_table(|table| {
+                table
+                    .create_mapping(
+                        app_mem_start,
+                        app_mem_end,
+                        app_mem_start,
+                        PageAttr::ReadWriteUser,
+                    )
+                    .expect("Failed to set mapping");
+            });
+        }
 
         let data = self.file.data();
         for s in &load_info.segments {
@@ -270,16 +296,31 @@ impl<'a> Elf<'a> {
         unsafe {
             let retcode: i64;
             asm!(
+                // Use iretq to switch to user mode
+                "mov rbp, rsp",
+                "push rdx", // SS
+                "push rbp", // RSP
+                "mov ax, 2",
+                "push rax", // RFLAGS
+                "push rcx", // CS
+                "lea rax, [rip+1f]",
+                "push rdi", // RIP
+                // *(rip as *const InterruptContext) == {
+                //   rip: u64,
+                //   cs: u64,
+                //   rflags: u64,
+                //   rsp: u64,
+                //   ss: u64,
+                // }
+                "iretq",
+
+                "1:",
+                "jmp rdi",
                 // Set data segments to USER_DS
                 "mov es, dx",
                 "mov ds, dx",
                 "mov fs, dx",
                 "mov gs, dx",
-
-                // Use sysretq to switch RIP, CS and SS to the user mode values
-                "lea rcx, [rip+1f]",
-                "sysretq", // sysretq will "jump" to rcx, which is the next line
-                "1:",
                 // Now, the CPU is in the user mode. Call the apps entry pointer
                 // (rax is set by rust, via the asm macro params)
                 "call rax",
@@ -288,8 +329,9 @@ impl<'a> Elf<'a> {
                 "mov eax, 0", // op = exit (0)
                 "syscall",
                 "ud2",
-                in("rax") entry_point,
+                in("rdi") entry_point,
                 in("rdx") crate::x86_64::USER_DS,
+                in("rcx") crate::x86_64::USER64_CS,
                 lateout("rax") retcode,
             );
             println!("returned from the code! retcode = {}", retcode);

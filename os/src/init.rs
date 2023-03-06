@@ -214,7 +214,7 @@ pub fn init_paging() -> Result<()> {
             _ => (),
         }
     }
-    table.create_mapping(0, end_of_mem, 0, PageAttr::ReadWriteUser)?;
+    table.create_mapping(0, end_of_mem, 0, PageAttr::ReadWriteKernel)?;
     println!("{:?}", table);
     unsafe {
         write_cr3(Box::into_raw(table));

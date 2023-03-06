@@ -383,7 +383,10 @@ pub fn init_syscall() {
     unsafe {
         write_msr(MSR_STAR, star);
         write_msr(MSR_LSTAR, asm_syscall_handler as *const () as u64);
-        write_msr(MSR_FMASK, 1u64 << 9);
+        write_msr(
+            MSR_FMASK,
+            1u64 << 9, /* RFLAGS.IF is masked (= disable interrupt on syscall) */
+        );
         let mut efer = read_msr(MSR_EFER);
         efer |= 1; // SCE: System Call Enable
         write_msr(MSR_EFER, efer);
