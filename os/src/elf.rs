@@ -124,7 +124,7 @@ impl LoadedSegment {
         println!("Region allocated       : {load_region_start:#018X}-{load_region_end:#018X}",);
         println!(
             "Making {:#018X} - {:#018X} accessible to user mode",
-            load_region_size, load_region_end
+            load_region_start, load_region_end
         );
         unsafe {
             with_current_page_table(|table| {
@@ -180,6 +180,53 @@ pub struct LoadedElf<'a> {
 impl<'a> LoadedElf<'a> {
     pub fn exec(&self) -> Result<usize> {
         println!("LoadedElf::exec(file: {})", self.elf.file.name());
+        let entry_point = self.elf.entry_vaddr;
+        println!("entry_point = {:#018X}", entry_point);
+        unsafe {
+            let retcode: i64;
+            asm!(
+                // Use iretq to switch to user mode
+                "mov rbp, rsp",
+                "push rdx", // SS
+                "push rbp", // RSP
+                "mov ax, 2",
+                "push rax", // RFLAGS
+                "push rcx", // CS
+                "lea rax, [rip+1f]",
+                "push rdi", // RIP
+                // *(rip as *const InterruptContext) == {
+                //   rip: u64,
+                //   cs: u64,
+                //   rflags: u64,
+                //   rsp: u64,
+                //   ss: u64,
+                // }
+                "iretq",
+
+                "1:",
+                "jmp rdi",
+                // Set data segments to USER_DS
+                "mov es, dx",
+                "mov ds, dx",
+                "mov fs, dx",
+                "mov gs, dx",
+                // Now, the CPU is in the user mode. Call the apps entry pointer
+                // (rax is set by rust, via the asm macro params)
+                // TODO(hikalium): check if it is a qemu's bug that the page fault becomes triple
+                // fault when the code is mapped but in a supervisor mode.
+                "call rax",
+                // Call exit() when it is returned
+                "mov rdi, rax", // retcode = rax
+                "mov eax, 0", // op = exit (0)
+                "syscall",
+                "ud2",
+                in("rdi") entry_point,
+                in("rdx") crate::x86_64::USER_DS,
+                in("rcx") crate::x86_64::USER64_CS,
+                lateout("rax") retcode,
+            );
+            println!("returned from the code! retcode = {}", retcode);
+        }
         Ok(0)
     }
 }
