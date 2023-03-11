@@ -155,9 +155,9 @@ fn main() -> Result<()> {
         .iter()
         .find(|&e| e.name() == &startup_app_file_name);
     if let Some(elf) = elf {
-        let elf = Elf::new(elf);
-        println!("Executable found: {:?} ", elf);
-        elf.exec().expect("Failed to parse ELF");
+        let elf = Elf::parse(elf)?;
+        let app = elf.load()?;
+        app.exec()?;
     }
 
     run_tasks()?;
