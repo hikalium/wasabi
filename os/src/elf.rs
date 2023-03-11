@@ -81,12 +81,15 @@ impl fmt::Debug for SegmentHeader {
     }
 }
 
-pub struct LoadedSegment {
+pub struct LoadedSegment<'a> {
+    range_vaddr: Range<u64>,
+    range_vaddr_relocated: Range<u64>,
     sh_index: usize,
+    elf: &'a Elf<'a>,
 }
-impl LoadedSegment {
+impl<'a> LoadedSegment<'a> {
     /// Load a segment with a specified index to the memory
-    fn new(elf: &Elf, sh_index: usize) -> Result<Self> {
+    fn new(elf: &'a Elf, sh_index: usize) -> Result<Self> {
         println!("Loading Segment #{}...", sh_index);
 
         let sh = elf
@@ -112,6 +115,10 @@ impl LoadedSegment {
         let vaddr_start = vaddr_start & !align_mask;
         let vaddr_end = (vaddr_end + align_mask) & !align_mask;
         println!("vaddr range   (aligned): {vaddr_start:#018X}-{vaddr_end:#018X}");
+        let range_vaddr = Range {
+            start: vaddr_start,
+            end: vaddr_end,
+        };
 
         let load_region_size = (vaddr_end - vaddr_start) as usize;
         let mut load_region = Page4K::alloc_contiguous(load_region_size);
@@ -121,6 +128,10 @@ impl LoadedSegment {
         }
         let load_region_start = load_region.as_ptr() as u64;
         let load_region_end = load_region.as_ptr() as u64 + load_region.len() as u64;
+        let range_vaddr_relocated = Range {
+            start: load_region_start,
+            end: load_region_end,
+        };
         println!("Region allocated       : {load_region_start:#018X}-{load_region_end:#018X}",);
         println!(
             "Making {:#018X} - {:#018X} accessible to user mode",
@@ -139,10 +150,15 @@ impl LoadedSegment {
             });
         }
 
-        Ok(LoadedSegment { sh_index })
+        Ok(LoadedSegment {
+            sh_index,
+            range_vaddr,
+            range_vaddr_relocated,
+            elf,
+        })
     }
 }
-impl fmt::Debug for LoadedSegment {
+impl<'a> fmt::Debug for LoadedSegment<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Segment #{}", self.sh_index)?;
         Ok(())
@@ -175,12 +191,22 @@ impl fmt::Debug for SectionHeader {
 
 pub struct LoadedElf<'a> {
     elf: &'a Elf<'a>,
-    loaded_segments: Vec<LoadedSegment>,
+    loaded_segments: Vec<LoadedSegment<'a>>,
 }
 impl<'a> LoadedElf<'a> {
+    fn resolve_vaddr(&self, vaddr: u64) -> Result<u64> {
+        for s in &self.loaded_segments {
+            if s.range_vaddr.contains(&vaddr) {
+                return Ok(vaddr
+                    .wrapping_sub(s.range_vaddr.start)
+                    .wrapping_add(s.range_vaddr_relocated.start));
+            }
+        }
+        Err(Error::Failed("Not found"))
+    }
     pub fn exec(&self) -> Result<usize> {
         println!("LoadedElf::exec(file: {})", self.elf.file.name());
-        let entry_point = self.elf.entry_vaddr;
+        let entry_point = self.resolve_vaddr(self.elf.entry_vaddr)?;
         println!("entry_point = {:#018X}", entry_point);
         unsafe {
             let retcode: i64;
