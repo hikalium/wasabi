@@ -1,0 +1,11 @@
+[package]
+name = "loop"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name="loop"
+test=false
+
+[dependencies]
+noli = { path = "../noli", version = "0.1.0" }

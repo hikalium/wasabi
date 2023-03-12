@@ -50,8 +50,9 @@ impl fmt::Debug for SegmentHeader {
 
 pub struct LoadedSegment {
     region: ContiguousPhysicalMemoryPages,
-    range_vaddr: Range<u64>,
-    range_vaddr_relocated: Range<u64>,
+    range_in_region: Range<usize>,
+    range_vaddr: Range<usize>,
+    range_vaddr_relocated: Range<usize>,
 }
 impl LoadedSegment {
     /// Load a segment with a specified index to the memory
@@ -63,69 +64,83 @@ impl LoadedSegment {
             .get(sh_index)
             .ok_or(Error::Failed("sh_index out of range"))?;
 
-        assert_eq!(sh.align as usize, PAGE_SIZE);
-        let align_mask = sh.align - 1;
+        assert_eq!(PAGE_SIZE % sh.align as usize, 0);
+        let align_mask = sh.align as usize - 1;
 
-        let file_start = sh.offset;
-        let file_end = sh.offset + sh.fsize;
-        println!("range in file (raw)    : {file_start:#018X}-{file_end:#018X}");
-
-        let file_start = file_start & !align_mask;
-        let file_end = (file_end + align_mask) & !align_mask;
-        println!("range in file (aligned): {file_start:#018X}-{file_end:#018X}");
-
-        let vaddr_start = sh.vaddr;
-        let vaddr_end = sh.vaddr + sh.vsize;
-        println!("vaddr range            : {vaddr_start:#018X}-{vaddr_end:#018X}");
-
-        let vaddr_start = vaddr_start & !align_mask;
-        let vaddr_end = (vaddr_end + align_mask) & !align_mask;
-        println!("vaddr range   (aligned): {vaddr_start:#018X}-{vaddr_end:#018X}");
-        let range_vaddr = Range {
-            start: vaddr_start,
-            end: vaddr_end,
+        let range_file = {
+            let start = sh.offset as usize;
+            let end = start + sh.fsize as usize;
+            println!("range in file          : {start:#018X}-{end:#018X}");
+            start..end
+        };
+        let range_vaddr = {
+            let start = sh.vaddr as usize;
+            let end = start + sh.vsize as usize;
+            println!("vaddr range            : {start:#018X}-{end:#018X}");
+            start..end
+        };
+        let range_vaddr_aligned = {
+            let start = range_vaddr.start & !align_mask;
+            let end = (range_vaddr.end + align_mask) & !align_mask;
+            start..end
+        };
+        let range_in_region = {
+            let start = range_vaddr.start & align_mask;
+            let end = start + sh.vsize as usize;
+            start..end
         };
 
-        let load_region_size = (vaddr_end - vaddr_start) as usize;
-        let mut region = ContiguousPhysicalMemoryPages::alloc_bytes(load_region_size)?;
+        let region_size = range_vaddr_aligned.end - range_vaddr_aligned.start;
+        let mut region = ContiguousPhysicalMemoryPages::alloc_bytes(region_size)?;
         let region_slice = region.as_mut_slice();
         region_slice.fill(0);
-        let load_region_start = region_slice.as_ptr() as u64;
-        let load_region_end = region_slice.as_ptr() as u64 + region_slice.len() as u64;
-        let range_vaddr_relocated = Range {
-            start: load_region_start,
-            end: load_region_end,
-        };
-        println!("Region allocated       : {load_region_start:#018X}-{load_region_end:#018X}",);
+        let region_start = region_slice.as_ptr() as u64;
+        let region_end = region_slice.as_ptr() as u64 + region_slice.len() as u64;
+        println!("Region allocated       : {region_start:#018X}-{region_end:#018X}",);
         println!(
             "Making {:#018X} - {:#018X} accessible to user mode",
-            load_region_start, load_region_end
+            region_start, region_end
         );
         unsafe {
             with_current_page_table(|table| {
                 table
                     .create_mapping(
-                        load_region_start,
-                        load_region_end,
-                        load_region_start, // Identity Mapping
+                        region_start,
+                        region_end,
+                        region_start, // Identity Mapping
                         PageAttr::ReadWriteUser,
                     )
                     .expect("Failed to set mapping");
             });
         }
 
+        let dst_start_ofs = range_vaddr.start & align_mask;
+        let copy_size = range_file.end - range_file.start;
+        let dst = &mut region_slice[dst_start_ofs..dst_start_ofs + copy_size];
+
         let src = elf.file.data();
-        let src = &src[Range {
-            start: file_start as usize,
-            end: file_end as usize,
-        }];
-        region_slice[..src.len()].copy_from_slice(src);
+        let src = &src[range_file];
+        dst.copy_from_slice(src);
+
+        let range_vaddr_relocated = {
+            let start = region_start as usize + dst_start_ofs;
+            let end = start + sh.vsize as usize;
+            println!("vaddr range (relocated): {start:#018X}-{end:#018X}");
+            start..end
+        };
 
         Ok(LoadedSegment {
             region,
+            range_in_region,
             range_vaddr,
             range_vaddr_relocated,
         })
+    }
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.region.as_mut_slice()[self.range_in_region.clone()]
+    }
+    pub fn as_slice(&self) -> &[u8] {
+        &self.region.as_slice()[self.range_in_region.clone()]
     }
 }
 
@@ -158,7 +173,7 @@ pub struct LoadedElf<'a> {
     loaded_segments: Vec<LoadedSegment>,
 }
 impl<'a> LoadedElf<'a> {
-    fn resolve_vaddr(&self, vaddr: u64) -> Result<u64> {
+    fn resolve_vaddr(&self, vaddr: usize) -> Result<usize> {
         for s in &self.loaded_segments {
             if s.range_vaddr.contains(&vaddr) {
                 return Ok(vaddr
@@ -195,7 +210,7 @@ impl<'a> LoadedElf<'a> {
                     .expect("Failed to set mapping");
             });
         }
-        let entry_point = self.resolve_vaddr(self.elf.entry_vaddr)?;
+        let entry_point = self.resolve_vaddr(self.elf.entry_vaddr as usize)?;
         println!("entry_point = {:#018X}", entry_point);
         unsafe {
             let retcode: i64;
@@ -371,28 +386,28 @@ impl<'a> Elf<'a> {
             let got_segment_index = loaded_segments
                 .iter()
                 .enumerate()
-                .find(|(_i, s)| s.range_vaddr.contains(&got.vaddr))
+                .find(|(_i, s)| s.range_vaddr.contains(&(got.vaddr as usize)))
                 .ok_or(Error::Failed(
                     ".got section is found but there is no segment for it",
                 ))?
                 .0;
             let got_segment_start_vaddr = loaded_segments[got_segment_index].range_vaddr.start;
-            let got_start_ofs_in_segment = (got.vaddr - got_segment_start_vaddr) as usize;
+            let got_start_ofs_in_segment = got.vaddr as usize - got_segment_start_vaddr;
             let got_range_in_segment =
                 got_start_ofs_in_segment..got_start_ofs_in_segment + got.size as usize;
             let got_data =
-                &loaded_segments[got_segment_index].region.as_slice()[got_range_in_segment.clone()];
+                &loaded_segments[got_segment_index].as_slice()[got_range_in_segment.clone()];
             for i in 0..(got.size as usize) / 8 {
                 let vaddr = read_le_u64(got_data, i * 8)?;
                 println!(" GOT[{:#04X}]: {:#18X}", i, vaddr);
                 for (i, s) in loaded_segments.iter().enumerate() {
-                    if s.range_vaddr.contains(&vaddr) {
+                    if s.range_vaddr.contains(&(vaddr as usize)) {
                         println!("   in section #{i}");
                     }
                 }
             }
             let got_data =
-                &mut loaded_segments[got_segment_index].region.as_mut_slice()[got_range_in_segment];
+                &mut loaded_segments[got_segment_index].as_mut_slice()[got_range_in_segment];
             for i in 0..(got.size as usize) / 8 {
                 write_le_u64(got_data, i * 8, 0)?;
             }
