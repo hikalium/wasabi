@@ -8,6 +8,7 @@ use crate::println;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
 use crate::util::read_le_u64;
+use crate::util::write_le_u64;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::paging::with_current_page_table;
 use crate::x86_64::paging::PageAttr;
@@ -48,6 +49,7 @@ impl fmt::Debug for SegmentHeader {
 }
 
 pub struct LoadedSegment {
+    region: ContiguousPhysicalMemoryPages,
     range_vaddr: Range<u64>,
     range_vaddr_relocated: Range<u64>,
 }
@@ -85,13 +87,11 @@ impl LoadedSegment {
         };
 
         let load_region_size = (vaddr_end - vaddr_start) as usize;
-        let mut load_region = ContiguousPhysicalMemoryPages::alloc_bytes(load_region_size)?;
-        let load_region = load_region.as_mut_slice();
-        unsafe {
-            core::ptr::write_bytes(load_region.as_mut_ptr(), 0, load_region.len());
-        }
-        let load_region_start = load_region.as_ptr() as u64;
-        let load_region_end = load_region.as_ptr() as u64 + load_region.len() as u64;
+        let mut region = ContiguousPhysicalMemoryPages::alloc_bytes(load_region_size)?;
+        let region_slice = region.as_mut_slice();
+        region_slice.fill(0);
+        let load_region_start = region_slice.as_ptr() as u64;
+        let load_region_end = region_slice.as_ptr() as u64 + region_slice.len() as u64;
         let range_vaddr_relocated = Range {
             start: load_region_start,
             end: load_region_end,
@@ -119,9 +119,10 @@ impl LoadedSegment {
             start: file_start as usize,
             end: file_end as usize,
         }];
-        load_region[..src.len()].copy_from_slice(src);
+        region_slice[..src.len()].copy_from_slice(src);
 
         Ok(LoadedSegment {
+            region,
             range_vaddr,
             range_vaddr_relocated,
         })
@@ -199,13 +200,17 @@ impl<'a> LoadedElf<'a> {
         unsafe {
             let retcode: i64;
             asm!(
+                // Set data segments to USER_DS
+                "mov es, dx",
+                "mov ds, dx",
+                "mov fs, dx",
+                "mov gs, dx",
                 // Use iretq to switch to user mode
                 "push rdx", // SS
                 "push rax", // RSP
                 "mov ax, 2",
                 "push rax", // RFLAGS
                 "push rcx", // CS
-                "lea rax, [rip+1f]",
                 "push rdi", // RIP
                 // *(rip as *const InterruptContext) == {
                 //   rip: u64,
@@ -214,25 +219,11 @@ impl<'a> LoadedElf<'a> {
                 //   rsp: u64,
                 //   ss: u64,
                 // }
+                // far-jmp to app using ireq
                 "iretq",
-
-                "1:",
-                "jmp rdi",
-                // Set data segments to USER_DS
-                "mov es, dx",
-                "mov ds, dx",
-                "mov fs, dx",
-                "mov gs, dx",
-                // Now, the CPU is in the user mode. Call the apps entry pointer
-                // (rax is set by rust, via the asm macro params)
                 // TODO(hikalium): check if it is a qemu's bug that the page fault becomes triple
                 // fault when the code is mapped but in a supervisor mode.
-                "call rax",
-                // Call exit() when it is returned
-                "mov rdi, rax", // retcode = rax
-                "mov eax, 0", // op = exit (0)
-                "syscall",
-                "ud2",
+
                 in("rax") stack_end, // stack grows toward 0, so empty stack pointer will be the end addr
                 in("rdi") entry_point,
                 in("rdx") crate::x86_64::USER_DS,
@@ -361,7 +352,6 @@ impl<'a> Elf<'a> {
         for (k, s) in &self.sections {
             println!("{k:16} {s:?}");
         }
-        let data = self.file.data();
         let sh_index_to_load: Vec<usize> = self
             .segments
             .iter()
@@ -373,12 +363,25 @@ impl<'a> Elf<'a> {
         if sh_index_to_load.is_empty() {
             return Err(Error::Failed("LOAD segment not found"));
         }
-        let loaded_segments: Vec<LoadedSegment> = sh_index_to_load
+        let mut loaded_segments: Vec<LoadedSegment> = sh_index_to_load
             .iter()
             .map(|i| LoadedSegment::new(self, *i))
             .collect::<Result<Vec<LoadedSegment>>>()?;
         if let Some(got) = self.sections.get(".got") {
-            let got_data = &data[got.offset as usize..(got.offset + got.size) as usize];
+            let got_segment_index = loaded_segments
+                .iter()
+                .enumerate()
+                .find(|(_i, s)| s.range_vaddr.contains(&got.vaddr))
+                .ok_or(Error::Failed(
+                    ".got section is found but there is no segment for it",
+                ))?
+                .0;
+            let got_segment_start_vaddr = loaded_segments[got_segment_index].range_vaddr.start;
+            let got_start_ofs_in_segment = (got.vaddr - got_segment_start_vaddr) as usize;
+            let got_range_in_segment =
+                got_start_ofs_in_segment..got_start_ofs_in_segment + got.size as usize;
+            let got_data =
+                &loaded_segments[got_segment_index].region.as_slice()[got_range_in_segment.clone()];
             for i in 0..(got.size as usize) / 8 {
                 let vaddr = read_le_u64(got_data, i * 8)?;
                 println!(" GOT[{:#04X}]: {:#18X}", i, vaddr);
@@ -387,6 +390,11 @@ impl<'a> Elf<'a> {
                         println!("   in section #{i}");
                     }
                 }
+            }
+            let got_data =
+                &mut loaded_segments[got_segment_index].region.as_mut_slice()[got_range_in_segment];
+            for i in 0..(got.size as usize) / 8 {
+                write_le_u64(got_data, i * 8, 0)?;
             }
         }
         Ok(LoadedElf {

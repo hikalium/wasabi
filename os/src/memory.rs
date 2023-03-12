@@ -31,6 +31,12 @@ impl ContiguousPhysicalMemoryPages {
         // checker, by requiring &mut self.
         unsafe { slice::from_raw_parts_mut(self.phys_addr as *mut u8, self.layout.size()) }
     }
+    pub fn as_slice(&self) -> &[u8] {
+        // SAFETY: This is safe since byte-level access to the region is always aligned and no
+        // value restrictions there. Shared write access via the reference is avoided by the borrow
+        // checker, by requiring &self.
+        unsafe { slice::from_raw_parts(self.phys_addr as *mut u8, self.layout.size()) }
+    }
     /// Allocates a physically-contiguous region of 4KiB memory pages that has enough space to
     /// `num_bytes` bytes.
     pub fn alloc_bytes(num_bytes: usize) -> Result<Self> {
