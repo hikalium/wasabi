@@ -3,18 +3,15 @@ extern crate alloc;
 use crate::boot_info::File;
 use crate::error::Error;
 use crate::error::Result;
+use crate::memory::ContiguousPhysicalMemoryPages;
 use crate::println;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
 use crate::util::read_le_u64;
-use crate::util::size_in_pages_from_bytes;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::paging::with_current_page_table;
 use crate::x86_64::paging::PageAttr;
-use alloc::borrow::BorrowMut;
-use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::slice;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -24,27 +21,6 @@ use core::mem::size_of;
 use core::ops::Range;
 
 const PHDR_TYPE_LOAD: u32 = 1;
-
-#[repr(align(4096))]
-#[repr(C)]
-struct Page4K {
-    bytes: [u8; 4096],
-}
-impl Page4K {
-    /// The content will be uninitialized
-    fn alloc_contiguous(byte_size: usize) -> Box<[Page4K]> {
-        let uninit_slice = Box::<[Page4K]>::new_uninit_slice(size_in_pages_from_bytes(byte_size));
-        unsafe {
-            // This is safe since any bytes for Page4K is valid
-            uninit_slice.assume_init()
-        }
-    }
-    fn into_u8_slice_mut(src: &mut [Self]) -> &mut [u8] {
-        unsafe {
-            slice::from_raw_parts_mut(src.as_mut_ptr() as *mut u8, src.len() * size_of::<Page4K>())
-        }
-    }
-}
 
 #[derive(Copy, Clone)]
 #[allow(unused)]
@@ -109,8 +85,8 @@ impl LoadedSegment {
         };
 
         let load_region_size = (vaddr_end - vaddr_start) as usize;
-        let mut load_region = Page4K::alloc_contiguous(load_region_size);
-        let load_region = Page4K::into_u8_slice_mut(load_region.borrow_mut());
+        let mut load_region = ContiguousPhysicalMemoryPages::alloc_bytes(load_region_size)?;
+        let load_region = load_region.as_mut_slice();
         unsafe {
             core::ptr::write_bytes(load_region.as_mut_ptr(), 0, load_region.len());
         }
@@ -194,8 +170,8 @@ impl<'a> LoadedElf<'a> {
     pub fn exec(self) -> Result<usize> {
         println!("LoadedElf::exec(file: {})", self.elf.file.name());
         let stack_size = 8 * 1024;
-        let mut stack = Page4K::alloc_contiguous(stack_size);
-        let stack = Page4K::into_u8_slice_mut(stack.borrow_mut());
+        let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
+        let stack = stack.as_mut_slice();
         unsafe {
             core::ptr::write_bytes(stack.as_mut_ptr(), 0, stack.len());
         }
@@ -404,7 +380,13 @@ impl<'a> Elf<'a> {
         if let Some(got) = self.sections.get(".got") {
             let got_data = &data[got.offset as usize..(got.offset + got.size) as usize];
             for i in 0..(got.size as usize) / 8 {
-                println!(" GOT[{:#04X}]: {:#18X}", i, read_le_u64(got_data, i * 8)?);
+                let vaddr = read_le_u64(got_data, i * 8)?;
+                println!(" GOT[{:#04X}]: {:#18X}", i, vaddr);
+                for (i, s) in loaded_segments.iter().enumerate() {
+                    if s.range_vaddr.contains(&vaddr) {
+                        println!("   in section #{i}");
+                    }
+                }
             }
         }
         Ok(LoadedElf {

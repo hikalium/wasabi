@@ -19,6 +19,7 @@
 #![feature(associated_type_bounds)]
 #![feature(inherent_associated_types)]
 #![feature(asm_const)]
+#![feature(alloc_layout_extra)]
 
 pub mod acpi;
 pub mod allocator;

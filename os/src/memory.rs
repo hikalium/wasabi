@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
+use crate::util::size_in_pages_from_bytes;
 use crate::util::PAGE_SIZE;
 use alloc::boxed::Box;
 use core::alloc::Layout;
@@ -10,6 +11,34 @@ use core::mem::ManuallyDrop;
 use core::pin::Pin;
 use core::slice;
 
+/// Represents a physically-contiguous region of
+/// 4KiB memory pages.
+/// The allocated region will be uninitialized
+pub struct ContiguousPhysicalMemoryPages {
+    layout: Layout,
+    phys_addr: *mut u8,
+}
+impl ContiguousPhysicalMemoryPages {
+    pub fn alloc_pages(num_pages: usize) -> Result<Self> {
+        let layout = Layout::from_size_align(PAGE_SIZE * num_pages, PAGE_SIZE)
+            .or(Err(Error::Failed("Invalid layout")))?;
+        let phys_addr = ALLOCATOR.alloc_with_options(layout);
+        Ok(Self { layout, phys_addr })
+    }
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        // SAFETY: This is safe since byte-level access to the region is always aligned and no
+        // value restrictions there. Shared access via the reference is avoided by the borrow
+        // checker, by requiring &mut self.
+        unsafe { slice::from_raw_parts_mut(self.phys_addr as *mut u8, self.layout.size()) }
+    }
+    /// Allocates a physically-contiguous region of 4KiB memory pages that has enough space to
+    /// `num_bytes` bytes.
+    pub fn alloc_bytes(num_bytes: usize) -> Result<Self> {
+        Self::alloc_pages(size_in_pages_from_bytes(num_bytes))
+    }
+}
+
+// TODO(hikalium): replace this with ContiguousPhysicalMemoryPages
 pub fn alloc_pages(num_pages: usize) -> Result<Pin<Box<[u8]>>> {
     let size = PAGE_SIZE * num_pages;
     let scratchpad_buffers = ALLOCATOR.alloc_with_options(
