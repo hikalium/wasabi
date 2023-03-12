@@ -3,7 +3,6 @@ extern crate alloc;
 use crate::boot_info::File;
 use crate::error::Error;
 use crate::error::Result;
-use crate::print;
 use crate::println;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
@@ -32,6 +31,7 @@ struct Page4K {
     bytes: [u8; 4096],
 }
 impl Page4K {
+    /// The content will be uninitialized
     fn alloc_contiguous(byte_size: usize) -> Box<[Page4K]> {
         let uninit_slice = Box::<[Page4K]>::new_uninit_slice(size_in_pages_from_bytes(byte_size));
         unsafe {
@@ -58,16 +58,6 @@ pub struct SegmentHeader {
     vsize: u64,
     align: u64,
 }
-impl SegmentHeader {
-    fn src_range(&self) -> Range<usize> {
-        // range of offset in the file
-        self.offset as usize..(self.offset + self.fsize) as usize
-    }
-    fn dst_range(&self) -> Range<usize> {
-        // range of (program's) virtual address
-        self.vaddr as usize..(self.vaddr + self.vsize) as usize
-    }
-}
 impl fmt::Debug for SegmentHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "type: {:#010X}", self.phdr_type)?;
@@ -81,15 +71,13 @@ impl fmt::Debug for SegmentHeader {
     }
 }
 
-pub struct LoadedSegment<'a> {
+pub struct LoadedSegment {
     range_vaddr: Range<u64>,
     range_vaddr_relocated: Range<u64>,
-    sh_index: usize,
-    elf: &'a Elf<'a>,
 }
-impl<'a> LoadedSegment<'a> {
+impl LoadedSegment {
     /// Load a segment with a specified index to the memory
-    fn new(elf: &'a Elf, sh_index: usize) -> Result<Self> {
+    fn new(elf: &Elf, sh_index: usize) -> Result<Self> {
         println!("Loading Segment #{}...", sh_index);
 
         let sh = elf
@@ -150,18 +138,17 @@ impl<'a> LoadedSegment<'a> {
             });
         }
 
+        let src = elf.file.data();
+        let src = &src[Range {
+            start: file_start as usize,
+            end: file_end as usize,
+        }];
+        load_region[..src.len()].copy_from_slice(src);
+
         Ok(LoadedSegment {
-            sh_index,
             range_vaddr,
             range_vaddr_relocated,
-            elf,
         })
-    }
-}
-impl<'a> fmt::Debug for LoadedSegment<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Segment #{}", self.sh_index)?;
-        Ok(())
     }
 }
 
@@ -191,7 +178,7 @@ impl fmt::Debug for SectionHeader {
 
 pub struct LoadedElf<'a> {
     elf: &'a Elf<'a>,
-    loaded_segments: Vec<LoadedSegment<'a>>,
+    loaded_segments: Vec<LoadedSegment>,
 }
 impl<'a> LoadedElf<'a> {
     fn resolve_vaddr(&self, vaddr: u64) -> Result<u64> {
@@ -204,17 +191,41 @@ impl<'a> LoadedElf<'a> {
         }
         Err(Error::Failed("Not found"))
     }
-    pub fn exec(&self) -> Result<usize> {
+    pub fn exec(self) -> Result<usize> {
         println!("LoadedElf::exec(file: {})", self.elf.file.name());
+        let stack_size = 8 * 1024;
+        let mut stack = Page4K::alloc_contiguous(stack_size);
+        let stack = Page4K::into_u8_slice_mut(stack.borrow_mut());
+        unsafe {
+            core::ptr::write_bytes(stack.as_mut_ptr(), 0, stack.len());
+        }
+        let stack_start = stack.as_ptr() as u64;
+        let stack_end = stack.as_ptr() as u64 + stack.len() as u64;
+        println!("Stack allocated = {stack_start:#018X}-{stack_end:#018X}",);
+        println!(
+            "Making {:#018X} - {:#018X} accessible to user mode",
+            stack_start, stack_end
+        );
+        unsafe {
+            with_current_page_table(|table| {
+                table
+                    .create_mapping(
+                        stack_start,
+                        stack_end,
+                        stack_start, // Identity Mapping
+                        PageAttr::ReadWriteUser,
+                    )
+                    .expect("Failed to set mapping");
+            });
+        }
         let entry_point = self.resolve_vaddr(self.elf.entry_vaddr)?;
         println!("entry_point = {:#018X}", entry_point);
         unsafe {
             let retcode: i64;
             asm!(
                 // Use iretq to switch to user mode
-                "mov rbp, rsp",
                 "push rdx", // SS
-                "push rbp", // RSP
+                "push rax", // RSP
                 "mov ax, 2",
                 "push rax", // RFLAGS
                 "push rcx", // CS
@@ -246,6 +257,7 @@ impl<'a> LoadedElf<'a> {
                 "mov eax, 0", // op = exit (0)
                 "syscall",
                 "ud2",
+                in("rax") stack_end, // stack grows toward 0, so empty stack pointer will be the end addr
                 in("rdi") entry_point,
                 in("rdx") crate::x86_64::USER_DS,
                 in("rcx") crate::x86_64::USER64_CS,
@@ -374,12 +386,6 @@ impl<'a> Elf<'a> {
             println!("{k:16} {s:?}");
         }
         let data = self.file.data();
-        if let Some(got) = self.sections.get(".got") {
-            let got_data = &data[got.offset as usize..(got.offset + got.size) as usize];
-            for i in 0..(got.size as usize) / 8 {
-                println!(" GOT[{:#04X}]: {:#18X}", i, read_le_u64(got_data, i * 8)?);
-            }
-        }
         let sh_index_to_load: Vec<usize> = self
             .segments
             .iter()
@@ -395,114 +401,16 @@ impl<'a> Elf<'a> {
             .iter()
             .map(|i| LoadedSegment::new(self, *i))
             .collect::<Result<Vec<LoadedSegment>>>()?;
-        for s in &loaded_segments {
-            println!("{s:?}");
+        if let Some(got) = self.sections.get(".got") {
+            let got_data = &data[got.offset as usize..(got.offset + got.size) as usize];
+            for i in 0..(got.size as usize) / 8 {
+                println!(" GOT[{:#04X}]: {:#18X}", i, read_le_u64(got_data, i * 8)?);
+            }
         }
         Ok(LoadedElf {
             elf: self,
             loaded_segments,
         })
-    }
-    pub fn exec(&self) -> Result<()> {
-        /*
-                let mut load_region_start = u64::MAX;
-                let mut load_region_end = 0;
-                for s in &load_info.segments {
-                    let start = s.vaddr;
-                    let end = s.vaddr + s.vsize;
-                    load_region_start = core::cmp::min(load_region_start, start);
-                    load_region_end = core::cmp::max(load_region_end, end);
-                }
-                load_region_start &= !0xFFF;
-                load_region_end = (load_region_end + 0xFFF) & !0xFFF;
-                println!("load_region_start = {load_region_start:#018X}");
-                println!("load_region_end = {load_region_end:#018X}");
-                let load_region_size = load_region_end - load_region_start;
-                let mut load_region = Page4K::alloc_contiguous(load_region_size as usize);
-                let load_region = Page4K::into_u8_slice_mut(load_region.borrow_mut());
-                unsafe {
-                    core::ptr::write_bytes(load_region.as_mut_ptr(), 0, load_region.len());
-                }
-                println!("load_region @ {:#p}", load_region.as_ptr());
-                let app_mem_start = load_region.as_ptr() as u64;
-                let app_mem_end = app_mem_start + load_region.len() as u64;
-
-                let data = self.file.data();
-                for s in &load_info.segments {
-                    let src_range = s.src_range();
-                    let src_range_size = src_range.end - src_range.start;
-                    println!(
-                        "src_range: {:#018X} - {:#018X}",
-                        src_range.start, src_range.end
-                    );
-                    let src = &data[src_range];
-
-                    let dst_range = s.dst_range();
-                    let dst_range_size = dst_range.end - dst_range.start;
-                    let copy_size = src_range_size;
-                    let fill_size = dst_range_size - src_range_size;
-                    let dst_range_start = dst_range.start - load_region_start as usize;
-                    let dst_range_copy = dst_range_start..dst_range_start + copy_size;
-                    let dst_range_fill = dst_range_copy.end..dst_range_copy.end + fill_size;
-                    println!(
-                        "dst_range(copy): {:#018X} - {:#018X}",
-                        dst_range.start, dst_range.end
-                    );
-                    load_region[dst_range_copy].copy_from_slice(src);
-                    load_region[dst_range_fill].fill(0);
-                }
-                println!("run the code!");
-                let entry_point = unsafe {
-                    load_region
-                        .as_ptr()
-                        .add((load_info.entry_vaddr - load_region_start) as usize)
-                };
-                println!("entry_point = {:#p}", entry_point);
-                unsafe {
-                    let retcode: i64;
-                    asm!(
-                        // Use iretq to switch to user mode
-                        "mov rbp, rsp",
-                        "push rdx", // SS
-                        "push rbp", // RSP
-                        "mov ax, 2",
-                        "push rax", // RFLAGS
-                        "push rcx", // CS
-                        "lea rax, [rip+1f]",
-                        "push rdi", // RIP
-                        // *(rip as *const InterruptContext) == {
-                        //   rip: u64,
-                        //   cs: u64,
-                        //   rflags: u64,
-                        //   rsp: u64,
-                        //   ss: u64,
-                        // }
-                        "iretq",
-
-                        "1:",
-                        "jmp rdi",
-                        // Set data segments to USER_DS
-                        "mov es, dx",
-                        "mov ds, dx",
-                        "mov fs, dx",
-                        "mov gs, dx",
-                        // Now, the CPU is in the user mode. Call the apps entry pointer
-                        // (rax is set by rust, via the asm macro params)
-                        "call rax",
-                        // Call exit() when it is returned
-                        "mov rdi, rax", // retcode = rax
-                        "mov eax, 0", // op = exit (0)
-                        "syscall",
-                        "ud2",
-                        in("rdi") entry_point,
-                        in("rdx") crate::x86_64::USER_DS,
-                        in("rcx") crate::x86_64::USER64_CS,
-                        lateout("rax") retcode,
-                    );
-                    println!("returned from the code! retcode = {}", retcode);
-                }
-        */
-        Ok(())
     }
 }
 impl<'a> fmt::Debug for Elf<'a> {
