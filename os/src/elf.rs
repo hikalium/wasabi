@@ -4,6 +4,7 @@ use crate::boot_info::File;
 use crate::error::Error;
 use crate::error::Result;
 use crate::memory::ContiguousPhysicalMemoryPages;
+use crate::print;
 use crate::println;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
@@ -395,21 +396,34 @@ impl<'a> Elf<'a> {
             let got_start_ofs_in_segment = got.vaddr as usize - got_segment_start_vaddr;
             let got_range_in_segment =
                 got_start_ofs_in_segment..got_start_ofs_in_segment + got.size as usize;
-            let got_data =
-                &loaded_segments[got_segment_index].as_slice()[got_range_in_segment.clone()];
-            for i in 0..(got.size as usize) / 8 {
-                let vaddr = read_le_u64(got_data, i * 8)?;
-                println!(" GOT[{:#04X}]: {:#18X}", i, vaddr);
+            let mut got_values = {
+                let got_data = &mut loaded_segments[got_segment_index].as_mut_slice()
+                    [got_range_in_segment.clone()];
+                let mut got_values = Vec::new();
+                for i in 0..(got.size as usize) / 8 {
+                    got_values.push(read_le_u64(got_data, i * 8)?);
+                }
+                got_values
+            };
+            got_values.iter_mut().enumerate().for_each(|(i, addr)| {
+                print!(" GOT[{:#04X}]: {:#18X}", i, addr);
                 for (i, s) in loaded_segments.iter().enumerate() {
-                    if s.range_vaddr.contains(&(vaddr as usize)) {
-                        println!("   in section #{i}");
+                    if s.range_vaddr.contains(&(*addr as usize)) {
+                        print!(" in section #{i} -> ");
+                        *addr = (*addr)
+                            .wrapping_sub(s.range_vaddr.start as u64)
+                            .wrapping_add(s.range_vaddr_relocated.start as u64);
+                        break;
                     }
                 }
-            }
-            let got_data =
-                &mut loaded_segments[got_segment_index].as_mut_slice()[got_range_in_segment];
-            for i in 0..(got.size as usize) / 8 {
-                write_le_u64(got_data, i * 8, 0)?;
+                println!("GOT[{:#04X}]: {:#18X}", i, addr);
+            });
+            {
+                let got_data =
+                    &mut loaded_segments[got_segment_index].as_mut_slice()[got_range_in_segment];
+                for (i, addr) in got_values.iter().enumerate() {
+                    write_le_u64(got_data, i * 8, *addr)?;
+                }
             }
         }
         Ok(LoadedElf {
