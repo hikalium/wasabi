@@ -18,6 +18,8 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::arch::asm;
+use core::cmp::max;
+use core::cmp::min;
 use core::fmt;
 use core::mem::size_of;
 use core::ops::Range;
@@ -50,20 +52,15 @@ impl fmt::Debug for SegmentHeader {
 }
 
 pub struct LoadedSegment {
-    region: ContiguousPhysicalMemoryPages,
     range_in_region: Range<usize>,
     range_vaddr: Range<usize>,
     range_vaddr_relocated: Range<usize>,
 }
 impl LoadedSegment {
+    /*
     /// Load a segment with a specified index to the memory
-    fn new(elf: &Elf, sh_index: usize) -> Result<Self> {
-        println!("Loading Segment #{}...", sh_index);
-
-        let sh = elf
-            .segments
-            .get(sh_index)
-            .ok_or(Error::Failed("sh_index out of range"))?;
+    fn new(elf: &Elf, region: &mut [u8], app_vaddr_range: Range<u64>, i: usize, sh: &SegmentHeader) -> Result<Self> {
+        println!("Loading Segment #{i}...");
 
         assert_eq!(PAGE_SIZE % sh.align as usize, 0);
         let align_mask = sh.align as usize - 1;
@@ -91,40 +88,16 @@ impl LoadedSegment {
             start..end
         };
 
-        let region_size = range_vaddr_aligned.end - range_vaddr_aligned.start;
-        let mut region = ContiguousPhysicalMemoryPages::alloc_bytes(region_size)?;
-        let region_slice = region.as_mut_slice();
-        region_slice.fill(0);
-        let region_start = region_slice.as_ptr() as u64;
-        let region_end = region_slice.as_ptr() as u64 + region_slice.len() as u64;
-        println!("Region allocated       : {region_start:#018X}-{region_end:#018X}",);
-        println!(
-            "Making {:#018X} - {:#018X} accessible to user mode",
-            region_start, region_end
-        );
-        unsafe {
-            with_current_page_table(|table| {
-                table
-                    .create_mapping(
-                        region_start,
-                        region_end,
-                        region_start, // Identity Mapping
-                        PageAttr::ReadWriteUser,
-                    )
-                    .expect("Failed to set mapping");
-            });
-        }
-
         let dst_start_ofs = range_vaddr.start & align_mask;
         let copy_size = range_file.end - range_file.start;
-        let dst = &mut region_slice[dst_start_ofs..dst_start_ofs + copy_size];
+        let dst = &mut region[dst_start_ofs..dst_start_ofs + copy_size];
 
         let src = elf.file.data();
         let src = &src[range_file];
         dst.copy_from_slice(src);
 
         let range_vaddr_relocated = {
-            let start = region_start as usize + dst_start_ofs;
+            let start = dst_start_ofs;
             let end = start + sh.vsize as usize;
             println!("vaddr range (relocated): {start:#018X}-{end:#018X}");
             start..end
@@ -143,6 +116,7 @@ impl LoadedSegment {
     pub fn as_slice(&self) -> &[u8] {
         &self.region.as_slice()[self.range_in_region.clone()]
     }
+    */
 }
 
 #[derive(Copy, Clone)]
@@ -171,6 +145,7 @@ impl fmt::Debug for SectionHeader {
 
 pub struct LoadedElf<'a> {
     elf: &'a Elf<'a>,
+    region: ContiguousPhysicalMemoryPages,
     loaded_segments: Vec<LoadedSegment>,
 }
 impl<'a> LoadedElf<'a> {
@@ -365,23 +340,62 @@ impl<'a> Elf<'a> {
             println!("{s:?}");
         }
         println!("Sections:");
-        for (k, s) in &self.sections {
-            println!("{k:16} {s:?}");
+        for (i, s) in &self.sections {
+            println!("{i:16} {s:?}");
         }
-        let sh_index_to_load: Vec<usize> = self
+        let segments_to_be_loaded: Vec<(usize, SegmentHeader)> = self
             .segments
             .iter()
             .cloned()
             .enumerate()
             .filter(|(_i, s)| s.phdr_type == PHDR_TYPE_LOAD)
-            .map(|(i, _s)| i)
             .collect();
-        if sh_index_to_load.is_empty() {
+        if segments_to_be_loaded.is_empty() {
             return Err(Error::Failed("LOAD segment not found"));
         }
-        let mut loaded_segments: Vec<LoadedSegment> = sh_index_to_load
+        for (i, s) in &segments_to_be_loaded {
+            println!("{i:16} {s:?}");
+        }
+        let app_vaddr_range = segments_to_be_loaded
             .iter()
-            .map(|i| LoadedSegment::new(self, *i))
+            .map(|(_, s)| {
+                (
+                    s.vaddr & !(s.align - 1),
+                    (s.vaddr + s.vsize).wrapping_add(s.align - 1) & !(s.align - 1),
+                )
+            })
+            .fold((u64::MAX, u64::MIN), |l, r| (min(l.0, r.0), max(l.1, r.1)));
+        let app_vaddr_range = app_vaddr_range.0..app_vaddr_range.1;
+        println!(
+            "App_vaddr_range: {:#018X}-{:#018X}",
+            app_vaddr_range.start, app_vaddr_range.end
+        );
+        let app_region_size = (app_vaddr_range.end - app_vaddr_range.start) as usize;
+        let mut app_region = ContiguousPhysicalMemoryPages::alloc_bytes(app_region_size)?;
+        let app_region = app_region.as_mut_slice();
+        let app_region_start = app_region.as_mut_ptr() as usize;
+        let app_region_end = app_region_start as usize + app_region_size;
+        unsafe {
+            core::ptr::write_bytes(app_region_start as *mut u8, 0, app_region_size);
+        }
+        println!("App region allocated = {app_region_start:#018X}-{app_region_end:#018X}",);
+        unsafe {
+            with_current_page_table(|table| {
+                table
+                    .create_mapping(
+                        app_region_start as u64,
+                        app_region_end as u64,
+                        app_region_start as u64, // Identity Mapping
+                        PageAttr::ReadWriteUser,
+                    )
+                    .expect("Failed to set mapping");
+            });
+        }
+        todo!();
+        /*
+        let mut loaded_segments: Vec<LoadedSegment> = segments_to_be_loaded
+            .iter()
+            .map(|(_, s)| LoadedSegment::new(app_region, app_vaddr_range, s))
             .collect::<Result<Vec<LoadedSegment>>>()?;
         if let Some(got) = self.sections.get(".got") {
             let got_segment_index = loaded_segments
@@ -430,6 +444,7 @@ impl<'a> Elf<'a> {
             elf: self,
             loaded_segments,
         })
+        */
     }
 }
 impl<'a> fmt::Debug for Elf<'a> {
