@@ -150,7 +150,7 @@ fn main() -> Result<()> {
     for (i, f) in root_files.iter().enumerate() {
         println!("root_files[{}]: {}", i, f.name());
     }
-    let startup_app_file_name = EfiFileName::from_str("hello1")?;
+    let startup_app_file_name = EfiFileName::from_str("hello0")?;
     let elf = root_files
         .iter()
         .find(|&e| e.name() == &startup_app_file_name);

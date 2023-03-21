@@ -3,8 +3,11 @@ extern crate alloc;
 use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
+use crate::println;
 use crate::util::size_in_pages_from_bytes;
 use crate::util::PAGE_SIZE;
+use crate::x86_64::paging::with_current_page_table;
+use crate::x86_64::paging::PageAttr;
 use alloc::boxed::Box;
 use core::alloc::Layout;
 use core::fmt;
@@ -84,7 +87,7 @@ impl ContiguousPhysicalMemoryPages {
     }
     pub fn fill_with_bytes(&mut self, value: u8) {
         unsafe {
-            core::ptr::write_bytes(self.phys_addr, 0, self.range().size());
+            core::ptr::write_bytes(self.phys_addr, value, self.range().size());
         }
     }
     pub fn range(&self) -> AddressRange {
@@ -101,6 +104,23 @@ impl ContiguousPhysicalMemoryPages {
         // value restrictions there. Shared write access via the reference is avoided by the borrow
         // checker, by requiring &self.
         unsafe { slice::from_raw_parts(self.phys_addr as *mut u8, self.layout.size()) }
+    }
+    pub fn set_page_attr(&mut self, attr: PageAttr) -> Result<()> {
+        let range = self.range();
+        println!("Setting page attr for {:?} to {:?}", range, attr);
+        unsafe {
+            with_current_page_table(|table| {
+                table
+                    .create_mapping(
+                        range.start() as u64,
+                        range.end() as u64,
+                        range.start() as u64, // Identity Mapping
+                        attr,
+                    )
+                    .expect("Failed to set mapping");
+            });
+        }
+        Ok(())
     }
     /// Allocates a physically-contiguous region of 4KiB memory pages that has enough space to
     /// `num_bytes` bytes.

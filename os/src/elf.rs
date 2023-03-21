@@ -11,8 +11,6 @@ use crate::util::read_le_u16;
 use crate::util::read_le_u32;
 use crate::util::read_le_u64;
 use crate::util::write_le_u64;
-use crate::util::PAGE_SIZE;
-use crate::x86_64::paging::with_current_page_table;
 use crate::x86_64::paging::PageAttr;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -74,6 +72,11 @@ pub struct SectionHeader {
     align: u64,
     entry_size: u64,
 }
+impl SectionHeader {
+    fn vaddr_range(&self) -> AddressRange {
+        AddressRange::from_start_and_size(self.vaddr as usize, self.size as usize)
+    }
+}
 impl fmt::Debug for SectionHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "type: {:#010X}", self.section_type)?;
@@ -103,29 +106,10 @@ impl<'a> LoadedElf<'a> {
         println!("LoadedElf::exec(file: {})", self.elf.file.name());
         let stack_size = 8 * 1024;
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
-        let stack = stack.as_mut_slice();
-        unsafe {
-            core::ptr::write_bytes(stack.as_mut_ptr(), 0, stack.len());
-        }
-        let stack_start = stack.as_ptr() as u64;
-        let stack_end = stack.as_ptr() as u64 + stack.len() as u64;
-        println!("Stack allocated = {stack_start:#018X}-{stack_end:#018X}",);
-        println!(
-            "Making {:#018X} - {:#018X} accessible to user mode",
-            stack_start, stack_end
-        );
-        unsafe {
-            with_current_page_table(|table| {
-                table
-                    .create_mapping(
-                        stack_start,
-                        stack_end,
-                        stack_start, // Identity Mapping
-                        PageAttr::ReadWriteUser,
-                    )
-                    .expect("Failed to set mapping");
-            });
-        }
+        let stack_range = stack.range();
+        println!("Stack allocated = {stack_range:?}",);
+        stack.fill_with_bytes(0);
+        stack.set_page_attr(PageAttr::ReadWriteUser)?;
         let entry_point = self.resolve_vaddr(self.elf.entry_vaddr as usize)?;
         println!("entry_point = {:#018X}", entry_point);
         unsafe {
@@ -155,7 +139,7 @@ impl<'a> LoadedElf<'a> {
                 // TODO(hikalium): check if it is a qemu's bug that the page fault becomes triple
                 // fault when the code is mapped but in a supervisor mode.
 
-                in("rax") stack_end, // stack grows toward 0, so empty stack pointer will be the end addr
+                in("rax") stack_range.end(), // stack grows toward 0, so empty stack pointer will be the end addr
                 in("rdi") entry_point,
                 in("rdx") crate::x86_64::USER_DS,
                 in("rcx") crate::x86_64::USER64_CS,
@@ -329,44 +313,15 @@ impl<'a> Elf<'a> {
         let mut region = ContiguousPhysicalMemoryPages::alloc_bytes(app_vaddr_range.size())?;
         let region_range = region.range();
         println!("App region allocated = {region_range:?}",);
-        unsafe {
-            with_current_page_table(|table| {
-                table
-                    .create_mapping(
-                        region_range.start() as u64,
-                        region_range.end() as u64,
-                        region_range.start() as u64, // Identity Mapping
-                        PageAttr::ReadWriteUser,
-                    )
-                    .expect("Failed to set mapping");
-            });
-        }
+        region.set_page_attr(PageAttr::ReadWriteUser)?;
         for s in &segments_to_be_loaded {
             self.load_segment(&mut region, &app_vaddr_range, s)?;
         }
-        Ok(LoadedElf {
-            elf: self,
-            region,
-            app_vaddr_range,
-            loaded_segments: segments_to_be_loaded,
-        })
-        /*
+        let loaded_segments = segments_to_be_loaded;
         if let Some(got) = self.sections.get(".got") {
-            let got_segment_index = loaded_segments
-                .iter()
-                .enumerate()
-                .find(|(_i, s)| s.range_vaddr.contains(&(got.vaddr as usize)))
-                .ok_or(Error::Failed(
-                    ".got section is found but there is no segment for it",
-                ))?
-                .0;
-            let got_segment_start_vaddr = loaded_segments[got_segment_index].range_vaddr.start;
-            let got_start_ofs_in_segment = got.vaddr as usize - got_segment_start_vaddr;
-            let got_range_in_segment =
-                got_start_ofs_in_segment..got_start_ofs_in_segment + got.size as usize;
+            let got_range = got.vaddr_range().into_range_in(&app_vaddr_range)?;
             let mut got_values = {
-                let got_data = &mut loaded_segments[got_segment_index].as_mut_slice()
-                    [got_range_in_segment.clone()];
+                let got_data = &mut region.as_mut_slice()[got_range.clone()];
                 let mut got_values = Vec::new();
                 for i in 0..(got.size as usize) / 8 {
                     got_values.push(read_le_u64(got_data, i * 8)?);
@@ -376,29 +331,27 @@ impl<'a> Elf<'a> {
             got_values.iter_mut().enumerate().for_each(|(i, addr)| {
                 print!(" GOT[{:#04X}]: {:#18X}", i, addr);
                 for (i, s) in loaded_segments.iter().enumerate() {
-                    if s.range_vaddr.contains(&(*addr as usize)) {
+                    if s.vaddr_range().contains(*addr as usize) {
                         print!(" in section #{i} -> ");
                         *addr = (*addr)
-                            .wrapping_sub(s.range_vaddr.start as u64)
-                            .wrapping_add(s.range_vaddr_relocated.start as u64);
+                            .wrapping_sub(app_vaddr_range.start() as u64)
+                            .wrapping_add(region.range().start() as u64);
                         break;
                     }
                 }
                 println!("GOT[{:#04X}]: {:#18X}", i, addr);
             });
-            {
-                let got_data =
-                    &mut loaded_segments[got_segment_index].as_mut_slice()[got_range_in_segment];
-                for (i, addr) in got_values.iter().enumerate() {
-                    write_le_u64(got_data, i * 8, *addr)?;
-                }
+            let got_data = &mut region.as_mut_slice()[got_range];
+            for (i, addr) in got_values.iter().enumerate() {
+                write_le_u64(got_data, i * 8, *addr)?;
             }
         }
         Ok(LoadedElf {
             elf: self,
+            region,
+            app_vaddr_range,
             loaded_segments,
         })
-        */
     }
 }
 impl<'a> fmt::Debug for Elf<'a> {

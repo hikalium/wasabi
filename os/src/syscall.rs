@@ -1,12 +1,9 @@
 use crate::print;
 use crate::println;
-use core::arch::asm;
 
 fn sys_exit(regs: &[u64; 15]) {
     println!("program exited with code {}", regs[1]);
-    unsafe {
-        asm!("int3");
-    }
+    todo!("Exit from an app is not yet implemented!");
 }
 
 fn sys_print(regs: &[u64; 15]) {
