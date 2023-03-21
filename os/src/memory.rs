@@ -7,9 +7,66 @@ use crate::util::size_in_pages_from_bytes;
 use crate::util::PAGE_SIZE;
 use alloc::boxed::Box;
 use core::alloc::Layout;
+use core::fmt;
 use core::mem::ManuallyDrop;
+use core::ops::Range;
 use core::pin::Pin;
 use core::slice;
+
+pub struct AddressRange {
+    range: Range<usize>,
+}
+impl AddressRange {
+    pub fn new(start: usize, end: usize) -> Self {
+        let range = start..end;
+        Self { range }
+    }
+    pub fn from_start_and_size(start: usize, size: usize) -> Self {
+        Self::new(start, start + size)
+    }
+    pub fn start(&self) -> usize {
+        self.range.start
+    }
+    pub fn end(&self) -> usize {
+        self.range.end
+    }
+    pub fn size(&self) -> usize {
+        self.range.end - self.range.start
+    }
+    pub fn into_range_in(&self, region: &AddressRange) -> Result<Range<usize>> {
+        let start = region.offset_of(self.start())?;
+        if self.size() == 0 || region.contains(self.end() - 1) {
+            Ok(start..start + self.size())
+        } else {
+            Err(Error::Failed("end of this range is outside of the region"))
+        }
+    }
+    pub fn contains(&self, addr: usize) -> bool {
+        self.range.contains(&addr)
+    }
+    pub fn offset_of(&self, addr: usize) -> Result<usize> {
+        if self.contains(addr) {
+            Ok(addr - self.start())
+        } else {
+            Err(Error::Failed("addr is outside of this region"))
+        }
+    }
+}
+impl From<(usize, usize)> for AddressRange {
+    fn from(e: (usize, usize)) -> Self {
+        Self::new(e.0, e.1)
+    }
+}
+impl From<(u64, u64)> for AddressRange {
+    fn from(e: (u64, u64)) -> Self {
+        Self::new(e.0 as usize, e.1 as usize)
+    }
+}
+impl fmt::Debug for AddressRange {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "addr({:#018X}-{:#018X})", self.start(), self.end())
+    }
+}
 
 /// Represents a physically-contiguous region of
 /// 4KiB memory pages.
@@ -24,6 +81,14 @@ impl ContiguousPhysicalMemoryPages {
             .or(Err(Error::Failed("Invalid layout")))?;
         let phys_addr = ALLOCATOR.alloc_with_options(layout);
         Ok(Self { layout, phys_addr })
+    }
+    pub fn fill_with_bytes(&mut self, value: u8) {
+        unsafe {
+            core::ptr::write_bytes(self.phys_addr, 0, self.range().size());
+        }
+    }
+    pub fn range(&self) -> AddressRange {
+        AddressRange::from_start_and_size(self.phys_addr as usize, self.layout.size())
     }
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         // SAFETY: This is safe since byte-level access to the region is always aligned and no
