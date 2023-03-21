@@ -15,12 +15,6 @@ fn f<F: FnOnce() -> i64>(g: F, c: i64) {
 fn main() -> i64 {
     f(|| 3, 2);
     f(|| 5, 7);
-    unsafe {
-        asm!("mov eax,0x208F88");
-        asm!("call rax");
-        asm!("mov [eax], eax");
-        asm!("int3");
-    }
     println!("heyheyhey!");
     unsafe {
         asm!("int3");

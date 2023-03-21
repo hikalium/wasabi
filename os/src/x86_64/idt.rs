@@ -270,21 +270,28 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
             println!("Page Fault");
             println!("CR2={:#018X}", read_cr2());
             println!(
-                "Caused by: {} mode {} access to a {} page",
-                if info.error_code & 0b0100 != 0 {
+                "Caused by: A {} mode {} on a {} page, page structures are {}",
+                if info.error_code & 0b0000_0100 != 0 {
                     "user"
                 } else {
                     "supervisor"
                 },
-                if info.error_code & 0b0010 != 0 {
-                    "write"
+                if info.error_code & 0b0001_0000 != 0 {
+                    "instruction fetch"
+                } else if info.error_code & 0b0010 != 0 {
+                    "data write"
                 } else {
-                    "read"
+                    "data read"
                 },
                 if info.error_code & 0b0001 != 0 {
                     "present"
                 } else {
                     "non-present"
+                },
+                if info.error_code & 0b1000 != 0 {
+                    "invalid"
+                } else {
+                    "valid"
                 },
             );
         }
