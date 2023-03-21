@@ -73,16 +73,71 @@ pub struct SectionHeader {
     entry_size: u64,
 }
 impl SectionHeader {
-    fn vaddr_range(&self) -> AddressRange {
-        AddressRange::from_start_and_size(self.vaddr as usize, self.size as usize)
+    fn vaddr_range(&self) -> Result<AddressRange> {
+        if self.vaddr != 0 && self.size != 0 {
+            Ok(AddressRange::from_start_and_size(
+                self.vaddr as usize,
+                self.size as usize,
+            ))
+        } else {
+            Err(Error::Failed(
+                "This section does not have a valid vaddr_range",
+            ))
+        }
+    }
+    fn file_range(&self) -> Result<Range<usize>> {
+        if self.offset != 0 && self.size != 0 {
+            Ok(self.offset as usize..(self.offset + self.size) as usize)
+        } else {
+            Err(Error::Failed(
+                "This section does not have a valid file_range",
+            ))
+        }
     }
 }
 impl fmt::Debug for SectionHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "type: {:#010X}", self.section_type)?;
-        write!(f, ", offset: {:#018X}", self.offset)?;
-        write!(f, ", vaddr: {:#018X}", self.vaddr)?;
         write!(f, ", align: {:#018X}", self.align)?;
+        if let Ok(range) = self.file_range() {
+            write!(f, ", file_range: {:?}", range)?;
+        }
+        if let Ok(range) = self.vaddr_range() {
+            write!(f, ", vaddr_range: {:?}", range)?;
+        }
+        if self.entry_size != 0 {
+            write!(f, ", entry_size: {:#018X}", self.entry_size)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct SymbolTableEntry {
+    name_ofs: u32,
+    info: u8,
+    _reserved: u8,
+    section_index: u16,
+    address: u64,
+    size: u64,
+}
+impl fmt::Debug for SymbolTableEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "sym type {:X} bind {:X} addr {:#018X} size {:#018X}",
+            self.info & 0x0F,
+            (self.info >> 4) & 0x0F,
+            self.address,
+            self.size,
+        )?;
+        match self.section_index {
+            0xFF00..=0xFF3F => {}
+            0xFFF1 => write!(f, " SHN_ABS")?,
+            0xFFF2 => write!(f, " SHN_COMMON")?,
+            _ => write!(f, " @ section[{}]", self.section_index)?,
+        }
         Ok(())
     }
 }
@@ -100,7 +155,7 @@ impl<'a> LoadedElf<'a> {
                 return Ok(self.region.range().start() + self.app_vaddr_range.offset_of(vaddr)?);
             }
         }
-        Err(Error::Failed("Not found"))
+        Err(Error::Failed("vaddr not found"))
     }
     pub fn exec(self) -> Result<usize> {
         println!("LoadedElf::exec(file: {})", self.elf.file.name());
@@ -156,8 +211,31 @@ pub struct Elf<'a> {
     entry_vaddr: u64,
     segments: Vec<SegmentHeader>,
     sections: BTreeMap<String, SectionHeader>,
+    string_table: Option<&'a [u8]>,
 }
 impl<'a> Elf<'a> {
+    fn read_string_from_table(string_table: &Option<&[u8]>, name_ofs: usize) -> String {
+        if let Some(string_table) = string_table {
+            if name_ofs >= string_table.len() {
+                "(out of range)".to_string()
+            } else {
+                let section_name = &string_table[name_ofs..];
+                let section_name: Vec<u8> = section_name
+                    .iter()
+                    .cloned()
+                    .take_while(|c| *c != 0)
+                    .collect();
+                core::str::from_utf8(&section_name)
+                    .unwrap_or("(invalid)")
+                    .to_string()
+            }
+        } else {
+            "(no string table)".to_string()
+        }
+    }
+    pub fn read_string(&self, name_ofs: usize) -> String {
+        Self::read_string_from_table(&self.string_table, name_ofs)
+    }
     pub fn parse(file: &'a File) -> Result<Self> {
         println!("Elf::parse(file: {})", file.name());
         let data = file.data();
@@ -196,7 +274,7 @@ impl<'a> Elf<'a> {
         let shdr_entry_size = read_le_u16(data, 58)?;
         let num_of_shdr_entry = read_le_u16(data, 60)?;
 
-        let index_of_string_table = read_le_u16(data, 62)?;
+        let shdr_name_table_idx = read_le_u16(data, 62)?;
 
         let phdr_indexes = 0..num_of_phdr_entry;
         let mut segments = Vec::new();
@@ -234,27 +312,28 @@ impl<'a> Elf<'a> {
             let section = unsafe { *section };
             sections.push(section);
         }
-        let string_table = sections[index_of_string_table as usize];
-        let string_table =
-            &data[string_table.offset as usize..(string_table.offset + string_table.size) as usize];
+        let shdr_name_table = sections[shdr_name_table_idx as usize];
+        let shdr_name_table = &data[shdr_name_table.offset as usize
+            ..(shdr_name_table.offset + shdr_name_table.size) as usize];
         let sections: BTreeMap<String, SectionHeader> = sections
             .iter()
             .map(|s| {
-                let section_name = &string_table[s.name_ofs as usize..];
-                let section_name: Vec<u8> = section_name
-                    .iter()
-                    .cloned()
-                    .take_while(|c| *c != 0)
-                    .collect();
-                let section_name = core::str::from_utf8(&section_name).unwrap_or("(invalid)");
-                (section_name.to_string(), *s)
+                (
+                    Self::read_string_from_table(&Some(shdr_name_table), s.name_ofs as usize),
+                    *s,
+                )
             })
             .collect();
+        let string_table = sections
+            .get(".strtab")
+            .and_then(|s| s.file_range().ok())
+            .map(|r| &data[r]);
         Ok(Self {
             file,
             entry_vaddr,
             segments,
             sections,
+            string_table,
         })
     }
     /// Load a segment to the region
@@ -311,6 +390,7 @@ impl<'a> Elf<'a> {
         );
         println!("App_vaddr_range: {app_vaddr_range:?}");
         let mut region = ContiguousPhysicalMemoryPages::alloc_bytes(app_vaddr_range.size())?;
+        region.fill_with_bytes(0);
         let region_range = region.range();
         println!("App region allocated = {region_range:?}",);
         region.set_page_attr(PageAttr::ReadWriteUser)?;
@@ -318,8 +398,35 @@ impl<'a> Elf<'a> {
             self.load_segment(&mut region, &app_vaddr_range, s)?;
         }
         let loaded_segments = segments_to_be_loaded;
+        if let Some(symbol_table) = self.sections.get(".symtab") {
+            let range = symbol_table.file_range()?;
+            let data = &self.file.data()[range];
+            for i in 0..(symbol_table.size as usize) / symbol_table.entry_size as usize {
+                let data = &data[i * symbol_table.entry_size as usize
+                    ..(i + 1) * symbol_table.entry_size as usize];
+                if data.len() < size_of::<SymbolTableEntry>() {
+                    println!("Invalid symbol table size");
+                    break;
+                }
+                // SAFETY: Following dereference is safe since the check above ensures its bounds
+                let s = unsafe { *(data.as_ptr() as *const SymbolTableEntry) };
+                println!(
+                    "symbol[{:3}]: {:?} {}",
+                    i,
+                    s,
+                    self.read_string(s.name_ofs as usize)
+                );
+            }
+        }
+        if let Some(relocation_table) = self.sections.get(".data.rel.ro") {
+            let vaddr_range = relocation_table
+                .vaddr_range()?
+                .into_range_in(&app_vaddr_range)?;
+            let data = &mut region.as_mut_slice()[vaddr_range];
+            print::hexdump(data);
+        }
         if let Some(got) = self.sections.get(".got") {
-            let got_range = got.vaddr_range().into_range_in(&app_vaddr_range)?;
+            let got_range = got.vaddr_range()?.into_range_in(&app_vaddr_range)?;
             let mut got_values = {
                 let got_data = &mut region.as_mut_slice()[got_range.clone()];
                 let mut got_values = Vec::new();
@@ -342,8 +449,9 @@ impl<'a> Elf<'a> {
                 println!("GOT[{:#04X}]: {:#18X}", i, addr);
             });
             let got_data = &mut region.as_mut_slice()[got_range];
-            for (i, addr) in got_values.iter().enumerate() {
-                write_le_u64(got_data, i * 8, *addr)?;
+            for (i, &addr) in got_values.iter().enumerate() {
+                println!("GOT[{:#04X}]: {:#18X}", i, addr);
+                write_le_u64(got_data, i * 8, addr)?;
             }
         }
         Ok(LoadedElf {

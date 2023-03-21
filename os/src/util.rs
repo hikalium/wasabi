@@ -143,7 +143,7 @@ pub fn read_le_u64(data: &[u8], ofs: usize) -> Result<u64> {
 }
 pub fn write_le_u64(data: &mut [u8], ofs: usize, value: u64) -> Result<()> {
     unsafe {
-        (data.as_mut_ptr() as *mut u64).add(ofs).write(value);
+        (data.as_mut_ptr().add(ofs) as *mut u64).write(value);
     }
     Ok(())
 }

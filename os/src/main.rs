@@ -125,7 +125,8 @@ fn main() -> Result<()> {
     paint_wasabi_logo();
 
     unsafe { core::arch::asm!("cli") }
-    let _interrupt_config = init::init_interrupts()?;
+    let interrupt_config = init::init_interrupts()?;
+    core::mem::forget(interrupt_config);
     init::init_paging()?;
     init::init_timer();
     init_syscall();
@@ -150,7 +151,7 @@ fn main() -> Result<()> {
     for (i, f) in root_files.iter().enumerate() {
         println!("root_files[{}]: {}", i, f.name());
     }
-    let startup_app_file_name = EfiFileName::from_str("hello0")?;
+    let startup_app_file_name = EfiFileName::from_str("hello1")?;
     let elf = root_files
         .iter()
         .find(|&e| e.name() == &startup_app_file_name);

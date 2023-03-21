@@ -172,6 +172,7 @@ macro_rules! interrupt_entrypoint_with_ecode {
 
 interrupt_entrypoint!(3);
 interrupt_entrypoint!(6);
+interrupt_entrypoint_with_ecode!(8);
 interrupt_entrypoint_with_ecode!(13);
 interrupt_entrypoint_with_ecode!(14);
 interrupt_entrypoint!(32);
@@ -179,6 +180,7 @@ interrupt_entrypoint!(32);
 extern "sysv64" {
     fn interrupt_entrypoint3();
     fn interrupt_entrypoint6();
+    fn interrupt_entrypoint8();
     fn interrupt_entrypoint13();
     fn interrupt_entrypoint14();
     fn interrupt_entrypoint32();
@@ -189,12 +191,6 @@ global_asm!(
 .global inthandler_common
 inthandler_common:
     // General purpose registers (except rsp and rcx)
-    mov ax,16 // KERNEL_DS == 2 << 3
-    mov es,ax
-    mov ds,ax
-    mov fs,ax
-    mov gs,ax
-    mov ss,ax
     push r15
     push r14
     push r13
@@ -263,6 +259,9 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
         }
         6 => {
             println!("Invalid Opcode");
+        }
+        8 => {
+            println!("Double Fault");
         }
         13 => {
             println!("General Protection Fault");
@@ -383,6 +382,12 @@ impl Idt {
             IdtAttr::IntGateDPL0,
             interrupt_entrypoint6,
         );
+        idt.entries[8] = IdtDescriptor::new(
+            segment_selector,
+            2,
+            IdtAttr::IntGateDPL0,
+            interrupt_entrypoint8,
+        );
         idt.entries[13] = IdtDescriptor::new(
             segment_selector,
             1,
@@ -392,7 +397,7 @@ impl Idt {
         idt.entries[14] = IdtDescriptor::new(
             segment_selector,
             1,
-            IdtAttr::IntGateDPL3,
+            IdtAttr::IntGateDPL0,
             interrupt_entrypoint14,
         );
         idt.entries[32] = IdtDescriptor::new(
@@ -429,36 +434,34 @@ const _: () = assert!(size_of::<TaskStateSegment64Inner>() == 104);
 
 pub struct TaskStateSegment64 {
     tss64: TaskStateSegment64Inner,
-    _stack_for_ring0: Pin<Box<[u8]>>,
 }
 impl TaskStateSegment64 {
     pub fn phys_addr(&self) -> u64 {
         &self.tss64 as *const TaskStateSegment64Inner as u64
     }
+    unsafe fn alloc_interrupt_stack() -> u64 {
+        const IST_STACK_NUM_PAGES: usize = 16;
+        let stack = alloc_pages(IST_STACK_NUM_PAGES).expect("Failed to alloc an interrupt stack");
+        let ptr = unsafe { stack.as_ptr().add(IST_STACK_NUM_PAGES * PAGE_SIZE) as u64 };
+        core::mem::forget(stack);
+        // now, no one except us own the region since it is forgotten by the allocator ;)
+        ptr
+    }
     pub fn new() -> Result<Pin<Box<Self>>> {
-        const RING0_STACK_NUM_PAGES: usize = 16;
-        let stack_for_ring0 = alloc_pages(RING0_STACK_NUM_PAGES)?;
-        let rsp0 = unsafe {
-            stack_for_ring0
-                .as_ptr()
-                .add(RING0_STACK_NUM_PAGES * PAGE_SIZE) as u64
-        };
+        let rsp0 = unsafe { Self::alloc_interrupt_stack() };
+        let mut ist = [0u64; 8];
+        for ist in ist[1..=7].iter_mut() {
+            *ist = unsafe { Self::alloc_interrupt_stack() };
+        }
         let tss64 = TaskStateSegment64Inner {
             _reserved0: 0,
-            _rsp: [rsp0; 3],
-            _ist: [rsp0; 8],
+            _rsp: [rsp0, 0, 0],
+            _ist: ist,
             _reserved1: [0; 5],
             _io_map_base_addr: 0,
         };
-        let this = Box::pin(Self {
-            tss64,
-            _stack_for_ring0: stack_for_ring0,
-        });
-        println!(
-            "TSS64 created @ {:#p}, with rsp0 = {:#018X}",
-            this.as_ref().get_ref(),
-            rsp0
-        );
+        let this = Box::pin(Self { tss64 });
+        println!("TSS64 created @ {:#p}", this.as_ref().get_ref(),);
         Ok(this)
     }
 }

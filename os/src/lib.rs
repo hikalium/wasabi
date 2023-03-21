@@ -13,7 +13,6 @@
 #![feature(new_uninit)]
 #![feature(saturating_int_impl)]
 #![feature(sync_unsafe_cell)]
-#![feature(pin_macro)]
 #![deny(clippy::wildcard_imports)]
 #![deny(clippy::enum_glob_use)]
 #![feature(associated_type_bounds)]
