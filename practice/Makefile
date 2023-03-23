@@ -1,13 +1,16 @@
 RUSTC=$(shell rustup which rustc)
 TARGETS=\
-		minimal_linux_elf_0 \
-		minimal_linux_elf_1 \
-		minimal_linux_elf_2 \
-		minimal_linux_elf_3 \
-		minimal_linux_elf_4 \
-		minimal_linux_elf_5 \
-		minimal_linux_elf_6 \
-		minimal_linux_elf_7 \
+		minimal_linux_elf_00 \
+		minimal_linux_elf_01 \
+		minimal_linux_elf_02 \
+		minimal_linux_elf_03 \
+		minimal_linux_elf_04 \
+		minimal_linux_elf_05 \
+		minimal_linux_elf_06 \
+		minimal_linux_elf_07 \
+		minimal_linux_elf_08 \
+		minimal_linux_elf_09 \
+		minimal_linux_elf_10 \
 # keep this line
 
 .PHONY : default
@@ -31,26 +34,35 @@ clean :
 
 # https://doc.rust-lang.org/cargo/reference/profiles.html
 
-minimal_linux_elf_0.bin : 
+minimal_linux_elf_00.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_base.rs 
 
-minimal_linux_elf_1.bin : 
+minimal_linux_elf_01.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_base.rs -O -C strip=debuginfo 
 
-minimal_linux_elf_2.bin : 
+minimal_linux_elf_02.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_base.rs -O -C strip=symbols 
 
-minimal_linux_elf_3.bin : 
+minimal_linux_elf_03.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_base.rs -O -C strip=symbols -C opt-level="z" 
 
-minimal_linux_elf_4.bin : 
+minimal_linux_elf_04.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_base.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 
 
-minimal_linux_elf_5.bin : 
+minimal_linux_elf_05.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_base.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort 
 
-minimal_linux_elf_6.bin : 
+minimal_linux_elf_06.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_base.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true 
 
-minimal_linux_elf_7.bin : 
-	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -Clink-args=-nostartfiles
+minimal_linux_elf_07.bin : 
+	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles
+	
+minimal_linux_elf_08.bin : 
+	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles -C target-cpu=native
+
+minimal_linux_elf_09.bin : 
+	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles -C target-cpu=native -Clink-args=-Wl,-n,-N,--no-dynamic-linker
+
+minimal_linux_elf_10.bin : 
+	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles -C target-cpu=native -Clink-args=-Wl,-n,-N,--no-dynamic-linker,--no-pie,--build-id=none,--no-eh-frame-hdr
