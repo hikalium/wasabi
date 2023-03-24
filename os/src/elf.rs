@@ -418,13 +418,14 @@ impl<'a> Elf<'a> {
                 );
             }
         }
-        if let Some(relocation_table) = self.sections.get(".data.rel.ro") {
+        if let Some(relocation_table) = self.sections.get(".rela.dyn") {
             let vaddr_range = relocation_table
                 .vaddr_range()?
                 .into_range_in(&app_vaddr_range)?;
             let data = &mut region.as_mut_slice()[vaddr_range];
             print::hexdump(data);
         }
+        /*
         if let Some(got) = self.sections.get(".got") {
             let got_range = got.vaddr_range()?.into_range_in(&app_vaddr_range)?;
             let mut got_values = {
@@ -453,7 +454,7 @@ impl<'a> Elf<'a> {
                 println!("GOT[{:#04X}]: {:#18X}", i, addr);
                 write_le_u64(got_data, i * 8, addr)?;
             }
-        }
+        }*/
         Ok(LoadedElf {
             elf: self,
             region,
