@@ -1,23 +1,12 @@
 NAME=$(shell cargo read-manifest | jq -r .name)
 ROOT=$(shell readlink -f ../../generated)
-BINPATH=$(ROOT)/bin/$(NAME)
+BINPATH=$(ROOT)/bin/
+TARGET=$(shell readlink -f ../../target/x86_64-unknown-none/debug/hello1)
 
-.PHONY : bulid
-build:
-	cargo -vvv install --path . --root $(ROOT)
+.PHONY : .FORCE
 
-.PHONY : objdump
-objdump: build
-	objdump -d $(BINPATH)
+$(TARGET): .FORCE
+	cargo build --target x86_64-unknown-none -vvv
 
-.PHONY : file
-file: build
-	file $(BINPATH)
-
-.PHONY : ls
-ls: build
-	ls -lah $(BINPATH)
-
-.PHONY : run
-run:
-	make -C ../../ run
+install: $(TARGET)
+	cp $(TARGET) $(BINPATH)
