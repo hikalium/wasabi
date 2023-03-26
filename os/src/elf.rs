@@ -142,6 +142,34 @@ impl fmt::Debug for SymbolTableEntry {
     }
 }
 
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct RelocationEntry {
+    address: u64,
+    info: u64,
+    addend: u64,
+}
+impl fmt::Debug for RelocationEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "rel info {:#018X} addr {:#018X} addend {:#018X}",
+            self.info, self.address, self.addend,
+        )
+    }
+}
+impl core::convert::TryFrom<&[u8]> for RelocationEntry {
+    type Error = Error;
+    fn try_from(data: &[u8]) -> Result<Self> {
+        if size_of::<Self>() <= data.len() {
+            // SAFETY: Following dereference is safe since the check above ensures its bounds
+            Ok(unsafe { *(data.as_ptr() as *const RelocationEntry) })
+        } else {
+            Err(Error::Failed("data is too short for SymbolTableEntry"))
+        }
+    }
+}
+
 pub struct LoadedElf<'a> {
     elf: &'a Elf<'a>,
     region: ContiguousPhysicalMemoryPages,
@@ -423,7 +451,12 @@ impl<'a> Elf<'a> {
                 .vaddr_range()?
                 .into_range_in(&app_vaddr_range)?;
             let data = &mut region.as_mut_slice()[vaddr_range];
-            print::hexdump(data);
+            for i in 0..(relocation_table.size as usize) / relocation_table.entry_size as usize {
+                let data = &data[i * relocation_table.entry_size as usize..];
+                if let Ok(e) = RelocationEntry::try_from(data) {
+                    println!("symbol[{:3}]: {:?}", i, e,);
+                }
+            }
         }
         /*
         if let Some(got) = self.sections.get(".got") {
