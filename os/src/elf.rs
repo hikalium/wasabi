@@ -22,6 +22,7 @@ use core::mem::size_of;
 use core::ops::Range;
 
 const PHDR_TYPE_LOAD: u32 = 1;
+const PHDR_TYPE_DYNAMIC: u32 = 2;
 
 #[derive(Copy, Clone)]
 #[allow(unused)]
@@ -164,6 +165,29 @@ impl core::convert::TryFrom<&[u8]> for RelocationEntry {
             Ok(unsafe { *(data.as_ptr() as *const RelocationEntry) })
         } else {
             Err(Error::Failed("data is too short for SymbolTableEntry"))
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct DynamicEntry {
+    tag: u64,
+    value: u64,
+}
+impl fmt::Debug for DynamicEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "dyn tag {:#018X} value {:#018X}", self.tag, self.value,)
+    }
+}
+impl core::convert::TryFrom<&[u8]> for DynamicEntry {
+    type Error = Error;
+    fn try_from(data: &[u8]) -> Result<Self> {
+        if size_of::<Self>() <= data.len() {
+            // SAFETY: Following dereference is safe since the check above ensures its bounds
+            Ok(unsafe { *(data.as_ptr() as *const DynamicEntry) })
+        } else {
+            Err(Error::Failed("data is too short for DynamicEntry"))
         }
     }
 }
@@ -424,6 +448,16 @@ impl<'a> Elf<'a> {
             self.load_segment(&mut region, &app_vaddr_range, s)?;
         }
         let loaded_segments = segments_to_be_loaded;
+
+        let dynamic_segment: Option<&SegmentHeader> = self
+            .segments
+            .iter()
+            .find(|s| s.phdr_type == PHDR_TYPE_DYNAMIC);
+        if let Some(dynamic_segment) = dynamic_segment {
+            println!("DYNAMIC segment found")
+        }
+
+        /*
         if let Some(symbol_table) = self.sections.get(".symtab") {
             let range = symbol_table.file_range()?;
             let data = &self.file.data()[range];
@@ -465,6 +499,7 @@ impl<'a> Elf<'a> {
                 }
             }
         }
+        */
         /*
         if let Some(got) = self.sections.get(".got") {
             let got_range = got.vaddr_range()?.into_range_in(&app_vaddr_range)?;

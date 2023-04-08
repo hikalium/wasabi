@@ -17,6 +17,7 @@ RUSTFLAGS=\
 		  -C link-args=-z \
 		  -C link-args=execstack
 CARGO=RUSTFLAGS='${RUSTFLAGS}' cargo
+BIN_PATH_DEBUG=$(shell cargo metadata --format-version 1 | jq -r .target_directory)/debug/$(NAME)
 
 .PHONY : build
 build :
@@ -42,7 +43,11 @@ nm :
 
 .PHONY : readelf
 readelf : build
-	readelf -l `cargo metadata --format-version 1 | jq -r .target_directory`/debug/$(NAME)
+	readelf -l $(BIN_PATH_DEBUG)
+
+.PHONY : hexdump
+hexdump : build
+	hexdump -C $(BIN_PATH_DEBUG)
 
 .PHONY : run
 run :
