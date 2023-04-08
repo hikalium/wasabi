@@ -255,7 +255,7 @@ impl core::str::FromStr for EfiFileName {
     fn from_str(s: &str) -> Result<Self> {
         let src = s.encode_utf16();
         let mut dst = [0u16; 32];
-        if src.clone().into_iter().count() > dst.len() {
+        if src.clone().count() > dst.len() {
             Err(Error::Failed("too long for EfiFileName"))
         } else {
             dst.iter_mut()
