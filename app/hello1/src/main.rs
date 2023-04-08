@@ -13,6 +13,7 @@ fn f<F: FnOnce() -> i64>(g: F, c: i64) {
 }
 
 fn main() -> i64 {
+    /*
     sys_print("hello from sys_print!\n");
     f(|| 3, 2);
     f(|| 5, 7);
@@ -21,6 +22,8 @@ fn main() -> i64 {
         asm!("int3");
     }
     sys_exit(unsafe { A });
+    */
+    sys_exit(42);
 }
 
 entry_point!(main);
