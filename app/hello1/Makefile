@@ -5,23 +5,23 @@ RUSTFLAGS=\
 		  -C no-redzone=true \
 		  -C panic=abort \
 		  -C link-args=-eentry,-Wl,--hash-style=sysv,--no-dynamic-linker,--build-id=none,--no-eh-frame-hdr,-z,norelro,-z,execstack
+CARGO=RUSTFLAGS='${RUSTFLAGS}' $(shell which cargo)
 
 .PHONY : build
 build :
 	rustup target add $(TARGET)
-	RUSTFLAGS="${RUSTFLAGS}" \
-			  cargo build --target $(TARGET) -vvv
+	$(CARGO) build --target $(TARGET) -vvv
 
 .PHONY : install
 install :
 	rustup target add $(TARGET)
-	RUSTFLAGS="${RUSTFLAGS}" \
-		cargo install --force --target $(TARGET) --root $(ROOT) --path .
+	$(CARGO) install --force --target $(TARGET) --root $(ROOT) --path .
 
 .PHONY : objdump
-objdump : $(NAME).bin
+objdump :
 	cargo install cargo-binutils
-	cargo objdump --bin $(NAME) -- -d
+	rustup component add llvm-tools-preview
+	$(CARGO) objdump --bin $(NAME) -- -d
 
 .PHONY : run
 run :
