@@ -60,11 +60,18 @@ minimal_linux_elf_06.bin :
 minimal_linux_elf_07.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles
 	
+# ASLR worked
 minimal_linux_elf_08.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles -C target-cpu=native
 
-minimal_linux_elf_09.bin : 
-	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles -C target-cpu=native -Clink-args=-Wl,-n,-N,--no-dynamic-linker
+.PHONY : minimal_linux_elf_09.bin
+minimal_linux_elf_09.bin :
+	# ASLR didn't work
+	#$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles -C target-cpu=native -Clink-args=-Wl,-n,-N,--no-dynamic-linker
+	# -n and -N can not be appended, since they will make the binary not pie (why...?)
+	# ASLR worked!
+	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles -C target-cpu=native -Clink-args=-Wl,--hash-style=sysv,--no-dynamic-linker,--build-id=none,--no-eh-frame-hdr,-z,norelro,-z,execstack
+	objcopy --strip-unneeded -R .hash -R .eh_frame -R .dynstr -R .dynsym minimal_linux_elf_09.bin
 
 minimal_linux_elf_10.bin : 
 	$(RUSTC) -o $@ minimal_linux_elf_nostd.rs -O -C strip=symbols -C opt-level="z" -C codegen-units=1 -C panic=abort -C lto=true -C link-args=-nostartfiles -C target-cpu=native -Clink-args=-Wl,-n,-N,--no-dynamic-linker,--build-id=none,--no-eh-frame-hdr

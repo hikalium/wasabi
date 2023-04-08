@@ -450,11 +450,20 @@ impl<'a> Elf<'a> {
             let vaddr_range = relocation_table
                 .vaddr_range()?
                 .into_range_in(&app_vaddr_range)?;
-            let data = &mut region.as_mut_slice()[vaddr_range];
             for i in 0..(relocation_table.size as usize) / relocation_table.entry_size as usize {
-                let data = &data[i * relocation_table.entry_size as usize..];
-                if let Ok(e) = RelocationEntry::try_from(data) {
+                let ofs = i * relocation_table.entry_size as usize;
+                let rel = if let Ok(e) =
+                    RelocationEntry::try_from(&region.as_mut_slice()[vaddr_range.clone()][ofs..])
+                {
                     println!("symbol[{:3}]: {:?}", i, e,);
+                    Some((e.address, e.addend))
+                } else {
+                    None
+                };
+                if let Some(rel) = rel {
+                    let data = &mut region.as_mut_slice()[vaddr_range.clone()];
+                    let old = read_le_u64(data, rel.0 as usize)?;
+                    println!("old: {old:#018X}");
                 }
             }
         }
