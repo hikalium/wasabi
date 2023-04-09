@@ -169,11 +169,15 @@ impl core::convert::TryFrom<&[u8]> for RelocationEntry {
     }
 }
 
+const DYNAMIC_TAG_RELA_ADDRESS: u64 = 7;
+const DYNAMIC_TAG_RELA_TOTAL_SIZE: u64 = 8;
+const DYNAMIC_TAG_RELA_ENTRY_SIZE: u64 = 9;
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct DynamicEntry {
-    tag: u64,
-    value: u64,
+    pub tag: u64,
+    pub value: u64,
 }
 impl fmt::Debug for DynamicEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -454,8 +458,36 @@ impl<'a> Elf<'a> {
             .iter()
             .find(|s| s.phdr_type == PHDR_TYPE_DYNAMIC);
         if let Some(dynamic_segment) = dynamic_segment {
-            println!("DYNAMIC segment found")
-        }
+            println!("DYNAMIC segment found");
+            let frange = dynamic_segment.offset as usize
+                ..(dynamic_segment.offset + dynamic_segment.fsize) as usize;
+            let entries = &self.file.data()[frange].chunks_exact(size_of::<DynamicEntry>()).map(DynamicEntry::try_from).collect::<Result<Vec<DynamicEntry>>>()?;
+            for e in entries {
+                    println!("{:?}", e);
+            }
+            if let Some(rela) = entries.iter().find(|e| e.tag == DYNAMIC_TAG_RELA_ADDRESS).cloned() {
+                let rela_addr = rela.value;
+                println!("RELA found. addr = {rela_addr:#018X}");
+            }
+            /*
+            for i in 0..(relocation_table.size as usize) / relocation_table.entry_size as usize {
+                let ofs = i * relocation_table.entry_size as usize;
+                let rel = if let Ok(e) =
+                    RelocationEntry::try_from(&region.as_mut_slice()[vaddr_range.clone()][ofs..])
+                {
+                    println!("symbol[{:3}]: {:?}", i, e,);
+                    Some((e.address, e.addend))
+                } else {
+                    None
+                };
+                if let Some(rel) = rel {
+                    let data = &mut region.as_mut_slice()[vaddr_range.clone()];
+                    let old = read_le_u64(data, rel.0 as usize)?;
+                    println!("old: {old:#018X}");
+                }
+            }
+            */
+        };
 
         /*
         if let Some(symbol_table) = self.sections.get(".symtab") {
