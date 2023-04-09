@@ -9,8 +9,10 @@ use crate::println;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
 use crate::util::read_le_u64;
+use crate::util::write_le_u64;
 use crate::x86_64::paging::PageAttr;
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -23,6 +25,11 @@ use core::ops::Range;
 
 const PHDR_TYPE_LOAD: u32 = 1;
 const PHDR_TYPE_DYNAMIC: u32 = 2;
+
+// [elf_1_2] Figure A-3. Relocation Types
+// B: base address where the object file is loaded to
+// A: addend field in the relocation entry
+const R_386_RELATIVE: u64 = 8; // B + A
 
 #[derive(Copy, Clone)]
 #[allow(unused)]
@@ -258,6 +265,19 @@ impl<'a> LoadedElf<'a> {
         }
         Ok(0)
     }
+    pub fn slice_of_vaddr_range(&self, range_on_vaddr: AddressRange) -> Result<&[u8]> {
+        let range = range_on_vaddr.into_range_in(&self.app_vaddr_range)?;
+        Ok(&self.region.as_slice()[range])
+    }
+    pub fn mut_slice_of_vaddr_range(&mut self, range_on_vaddr: AddressRange) -> Result<&mut [u8]> {
+        let range = range_on_vaddr.into_range_in(&self.app_vaddr_range)?;
+        Ok(&mut self.region.as_mut_slice()[range])
+    }
+    pub fn write_le_u64_at_vaddr(&mut self, vaddr: usize, value: u64) -> Result<()> {
+        let bytes = self
+            .mut_slice_of_vaddr_range(AddressRange::from_start_and_size(vaddr, size_of::<u64>()))?;
+        write_le_u64(bytes, 0, value)
+    }
 }
 
 pub struct Elf<'a> {
@@ -452,6 +472,12 @@ impl<'a> Elf<'a> {
             self.load_segment(&mut region, &app_vaddr_range, s)?;
         }
         let loaded_segments = segments_to_be_loaded;
+        let mut loaded = LoadedElf {
+            elf: self,
+            region,
+            app_vaddr_range,
+            loaded_segments,
+        };
 
         let dynamic_segment: Option<&SegmentHeader> = self
             .segments
@@ -461,32 +487,50 @@ impl<'a> Elf<'a> {
             println!("DYNAMIC segment found");
             let frange = dynamic_segment.offset as usize
                 ..(dynamic_segment.offset + dynamic_segment.fsize) as usize;
-            let entries = &self.file.data()[frange].chunks_exact(size_of::<DynamicEntry>()).map(DynamicEntry::try_from).collect::<Result<Vec<DynamicEntry>>>()?;
+            let entries = &self.file.data()[frange]
+                .chunks_exact(size_of::<DynamicEntry>())
+                .map(DynamicEntry::try_from)
+                .collect::<Result<Vec<DynamicEntry>>>()?;
             for e in entries {
+                println!("{:?}", e);
+            }
+            let rela_addr = entries
+                .iter()
+                .find(|e| e.tag == DYNAMIC_TAG_RELA_ADDRESS)
+                .map(|e| e.value as usize);
+            let rela_total_size = entries
+                .iter()
+                .find(|e| e.tag == DYNAMIC_TAG_RELA_TOTAL_SIZE)
+                .map(|e| e.value as usize);
+            let rela_entry_size = entries
+                .iter()
+                .find(|e| e.tag == DYNAMIC_TAG_RELA_ENTRY_SIZE)
+                .map(|e| e.value as usize);
+            if let (Some(rela_addr), Some(rela_total_size), Some(rela_entry_size)) =
+                (rela_addr, rela_total_size, rela_entry_size)
+            {
+                println!("RELA found. addr = {rela_addr:#018X} size = {rela_total_size:#018X}");
+                let rela_data = loaded.slice_of_vaddr_range(AddressRange::from_start_and_size(
+                    rela_addr,
+                    rela_total_size,
+                ))?;
+                let rela_entries = &rela_data
+                    .chunks_exact(rela_entry_size)
+                    .map(RelocationEntry::try_from)
+                    .collect::<Result<Vec<RelocationEntry>>>()?;
+                for e in rela_entries {
                     println!("{:?}", e);
-            }
-            if let Some(rela) = entries.iter().find(|e| e.tag == DYNAMIC_TAG_RELA_ADDRESS).cloned() {
-                let rela_addr = rela.value;
-                println!("RELA found. addr = {rela_addr:#018X}");
-            }
-            /*
-            for i in 0..(relocation_table.size as usize) / relocation_table.entry_size as usize {
-                let ofs = i * relocation_table.entry_size as usize;
-                let rel = if let Ok(e) =
-                    RelocationEntry::try_from(&region.as_mut_slice()[vaddr_range.clone()][ofs..])
-                {
-                    println!("symbol[{:3}]: {:?}", i, e,);
-                    Some((e.address, e.addend))
-                } else {
-                    None
-                };
-                if let Some(rel) = rel {
-                    let data = &mut region.as_mut_slice()[vaddr_range.clone()];
-                    let old = read_le_u64(data, rel.0 as usize)?;
-                    println!("old: {old:#018X}");
+                    let rel_type = e.info & 0xffffffff;
+                    if rel_type == R_386_RELATIVE {
+                        let resolved = loaded.resolve_vaddr(e.addend as usize)?;
+                        loaded.write_le_u64_at_vaddr(e.address as usize, resolved as u64)?;
+                    } else {
+                        return Err(Error::FailedString(format!(
+                            "Relocation type {rel_type} is not supported yet"
+                        )));
+                    }
                 }
             }
-            */
         };
 
         /*
@@ -562,12 +606,7 @@ impl<'a> Elf<'a> {
                 write_le_u64(got_data, i * 8, addr)?;
             }
         }*/
-        Ok(LoadedElf {
-            elf: self,
-            region,
-            app_vaddr_range,
-            loaded_segments,
-        })
+        Ok(loaded)
     }
 }
 impl<'a> fmt::Debug for Elf<'a> {
