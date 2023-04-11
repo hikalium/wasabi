@@ -11,6 +11,8 @@ use crate::util::read_le_u32;
 use crate::util::read_le_u64;
 use crate::util::write_le_u64;
 use crate::x86_64::paging::PageAttr;
+use crate::x86_64::ExecutionContext;
+use crate::x86_64::CONTEXT_OS;
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
@@ -228,21 +230,53 @@ impl<'a> LoadedElf<'a> {
         stack.set_page_attr(PageAttr::ReadWriteUser)?;
         let entry_point = self.resolve_vaddr(self.elf.entry_vaddr as usize)?;
         println!("entry_point = {:#018X}", entry_point);
+        let os_ctx = ExecutionContext::allocate();
+        {
+            let mut ctx = CONTEXT_OS.lock();
+            *ctx = os_ctx;
+            println!("CONTEXT_OS: {:?}", *ctx);
+        }
         unsafe {
             let retcode: i64;
             asm!(
+                // Save current execution state in os_ctx
+                // General registers
+                "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop
+                "push rsi", // ExecutionContext.rsp
+                "push r15",
+                "push r14",
+                "push r13",
+                "push r12",
+                "push r11",
+                "push r10",
+                "push r9",
+                "push r8",
+                "push rdi",
+                "push rsi",
+                "push rbp",
+                "push rbx",
+                "push rdx",
+                "push rcx",
+                "push rax",
+                "pushfq", // ExecutionContext.rflags
+                "lea r8, [rip+0f]", // ExecutionContext.rip
+                "push r8", // ExecutionContext.rip
+                "sub rsp, 512",
+                "fxsave64[rsp]",
+                "xchg rsp,rsi", // recover the original rsp
+
                 // Set data segments to USER_DS
-                "mov es, dx",
-                "mov ds, dx",
+                "mov es, dx", // SS = crate::x86_64::USER_DS
+                "mov ds, dx", // SS = crate::
                 "mov fs, dx",
                 "mov gs, dx",
                 // Use iretq to switch to user mode
-                "push rdx", // SS
-                "push rax", // RSP
-                "mov ax, 2",
-                "push rax", // RFLAGS
-                "push rcx", // CS
-                "push rdi", // RIP
+                "push rdx", // SS = crate::x86_64::USER_DS
+                "push rax", // RSP = stack_range.end()
+                "mov eax, 2",
+                "push rax", // RFLAGS = 2
+                "push rcx", // CS = crate::x86_64::USER64_CS
+                "push rdi", // RIP = entry_point
                 // *(rip as *const InterruptContext) == {
                 //   rip: u64,
                 //   cs: u64,
@@ -252,13 +286,45 @@ impl<'a> LoadedElf<'a> {
                 // }
                 // far-jmp to app using ireq
                 "iretq",
-                // TODO(hikalium): check if it is a qemu's bug that the page fault becomes triple
-                // fault when the code is mapped but in a supervisor mode.
 
+                // **** exit from app ****
+                "0:",
+                // rdi (first arg in systemv abi) should be a pointer of ExecutionContext
+                // See crate::syscall::sys_exit
+                "mov rsp, rdi",
+                "mov di,ss",
+                "mov ds,di",
+                "mov es,di",
+                "mov fs,di",
+                "mov gs,di",
+                "fxrstor64[rsp]",
+                "add rsp, 512",
+                "pop rax", // drop ExecutionContext.rip
+                "pop rax", // drop ExecutionContext.rflags
+                "pop rax",
+                "pop rcx",
+                "pop rdx",
+                "pop rbx",
+                "pop rbp",
+                "pop rsi",
+                "pop rdi",
+                "pop r8",
+                "pop r9",
+                "pop r10",
+                "pop r11",
+                "pop r12",
+                "pop r13",
+                "pop r14",
+                "pop r15",
+                "pop rsp", // ExecutionContext.rsp
+                // restore the context
                 in("rax") stack_range.end(), // stack grows toward 0, so empty stack pointer will be the end addr
-                in("rdi") entry_point,
-                in("rdx") crate::x86_64::USER_DS,
                 in("rcx") crate::x86_64::USER64_CS,
+                in("rdx") crate::x86_64::USER_DS,
+                // rbx is used for LLVM internally
+                in("rsi") (os_ctx as *mut u8).add(size_of::<ExecutionContext>()),
+                // to easily load / store with pop / push
+                in("rdi") entry_point,
                 lateout("rax") retcode,
             );
             println!("returned from the code! retcode = {}", retcode);
@@ -533,79 +599,6 @@ impl<'a> Elf<'a> {
             }
         };
 
-        /*
-        if let Some(symbol_table) = self.sections.get(".symtab") {
-            let range = symbol_table.file_range()?;
-            let data = &self.file.data()[range];
-            for i in 0..(symbol_table.size as usize) / symbol_table.entry_size as usize {
-                let data = &data[i * symbol_table.entry_size as usize
-                    ..(i + 1) * symbol_table.entry_size as usize];
-                if data.len() < size_of::<SymbolTableEntry>() {
-                    println!("Invalid symbol table size");
-                    break;
-                }
-                // SAFETY: Following dereference is safe since the check above ensures its bounds
-                let s = unsafe { *(data.as_ptr() as *const SymbolTableEntry) };
-                println!(
-                    "symbol[{:3}]: {:?} {}",
-                    i,
-                    s,
-                    self.read_string(s.name_ofs as usize)
-                );
-            }
-        }
-        if let Some(relocation_table) = self.sections.get(".rela.dyn") {
-            let vaddr_range = relocation_table
-                .vaddr_range()?
-                .into_range_in(&app_vaddr_range)?;
-            for i in 0..(relocation_table.size as usize) / relocation_table.entry_size as usize {
-                let ofs = i * relocation_table.entry_size as usize;
-                let rel = if let Ok(e) =
-                    RelocationEntry::try_from(&region.as_mut_slice()[vaddr_range.clone()][ofs..])
-                {
-                    println!("symbol[{:3}]: {:?}", i, e,);
-                    Some((e.address, e.addend))
-                } else {
-                    None
-                };
-                if let Some(rel) = rel {
-                    let data = &mut region.as_mut_slice()[vaddr_range.clone()];
-                    let old = read_le_u64(data, rel.0 as usize)?;
-                    println!("old: {old:#018X}");
-                }
-            }
-        }
-        */
-        /*
-        if let Some(got) = self.sections.get(".got") {
-            let got_range = got.vaddr_range()?.into_range_in(&app_vaddr_range)?;
-            let mut got_values = {
-                let got_data = &mut region.as_mut_slice()[got_range.clone()];
-                let mut got_values = Vec::new();
-                for i in 0..(got.size as usize) / 8 {
-                    got_values.push(read_le_u64(got_data, i * 8)?);
-                }
-                got_values
-            };
-            got_values.iter_mut().enumerate().for_each(|(i, addr)| {
-                print!(" GOT[{:#04X}]: {:#18X}", i, addr);
-                for (i, s) in loaded_segments.iter().enumerate() {
-                    if s.vaddr_range().contains(*addr as usize) {
-                        print!(" in section #{i} -> ");
-                        *addr = (*addr)
-                            .wrapping_sub(app_vaddr_range.start() as u64)
-                            .wrapping_add(region.range().start() as u64);
-                        break;
-                    }
-                }
-                println!("GOT[{:#04X}]: {:#18X}", i, addr);
-            });
-            let got_data = &mut region.as_mut_slice()[got_range];
-            for (i, &addr) in got_values.iter().enumerate() {
-                println!("GOT[{:#04X}]: {:#18X}", i, addr);
-                write_le_u64(got_data, i * 8, addr)?;
-            }
-        }*/
         Ok(loaded)
     }
 }

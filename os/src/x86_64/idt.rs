@@ -14,11 +14,6 @@ use core::fmt;
 use core::mem::size_of;
 use core::pin::Pin;
 
-// System V AMD64 (sysv64) ABI:
-//   args: RDI, RSI, RDX, RCX, R8, R9
-//   callee-saved: RBX, RBP, R12, R13, R14, R15
-//   caller-saved: otherwise
-
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(Clone, Copy)]

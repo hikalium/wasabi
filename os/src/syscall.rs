@@ -1,9 +1,26 @@
 use crate::print;
 use crate::println;
+use crate::x86_64::ExecutionContext;
+use crate::x86_64::CONTEXT_OS;
 
 fn sys_exit(regs: &[u64; 15]) {
     println!("program exited with code {}", regs[1]);
-    todo!("Exit from an app is not yet implemented!");
+    {
+        let ctx = CONTEXT_OS.lock();
+        let ctx = *ctx;
+        println!("CONTEXT_OS: {:?}", ctx);
+        if ctx.is_null() {
+            panic!("context is invalid");
+        }
+        unsafe {
+            println!("{:?}", (*ctx).cpu);
+            // c.f. https://rust-lang.github.io/unsafe-code-guidelines/layout/function-pointers.html
+
+            let f: extern "sysv64" fn(*const ExecutionContext) -> ! =
+                core::mem::transmute((*ctx).cpu.rip);
+            f(ctx)
+        }
+    }
 }
 
 fn sys_print(regs: &[u64; 15]) {
