@@ -24,9 +24,9 @@ QEMU_ARGS=\
 		--no-reboot \
 		-d int,cpu_reset \
 		-D qemu_debug.log \
-		-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on \
 		${MORE_QEMU_FLAGS}
 
+#		-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on \
 #		-gdb tcp::3333 -S \
 # -device usb-host,hostbus=1,hostport=1 \
 # -device usb-host,hostbus=2,hostport=1.2.1 \
