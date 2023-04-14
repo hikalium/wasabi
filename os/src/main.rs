@@ -8,11 +8,14 @@
 
 extern crate alloc;
 
+use alloc::string::String;
 use core::pin::Pin;
 use core::str::FromStr;
 use os::boot_info::BootInfo;
+use os::debug_exit;
 use os::efi::EfiFileName;
 use os::elf::Elf;
+use os::error::Error;
 use os::error::Result;
 use os::executor::yield_execution;
 use os::executor::Executor;
@@ -151,14 +154,21 @@ fn main() -> Result<()> {
     for (i, f) in root_files.iter().enumerate() {
         println!("root_files[{}]: {}", i, f.name());
     }
-    let startup_app_file_name = EfiFileName::from_str("hello1")?;
-    let elf = root_files
-        .iter()
-        .find(|&e| e.name() == &startup_app_file_name);
-    if let Some(elf) = elf {
-        let elf = Elf::parse(elf)?;
-        let app = elf.load()?;
-        app.exec()?;
+    let init_app = EfiFileName::from_str("init.txt")?;
+    let init_app = root_files.iter().find(|&e| e.name() == &init_app);
+    if let Some(init_app) = init_app {
+        let init_app = String::from_utf8_lossy(init_app.data());
+        let init_app = init_app.trim();
+        let init_app = EfiFileName::from_str(init_app)?;
+        let elf = root_files.iter().find(|&e| e.name() == &init_app);
+        if let Some(elf) = elf {
+            let elf = Elf::parse(elf)?;
+            let app = elf.load()?;
+            app.exec()?;
+            debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
+        } else {
+            return Err(Error::Failed("Init app file not found"));
+        }
     }
 
     run_tasks()?;

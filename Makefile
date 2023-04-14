@@ -4,6 +4,7 @@ QEMU=qemu-system-x86_64
 PORT_MONITOR?=2345
 PORT_OFFSET_VNC?=5
 VNC_PASSWORD?=wasabi
+INIT?=hello1
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
@@ -70,6 +71,7 @@ dump_config:
 	@echo "Host target: $(HOST_TARGET)"
 
 test: font
+	make internal_run_app_test INIT="hello1"
 	cd os && cargo test --bin os
 	cd os && cargo test --lib
 	# For now, only OS tests are run to speed up the development
@@ -110,7 +112,7 @@ rustcheck :
 
 run :
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
-	cd os/examples && cargo run --release
+	export INIT="${INIT}" && cd os/examples && cargo run --release
 
 run_debug :
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
@@ -144,15 +146,34 @@ watch_serial:
 watch_qemu_monitor:
 	while ! telnet localhost ${PORT_MONITOR} ; do sleep 1 ; done ;
 
+.PHONY : generated/bin/os.efi
+generated/bin/os.efi:
+	cd os && cargo install --path . --root ../generated/
+
 install : run_deps generated/bin/os.efi
 	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
 	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " REPLY && \
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 
 internal_launch_qemu : run_deps
-	@echo Using ${PATH_TO_EFI} as a os...
+	@echo "Using ${PATH_TO_EFI} as a os, with INIT=$$INIT..."
+	printf "$$INIT" > mnt/init.txt
 	cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
 	$(QEMU) $(QEMU_ARGS)
+
+internal_run_app_test : run_deps generated/bin/os.efi
+	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
+	@echo Testing app $$INIT...
+	printf "$$INIT" > mnt/init.txt
+	$(QEMU) $(QEMU_ARGS) -display none ; \
+		RETCODE=$$? ; \
+		if [ $$RETCODE -eq 3 ]; then \
+			echo "\nPASS" ; \
+			exit 0 ; \
+		else \
+			echo "\nFAIL: QEMU returned $$RETCODE" ; \
+			exit 1 ; \
+		fi
 
 internal_run_os_test : run_deps
 	@echo Using ${LOADER_TEST_EFI} as a os...
