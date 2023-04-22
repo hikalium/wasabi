@@ -156,8 +156,7 @@ install : run_deps generated/bin/os.efi
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 
 internal_launch_qemu : run_deps
-	@echo "Using ${PATH_TO_EFI} as a os, with INIT=$$INIT..."
-	printf "$$INIT" > mnt/init.txt
+	@echo "Using ${PATH_TO_EFI}"
 	cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
 	$(QEMU) $(QEMU_ARGS)
 
