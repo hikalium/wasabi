@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::bitset::BitSet;
 use crate::error::Error;
 use crate::error::Result;
 use crate::memory::Mmio;
@@ -124,19 +125,35 @@ pub async fn attach_usb_device(
         }
     }
     println!("USB KBD init done!");
+    let mut prev_pressed_keys = BitSet::<32>::new();
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
             Ok(Some(trb)) => {
                 let transfer_trb_ptr = trb.data() as usize;
-                let report = unsafe {
-                    Mmio::<[u8; 8]>::from_raw(*(transfer_trb_ptr as *const usize) as *mut [u8; 8])
-                };
-                println!("recv: {:?}", report.as_ref());
+                let mut report = [0u8; 8];
+                report.copy_from_slice(
+                    unsafe {
+                        Mmio::<[u8; 8]>::from_raw(
+                            *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
+                        )
+                    }
+                    .as_ref(),
+                );
                 if let Some(ref mut tring) = ep_rings[trb.dci()] {
                     tring.dequeue_trb(transfer_trb_ptr)?;
                     xhci.notify_ep(slot, trb.dci());
                 }
+                println!("recv: {:?}", report);
+                let mut next_pressed_keys = BitSet::<32>::new();
+                for value in report.iter() {
+                    next_pressed_keys.insert(*value as usize).unwrap();
+                }
+                let change = prev_pressed_keys.symmetric_difference(&next_pressed_keys);
+                for id in change.iter() {
+                    println!("changed: {id}");
+                }
+                prev_pressed_keys = next_pressed_keys;
             }
             Ok(None) => {
                 // Timed out. Do nothing.

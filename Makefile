@@ -44,21 +44,19 @@ default: bin
 	bin \
 	commit \
 	dump_config \
-	font \
 	spellcheck \
 	run \
 	run_deps \
 	watch_serial \
 	# Keep this line blank
 
-bin: font
+bin: generated/font.rs
 	rustup component add rust-src
-	cd font && cargo build
 	cd os && cargo build
 
 CLIPPY_OPTIONS=-D warnings
 
-clippy: font
+clippy:
 	rustup component add clippy
 	cd font && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
@@ -70,7 +68,7 @@ clippy: font
 dump_config:
 	@echo "Host target: $(HOST_TARGET)"
 
-test: font
+test:
 	make internal_run_app_test INIT="hello1"
 	cd os && cargo test --bin os
 	cd os && cargo test --lib
@@ -94,9 +92,9 @@ commit :
 	git diff HEAD --color=always | less -R
 	git commit
 
-font:
+generated/font.rs: font/font.txt
 	mkdir -p generated
-	cargo run --bin font font/font.txt > generated/font.rs
+	cargo run --bin font font/font.txt > $@
 
 filecheck:
 	@! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore)$$' \
@@ -156,8 +154,7 @@ install : run_deps generated/bin/os.efi
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 
 internal_launch_qemu : run_deps
-	@echo "Using ${PATH_TO_EFI} as a os, with INIT=$$INIT..."
-	printf "$$INIT" > mnt/init.txt
+	@echo "Using ${PATH_TO_EFI}"
 	cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
 	$(QEMU) $(QEMU_ARGS)
 
