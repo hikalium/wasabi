@@ -5,6 +5,7 @@ members = [
     "os",
     "app/hello0",
     "app/hello1",
+    "app/uname",
     "app/loop",
     "app/noli",
 ]
