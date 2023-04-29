@@ -241,7 +241,7 @@ impl Network {
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
 
 pub async fn network_manager_thread() -> Result<()> {
-    println!("Network manager is started!");
+    println!("Network manager started running");
     let network = Network::take();
 
     loop {
@@ -254,7 +254,7 @@ pub async fn network_manager_thread() -> Result<()> {
             let interfaces = network.interfaces.lock();
             for iface in &*interfaces {
                 if let Some(iface) = iface.upgrade() {
-                    println!("{:?} {}", iface.ethernet_addr(), iface.name());
+                    println!("  {:?} {}", iface.ethernet_addr(), iface.name());
                     for _ in 0..30 {
                         let arp_req = Box::pin(ArpPacket::request(
                             iface.ethernet_addr(),

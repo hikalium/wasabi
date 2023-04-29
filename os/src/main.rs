@@ -170,9 +170,8 @@ fn run_app(name: &str) -> Result<i64> {
 }
 
 fn main() -> Result<()> {
+    println!("Booting WasabiOS...");
     init::init_graphical_terminal();
-    os::println!("Booting Wasabi OS!!!");
-    println!("Initial rsp = {:#018X}", x86_64::read_rsp());
     paint_wasabi_logo();
 
     unsafe { core::arch::asm!("cli") }
@@ -183,25 +182,15 @@ fn main() -> Result<()> {
     init_syscall();
 
     println!(
-        "Wasabi OS booted. efi_main = {:#018p}",
+        "Welcome to WasabiOS! efi_main = {:#018p}",
         efi_main as *const ()
     );
-    os::print::hexdump(unsafe {
-        core::slice::from_raw_parts(efi_main as *const () as *const u8, 16)
-    });
     println!("debug_info: write_cr3 = {:#018p}", write_cr3 as *const ());
-    os::print::hexdump(unsafe {
-        core::slice::from_raw_parts(write_cr3 as *const () as *const u8, 16)
-    });
 
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();
     let root_files: alloc::vec::Vec<&os::boot_info::File> =
         root_files.iter().filter_map(|e| e.as_ref()).collect();
-    println!("Number of root files: {}", root_files.len());
-    for (i, f) in root_files.iter().enumerate() {
-        println!("root_files[{}]: {}", i, f.name());
-    }
     let init_app = EfiFileName::from_str("init.txt")?;
     let init_app = root_files.iter().find(|&e| e.name() == &init_app);
     if let Some(init_app) = init_app {

@@ -91,10 +91,8 @@ pub async fn attach_usb_device(
     input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
     let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
     xhci.send_command(cmd).await?.completed()?;
-    println!("setting config");
     xhci.request_set_config(slot, ctrl_ep_ring, config_desc.config_value())
         .await?;
-    println!("setting interface");
     xhci.request_set_interface(
         slot,
         ctrl_ep_ring,
@@ -102,7 +100,6 @@ pub async fn attach_usb_device(
         interface_desc.alt_setting(),
     )
     .await?;
-    println!("setting protocol");
     xhci.request_set_protocol(
         slot,
         ctrl_ep_ring,
@@ -124,7 +121,7 @@ pub async fn attach_usb_device(
             None => {}
         }
     }
-    println!("USB KBD init done!");
+    println!("USB Keyboard initialized!");
     let mut prev_pressed_keys = BitSet::<32>::new();
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
@@ -144,14 +141,13 @@ pub async fn attach_usb_device(
                     tring.dequeue_trb(transfer_trb_ptr)?;
                     xhci.notify_ep(slot, trb.dci());
                 }
-                println!("recv: {:?}", report);
                 let mut next_pressed_keys = BitSet::<32>::new();
                 for value in report.iter() {
                     next_pressed_keys.insert(*value as usize).unwrap();
                 }
                 let change = prev_pressed_keys.symmetric_difference(&next_pressed_keys);
                 for id in change.iter() {
-                    println!("changed: {id}");
+                    println!("key changed: {id}");
                 }
                 prev_pressed_keys = next_pressed_keys;
             }

@@ -2,12 +2,10 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::memory_map_holder;
 use crate::memory_map_holder::MemoryMapHolder;
-use crate::println;
 use crate::util::size_in_pages_from_bytes;
 use core::fmt;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
-use core::mem::size_of_val;
 use core::mem::zeroed;
 use core::pin::Pin;
 use core::ptr::null;
@@ -547,10 +545,6 @@ impl EfiBootServicesTable {
     ) -> Result<Pin<&'static EfiLoadedImageProtocol>> {
         let mut loaded_image_protocol = None;
         let handle_protocol = &self.handle_protocol;
-        println!("handle_protocol: {:#p}", handle_protocol);
-        println!("image_handle: {:?}", image_handle);
-        println!("guid: {:?}", EFI_LOADED_IMAGE_PROTOCOL_GUID);
-        println!("size: {}", size_of_val(&loaded_image_protocol));
         let status = unsafe {
             (handle_protocol.handle_loaded_image_protocol)(
                 image_handle,
@@ -558,9 +552,7 @@ impl EfiBootServicesTable {
                 &mut loaded_image_protocol,
             )
         };
-        println!("status: {:?}", status);
         status.into_result()?;
-        println!("loaded_image_protocol: {:?}", loaded_image_protocol);
         loaded_image_protocol.ok_or(Error::Failed("Returned pointer was null"))
     }
 }

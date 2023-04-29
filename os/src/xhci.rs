@@ -525,7 +525,6 @@ impl Xhci {
         for ep_desc in ep_desc_list {
             match EndpointType::from(ep_desc) {
                 EndpointType::InterruptIn => {
-                    println!("InterruptIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
                     let tring = TransferRing::new(4096)?;
                     input_ctrl_ctx.add_context(ep_desc.dci())?;
                     input_context.set_ep_ctx(
@@ -542,7 +541,6 @@ impl Xhci {
                     ep_rings[ep_desc.dci()] = Some(tring);
                 }
                 EndpointType::BulkIn => {
-                    println!("BulkIn! dci={}: {:?}", ep_desc.dci(), ep_desc);
                     let tring = TransferRing::new(4096)?;
                     input_ctrl_ctx.add_context(ep_desc.dci())?;
                     input_context.set_ep_ctx(
@@ -559,7 +557,6 @@ impl Xhci {
                     ep_rings[ep_desc.dci()] = Some(tring);
                 }
                 EndpointType::BulkOut => {
-                    println!("BulkOut! dci={}: {:?}", ep_desc.dci(), ep_desc);
                     let tring = TransferRing::new(4096)?;
                     input_ctrl_ctx.add_context(ep_desc.dci())?;
                     input_context.set_ep_ctx(
@@ -584,7 +581,6 @@ impl Xhci {
         input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
         let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
-        println!("Endpoint setup done!");
         Ok(ep_rings)
     }
     async fn device_ready(
@@ -595,7 +591,6 @@ impl Xhci {
         ctrl_ep_ring: &mut CommandRing,
     ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
-        println!("Port speed: {:?}", portsc.port_speed());
         if portsc.port_speed() == UsbMode::FullSpeed {
             // For full speed device, we should read the first 8 bytes of the device descriptor to
             // get proper MaxPacketSize parameter.
@@ -603,10 +598,6 @@ impl Xhci {
                 .request_initial_device_descriptor(slot, ctrl_ep_ring)
                 .await?;
             let max_packet_size = device_descriptor.max_packet_size;
-            println!(
-                "Updating MaxPacketSize to {} for FullSpeed device",
-                max_packet_size
-            );
             let mut input_ctrl_ctx = InputControlContext::default();
             input_ctrl_ctx.add_context(0)?;
             input_ctrl_ctx.add_context(1)?;
@@ -620,24 +611,16 @@ impl Xhci {
             )?;
             let cmd = GenericTrbEntry::cmd_evaluate_context(input_context.as_ref(), slot);
             self.send_command(cmd).await?.completed()?;
-            println!("Evaluated");
-            //ctrl_ep_ring.reset();
         }
         let device_descriptor = self.request_device_descriptor(slot, ctrl_ep_ring).await?;
-        println!("{:?}", device_descriptor);
         let descriptors = self
             .request_config_descriptor_and_rest(slot, ctrl_ep_ring)
             .await?;
-        for d in &descriptors {
-            println!("{:?}", d);
-        }
         if let Ok(e) = self
             .request_string_descriptor_zero(slot, ctrl_ep_ring)
             .await
         {
-            println!("String Descriptor Zero: {:?}", e);
             let lang_id = e[1];
-            println!("Using lang_id {:#06X}", lang_id);
             if device_descriptor.manufacturer_idx != 0 {
                 let vendor_name = self
                     .request_string_descriptor(
@@ -648,8 +631,6 @@ impl Xhci {
                     )
                     .await?;
                 println!("Vendor: {}", vendor_name);
-            } else {
-                println!("Vendor is not available");
             }
             if device_descriptor.product_idx != 0 {
                 let product_name = self
@@ -661,8 +642,6 @@ impl Xhci {
                     )
                     .await?;
                 println!("Product: {}", product_name);
-            } else {
-                println!("Product is not available");
             }
             if device_descriptor.serial_idx != 0 {
                 let serial = self
@@ -674,12 +653,9 @@ impl Xhci {
                     )
                     .await?;
                 println!("Serial: {}", serial);
-            } else {
-                println!("Serial is not available");
             }
         }
         if device_descriptor.vendor_id == 2965 && device_descriptor.product_id == 6032 {
-            println!("AX88179!");
             ax88179::attach_usb_device(self, port, slot, input_context, ctrl_ep_ring, &descriptors)
                 .await?;
         } else if device_descriptor.vendor_id == 0x0bda
@@ -697,7 +673,6 @@ impl Xhci {
                 }
             }
             if boot_keyboard_interface.is_some() {
-                println!("!!!!! USB KBD Found!");
                 usb_hid_keyboard::attach_usb_device(
                     self,
                     port,
@@ -746,9 +721,7 @@ impl Xhci {
         )?;
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
-        println!("Sending AddressDeviceCommand...");
         self.send_command(cmd).await?.completed()?;
-        println!("Device Addressed!");
         self.device_ready(port, slot, &mut input_context, &mut ctrl_ep_ring)
             .await
     }
@@ -764,23 +737,14 @@ impl Xhci {
             .send_command(GenericTrbEntry::cmd_enable_slot())
             .await?
             .slot_id();
-        println!("USB Device Detected, port = {}, slot {}", port, slot);
         self.address_device(port, slot).await
     }
     async fn reset_port(&mut self, port: usize) -> Result<()> {
         let portsc = self.portsc.get(port)?;
-        println!(
-            "Resetting port: prev state: portsc[port = {}] = {:#10X} {:?} {:?}",
-            port,
-            portsc.value(),
-            portsc.state(),
-            portsc
-        );
         portsc.reset();
         Ok(())
     }
     async fn enable_port(&mut self, port: usize) -> Result<()> {
-        println!("Enabling Port {}...", port);
         // Reset port to enable the port (via Reset state)
         self.reset_port(port).await?;
         loop {

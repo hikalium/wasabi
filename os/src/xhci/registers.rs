@@ -378,7 +378,6 @@ impl OperationalRegisters {
         Ok(())
     }
     pub fn reset_xhc(&mut self) {
-        print!("[xHC] Resetting the controller...");
         self.clear_command_bits(Self::CMD_RUN_STOP);
         while self.status() & Self::STATUS_HC_HALTED == 0 {
             print!(".");
@@ -389,16 +388,14 @@ impl OperationalRegisters {
             print!(".");
             busy_loop_hint();
         }
-        println!("Done!");
     }
     pub fn start_xhc(&mut self) {
-        print!("[xHC] Starting the controller...");
         self.set_command_bits(Self::CMD_RUN_STOP);
         while self.status() & Self::STATUS_HC_HALTED != 0 {
             print!(".");
             busy_loop_hint();
         }
-        println!("Done!");
+        println!("xHC started");
     }
 }
 

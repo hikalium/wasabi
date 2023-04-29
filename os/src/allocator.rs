@@ -137,11 +137,9 @@ unsafe impl Sync for FirstFitAllocator {}
 
 unsafe impl GlobalAlloc for FirstFitAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        //println!("ALLOCATOR! {:#p} {} alloc", addr, layout.size());
         self.alloc_with_options(layout)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-        //println!("ALLOCATOR! {:#p} {} dealloc", ptr, layout.size());
         let mut region = Header::from_allocated_region(ptr);
         region.is_allocated = false;
         Box::leak(region);
@@ -169,15 +167,8 @@ impl FirstFitAllocator {
         }
     }
     pub fn init_with_mmap(&self, memory_map: &MemoryMapHolder) {
-        println!("Using mmap at {:#p}", memory_map);
-        println!("Loader Info:");
+        println!("Memory map:");
         for e in memory_map.iter() {
-            if e.memory_type != EfiMemoryType::LOADER_CODE
-                && e.memory_type != EfiMemoryType::LOADER_DATA
-            {
-                println!("{:?}", e);
-                continue;
-            }
             println!("{:?}", e);
         }
         println!("Available memory:");
