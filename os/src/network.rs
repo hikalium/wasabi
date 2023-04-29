@@ -213,7 +213,10 @@ const _: () = assert!(size_of::<DhcpPacket>() == 282);
 pub trait NetworkInterface {
     fn name(&self) -> &str;
     fn ethernet_addr(&self) -> EthernetAddr;
-    fn queue_packet(&self, packet: Box<[u8]>) -> Result<()>;
+    fn push_packet(&self, packet: Box<[u8]>) -> Result<()>;
+    fn pop_packet(&self) -> Result<Box<[u8]>> {
+        Err(Error::Failed("Not implemented yet"))
+    }
 }
 
 pub struct Network {
@@ -261,7 +264,7 @@ pub async fn network_manager_thread() -> Result<()> {
                             IpV4Addr::new([10, 0, 2, 15]),
                             IpV4Addr::new([10, 0, 2, 2]),
                         ));
-                        iface.queue_packet(arp_req.copy_into_slice())?;
+                        iface.push_packet(arp_req.copy_into_slice())?;
                     }
                 }
             }

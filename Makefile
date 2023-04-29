@@ -88,6 +88,7 @@ commit :
 	make # build
 	make test
 	./scripts/ensure_objs_are_not_under_git_control.sh
+	git add .
 	git diff HEAD --color=always | less -R
 	git commit
 

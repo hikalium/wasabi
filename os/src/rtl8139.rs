@@ -1,11 +1,11 @@
 extern crate alloc;
 
+use crate::error::Error;
 use crate::error::Result;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::executor::ROOT_EXECUTOR;
 use crate::mutex::Mutex;
-use crate::network::ArpPacket;
 use crate::network::EthernetAddr;
 use crate::network::Network;
 use crate::network::NetworkInterface;
@@ -24,7 +24,6 @@ use crate::x86_64::write_io_port_u8;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
-use core::mem::size_of;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 use core::slice;
@@ -54,6 +53,7 @@ impl PciDeviceDriver for Rtl8139Driver {
 const RTL8139_RXBUF_SIZE: usize = 9708;
 struct RxContext {
     buf: Pin<Box<[u8; RTL8139_RXBUF_SIZE]>>,
+    pending_packets: VecDeque<Box<[u8]>>,
     next_index: usize,
     packet_count: usize,
 }
@@ -61,6 +61,7 @@ impl RxContext {
     fn new() -> Self {
         Self {
             buf: Box::pin(unsafe { MaybeUninit::zeroed().assume_init() }),
+            pending_packets: VecDeque::new(),
             next_index: 0,
             packet_count: 0,
         }
@@ -133,10 +134,16 @@ impl Rtl8139 {
 
         Ok(d)
     }
-    fn queue_packet(&self, packet: Box<[u8]>) -> Result<()> {
+    fn push_packet(&self, packet: Box<[u8]>) -> Result<()> {
         let mut tx = self.tx.lock();
         tx.pending_packets.push_back(packet);
         Ok(())
+    }
+    fn pop_packet(&self) -> Result<Box<[u8]>> {
+        let mut rx = self.rx.lock();
+        rx.pending_packets
+            .pop_front()
+            .ok_or(Error::Failed("No packets"))
     }
     fn update_rx_buf_read_ptr(&self, read_index: u16) {
         // CAPR: Current Address of Packet Read
@@ -217,10 +224,9 @@ impl Rtl8139 {
             // bit 2
             // - 1 if physical address is received.
             let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
-            let arp = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
-            if packet_len >= size_of::<ArpPacket>() {
-                let _arp = ArpPacket::from_bytes(&arp[0..size_of::<ArpPacket>()]);
-            }
+            println!("Rtl8139: recv! packet_len = {packet_len}");
+            let packet = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
+            rx.pending_packets.push_back(packet.into());
 
             // Erase the packet for the next cycle
             unsafe { rx_desc_ptr.write_bytes(0, packet_len + 4) };
@@ -250,8 +256,11 @@ impl NetworkInterface for Rtl8139 {
     fn ethernet_addr(&self) -> EthernetAddr {
         self.eth_addr
     }
-    fn queue_packet(&self, packet: Box<[u8]>) -> Result<()> {
-        self.queue_packet(packet)
+    fn push_packet(&self, packet: Box<[u8]>) -> Result<()> {
+        self.push_packet(packet)
+    }
+    fn pop_packet(&self) -> Result<Box<[u8]>> {
+        self.pop_packet()
     }
 }
 
