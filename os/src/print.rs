@@ -14,7 +14,6 @@ pub struct GlobalPrinter {
 impl GlobalPrinter {
     pub fn set_text_area(&self, text_area: TextArea<VRAMBufferInfo>) {
         *self.text_area.borrow_mut() = Some(text_area);
-        println!("GlobalPrinter: TextArea is set. Printing to VRAM.");
     }
 }
 

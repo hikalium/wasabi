@@ -5,6 +5,8 @@ PORT_MONITOR?=2345
 PORT_OFFSET_VNC?=5
 VNC_PASSWORD?=wasabi
 INIT?=hello1
+RUNNER_NORMAL=$(shell readlink -f scripts/launch_qemu.sh)
+RUNNER_TEST=$(shell readlink -f scripts/test_runner.sh)
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
@@ -70,11 +72,8 @@ dump_config:
 .PHONY : test
 test:
 	make internal_run_app_test INIT="hello1"
-	cd os && cargo test --bin os
-	cd os && cargo test --lib
-	# For now, only OS tests are run to speed up the development
-	# cd os && cargo test -vvv
-	# cd font && cargo test
+	make run_os_test
+	make run_os_lib_test
 
 .PHONY : commit
 commit :
@@ -114,13 +113,23 @@ rustcheck :
 .PHONY : run
 run :
 	export INIT="${INIT}" && \
-		cargo \
-		  --config "target.'cfg(target_arch = \"x86_64\")'.runner = '$(shell readlink -f scripts/launch_qemu.sh)'" \
-		  --config "build.target = 'x86_64-unknown-uefi'" \
-		  --config "lib.target = 'x86_64-unknown-uefi'" \
-		  --config 'unstable.build-std = ["core", "compiler_builtins", "alloc", "panic_abort"]' \
-		  --config 'unstable.build-std-features = ["compiler-builtins-mem"]' \
-		run --bin os --release
+		cd os && cargo \
+		  --config "target.'cfg(target_os = \"uefi\")'.runner = '$(RUNNER_NORMAL)'" \
+		run --release
+
+.PHONY : run_os_test
+run_os_test :
+	export INIT="${INIT}" && \
+		cd os && cargo \
+		  --config "target.'cfg(target_os = \"uefi\")'.runner = '$(RUNNER_TEST)'" \
+		test --bin os
+
+.PHONY : run_os_lib_test
+run_os_lib_test :
+	export INIT="${INIT}" && \
+		cd os && cargo \
+		  --config "target.'cfg(target_os = \"uefi\")'.runner = '$(RUNNER_TEST)'" \
+		test --lib
 
 .PHONY : app
 app :

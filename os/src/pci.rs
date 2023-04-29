@@ -3,7 +3,6 @@ extern crate alloc;
 use crate::acpi::Mcfg;
 use crate::error::Error;
 use crate::error::Result;
-use crate::print::hexdump;
 use crate::println;
 use crate::rtl8139::Rtl8139Driver;
 use crate::x86_64::paging::with_current_page_table;
@@ -242,7 +241,6 @@ impl Pci {
         }
     }
     pub fn try_bar0_mem64(&self, bdf: BusDeviceFunction) -> Result<BarMem64> {
-        hexdump(unsafe { core::slice::from_raw_parts(self.ecm_base(bdf), 0x100) });
         let bar0 = self.read_register_u64(bdf, 0x10)?;
         if bar0 & 0b0111 == 0b0100
         /* Memory, 64bit, Non-prefetchable */
