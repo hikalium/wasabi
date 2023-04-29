@@ -21,8 +21,15 @@ Toy web browser and OS in Rust ("sabi" in Japanese) = WasabiOS
 make
 make run
 ```
+## Running app
+
+```
+make internal_run_app_test INIT="app_name_here"
+```
 
 ## Debugging tips
+
+
 
 ```
 make run MORE_QEMU_FLAGS="-d int,cpu_reset --no-reboot" 2>&1 | cargo run --bin=dbgutil

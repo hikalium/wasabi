@@ -129,6 +129,7 @@ app :
 	-rm -r generated/bin
 	make -C app/hello0
 	make -C app/hello1 install
+	make -C app/uname install
 	make -C app/loop
 
 run_deps : app

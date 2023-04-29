@@ -101,10 +101,11 @@ macro_rules! entry_point {
     // c.f. https://docs.rs/bootloader/0.6.4/bootloader/macro.entry_point.html
     ($path:path) => {
         #[no_mangle]
-        pub unsafe extern "C" fn entry() -> i64 {
+        pub unsafe extern "C" fn entry() -> ! {
             // validate the signature of the program entry point
             let f: fn() -> i64 = $path;
-            f()
+            let ret = f();
+            sys_exit(ret);
         }
     };
 }
