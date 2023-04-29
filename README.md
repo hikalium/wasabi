@@ -32,6 +32,7 @@ make internal_run_app_test INIT="app_name_here"
 
 
 ```
+make run MORE_QEMU_FLAGS='-nographic'
 make run MORE_QEMU_FLAGS="-d int,cpu_reset --no-reboot" 2>&1 | cargo run --bin=dbgutil
 make run MORE_QEMU_FLAGS="-d int,cpu_reset --no-reboot" 2>&1
 ```
