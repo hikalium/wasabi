@@ -36,47 +36,47 @@ QEMU_ARGS=\
 # -object filter-dump,id=f1,netdev=net0,file=dump_net0.dat \
 
 HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
+CLIPPY_OPTIONS=-D warnings
 
 default: bin
 
 .PHONY: \
 	app \
-	bin \
 	commit \
-	dump_config \
 	spellcheck \
 	run \
 	run_deps \
 	watch_serial \
 	# Keep this line blank
 
+.PHONY : bin
 bin: generated/font.rs
 	rustup component add rust-src
 	cd os && cargo build
 
-CLIPPY_OPTIONS=-D warnings
-
+.PHONY : clippy
 clippy:
 	rustup component add clippy
 	cd font && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd dbgutil && cargo clippy
-	# Following ones will run clippy on examples as well, but disabled for now
 	# cd font && cargo clippy --all-features --all-targets -- -D warnings
 	# cd os && cargo clippy --all-features --all-targets -- -D warnings
 
+.PHONY : dump_config
 dump_config:
 	@echo "Host target: $(HOST_TARGET)"
 
+.PHONY : test
 test:
 	make internal_run_app_test INIT="hello1"
 	cd os && cargo test --bin os
 	cd os && cargo test --lib
 	# For now, only OS tests are run to speed up the development
 	# cd os && cargo test -vvv
-	# cd os && cargo test --examples
 	# cd font && cargo test
 
+.PHONY : commit
 commit :
 	git add .
 	make filecheck
@@ -96,20 +96,23 @@ generated/font.rs: font/font.txt
 	mkdir -p generated
 	cargo run --bin font font/font.txt > $@
 
+.PHONY : filecheck
 filecheck:
 	@! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore)$$' \
 		|| ! echo "!!! Unknown file type is being added! Do you really want to commit the file above? (if so, just modify filecheck recipe)"
 
+.PHONY : spellcheck
 spellcheck :
 	@scripts/spellcheck.sh recieve receive
 	@scripts/spellcheck.sh faild failed
 	@scripts/spellcheck.sh mappng mapping
 
+.PHONY : rustcheck
 rustcheck :
 	@scripts/rustcheck.sh
 
+.PHONY : run
 run :
-	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
 	export INIT="${INIT}" && \
 		cargo \
 		  --config "target.'cfg(target_arch = \"x86_64\")'.runner = '$(shell readlink -f scripts/launch_qemu.sh)'" \
@@ -119,9 +122,7 @@ run :
 		  --config 'unstable.build-std-features = ["compiler-builtins-mem"]' \
 		run --bin os --release
 
-pxe :
-	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
-
+.PHONY : app
 app :
 	-rm -r generated/bin
 	make -C app/hello0
@@ -129,6 +130,7 @@ app :
 	make -C app/uname install
 	make -C app/loop
 
+.PHONY : run_deps
 run_deps : app
 	-rm -rf mnt
 	mkdir -p mnt/
@@ -136,26 +138,30 @@ run_deps : app
 	cp README.md mnt/
 	cp generated/bin/* mnt/
 
+.PHONY : watch_serial
 watch_serial:
 	while ! telnet localhost 1235 ; do sleep 1 ; done ;
 
+.PHONY : watch_qemu_monitor
 watch_qemu_monitor:
 	while ! telnet localhost ${PORT_MONITOR} ; do sleep 1 ; done ;
 
-.PHONY : generated/bin/os.efi
 generated/bin/os.efi:
 	cd os && cargo install --path . --root ../generated/
 
+.PHONY : install
 install : run_deps generated/bin/os.efi
 	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
 	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " REPLY && \
 		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
 
+.PHONY : internal_launch_qemu
 internal_launch_qemu : run_deps
 	@echo "Using ${PATH_TO_EFI}"
 	cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
 	$(QEMU) $(QEMU_ARGS)
 
+.PHONY : internal_run_app_test
 internal_run_app_test : run_deps generated/bin/os.efi
 	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
 	@echo Testing app $$INIT...
@@ -170,6 +176,7 @@ internal_run_app_test : run_deps generated/bin/os.efi
 			exit 1 ; \
 		fi
 
+.PHONY : internal_run_os_test
 internal_run_os_test : run_deps
 	@echo Using ${LOADER_TEST_EFI} as a os...
 	cp ${LOADER_TEST_EFI} mnt/EFI/BOOT/BOOTX64.EFI
@@ -183,31 +190,33 @@ internal_run_os_test : run_deps
 			exit 1 ; \
 		fi
 
+.PHONY : act
 act:
 	act -P hikalium/wasabi-builder:latest=hikalium/wasabi-builder:latest
 
+.PHONY : symbols
 symbols:
-	cargo run --bin=dbgutil > symbols.txt < /dev/null
+	cargo run --bin=dbgutil -- symbol | tee symbols.txt
 
+.PHONY : objdump
 objdump:
 	cargo install cargo-binutils
 	rustup component add llvm-tools-preview
 	cd os && cargo-objdump -- -d > ../objdump.txt
 	echo "Saved objdump as objdump.txt"
 
-objdump_hello:
-	`brew --prefix binutils`/bin/objdump -d -C mnt/hello | tee objdump_hello.txt
-
+.PHONY : crash
 crash:
 	cargo run --bin=dbgutil crash \
 		--qemu-debug-log $$(readlink -f qemu_debug.log) \
 		--serial-log $$(readlink -f com2.log)
 
-NOVNC_VERSION=1.4.0
-
-generated/noVNC-% : 
+generated/noVNC-% :
 	wget -O generated/novnc.tar.gz https://github.com/novnc/noVNC/archive/refs/tags/v$*.tar.gz
 	cd generated && tar -xvf novnc.tar.gz
+
+NOVNC_VERSION=1.4.0
+.PHONY : vnc
 vnc: generated/noVNC-$(NOVNC_VERSION)
 	( echo 'change vnc password $(VNC_PASSWORD)' | while ! nc localhost $(PORT_MONITOR) ; do sleep 1 ; done ) &
 	generated/noVNC-$(NOVNC_VERSION)/utils/novnc_proxy --vnc localhost:$$((5900+${PORT_OFFSET_VNC}))
