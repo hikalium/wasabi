@@ -13,18 +13,18 @@ QEMU_ARGS=\
 		-device usb-kbd \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=net1 -device rtl8139,netdev=net1 \
-		-object filter-dump,id=f2,netdev=net1,file=dump_net1.dat \
+		-object filter-dump,id=f2,netdev=net1,file=log/dump_net1.pcap \
 		-m 1024M \
 		-drive format=raw,file=fat:rw:mnt \
-		-chardev file,id=char_com1,mux=on,path=com1.log \
-		-chardev stdio,id=char_com2,mux=on,logfile=com2.log \
+		-chardev file,id=char_com1,mux=on,path=log/com1.txt \
+		-chardev stdio,id=char_com2,mux=on,logfile=log/com2.txt \
 		-serial chardev:char_com1 \
 		-serial chardev:char_com2 \
 		-rtc base=localtime \
 		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
 		--no-reboot \
 		-d int,cpu_reset \
-		-D qemu_debug.log \
+		-D log/qemu_debug.txt \
 		${MORE_QEMU_FLAGS}
 
 #		-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on \
@@ -33,7 +33,7 @@ QEMU_ARGS=\
 # -device usb-host,hostbus=2,hostport=1.2.1 \
 # -device usb-mouse \
 # -netdev user,id=net0 -device usb-net,netdev=net0 \
-# -object filter-dump,id=f1,netdev=net0,file=dump_net0.dat \
+# -object filter-dump,id=f1,netdev=net0,file=log/dump_net0.dat \
 
 HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
 CLIPPY_OPTIONS=-D warnings
@@ -98,7 +98,7 @@ generated/font.rs: font/font.txt
 
 .PHONY : filecheck
 filecheck:
-	@! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore)$$' \
+	@! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore|\.gitkeep)$$' \
 		|| ! echo "!!! Unknown file type is being added! Do you really want to commit the file above? (if so, just modify filecheck recipe)"
 
 .PHONY : spellcheck
@@ -208,8 +208,8 @@ objdump:
 .PHONY : crash
 crash:
 	cargo run --bin=dbgutil crash \
-		--qemu-debug-log $$(readlink -f qemu_debug.log) \
-		--serial-log $$(readlink -f com2.log)
+		--qemu-debug-log $$(readlink -f log/qemu_debug.txt) \
+		--serial-log $$(readlink -f log/com2.txt)
 
 generated/noVNC-% :
 	wget -O generated/novnc.tar.gz https://github.com/novnc/noVNC/archive/refs/tags/v$*.tar.gz

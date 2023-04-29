@@ -27,3 +27,6 @@ generated/
 
 # binary files
 *.bin
+
+# log files
+log/
