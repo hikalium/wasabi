@@ -87,6 +87,7 @@ const _: () = assert!(size_of::<FpuContext>() == 512);
 #[derive(Clone, Debug, Default)]
 pub struct CpuContext {
     pub rip: u64,
+    pub rflags: u64,
     pub rax: u64,
     pub rcx: u64,
     pub rdx: u64,
@@ -102,7 +103,6 @@ pub struct CpuContext {
     pub r13: u64,
     pub r14: u64,
     pub r15: u64,
-    pub rflags: u64,
     pub rsp: u64, // rsp should be here to make load / store easy
 }
 const _: () = assert!(size_of::<CpuContext>() == 8 * 16 + 8 * 2);

@@ -1,4 +1,5 @@
-use crate::x86_64;
+use crate::x86_64::read_io_port_u8;
+use crate::x86_64::write_io_port_u8;
 use core::arch::asm;
 use core::convert::TryInto;
 use core::fmt;
@@ -24,28 +25,35 @@ pub const IO_ADDR_COM: [u16; 8] = [
 ];
 
 pub fn com_initialize(base_io_addr: u16) {
-    x86_64::write_io_port_u8(base_io_addr + 1, 0x00); // Disable all interrupts
-    x86_64::write_io_port_u8(base_io_addr + 3, 0x80); // Enable DLAB (set baud rate divisor)
+    write_io_port_u8(base_io_addr + 1, 0x00); // Disable all interrupts
+    write_io_port_u8(base_io_addr + 3, 0x80); // Enable DLAB (set baud rate divisor)
     const BAUD_DIVISOR: u16 = 0x0001; // baud rate = (115200 / BAUD_DIVISOR)
-    x86_64::write_io_port_u8(base_io_addr, (BAUD_DIVISOR & 0xff).try_into().unwrap());
-    x86_64::write_io_port_u8(base_io_addr + 1, (BAUD_DIVISOR >> 8).try_into().unwrap());
-    x86_64::write_io_port_u8(base_io_addr + 3, 0x03); // 8 bits, no parity, one stop bit
-    x86_64::write_io_port_u8(base_io_addr + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
-    x86_64::write_io_port_u8(base_io_addr + 4, 0x0B); // IRQs enabled, RTS/DSR set
+    write_io_port_u8(base_io_addr, (BAUD_DIVISOR & 0xff).try_into().unwrap());
+    write_io_port_u8(base_io_addr + 1, (BAUD_DIVISOR >> 8).try_into().unwrap());
+    write_io_port_u8(base_io_addr + 3, 0x03); // 8 bits, no parity, one stop bit
+    write_io_port_u8(base_io_addr + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
+    write_io_port_u8(base_io_addr + 4, 0x0B); // IRQs enabled, RTS/DSR set
 }
 
-pub struct SerialConsoleWriter {
+pub struct SerialPort {
     base_io_addr: u16,
 }
-impl SerialConsoleWriter {
+impl SerialPort {
     pub fn new(base_io_addr: u16) -> Self {
         Self { base_io_addr }
     }
     pub fn send_char(&self, c: char) {
-        while (x86_64::read_io_port_u8(self.base_io_addr + 5) & 0x20) == 0 {
+        while (read_io_port_u8(self.base_io_addr + 5) & 0x20) == 0 {
             unsafe { asm!("pause") }
         }
-        x86_64::write_io_port_u8(self.base_io_addr, c as u8)
+        write_io_port_u8(self.base_io_addr, c as u8)
+    }
+    pub fn try_read(&self) -> Option<u8> {
+        if read_io_port_u8(self.base_io_addr + 5) & 0x01 == 0 {
+            None
+        } else {
+            Some(read_io_port_u8(self.base_io_addr))
+        }
     }
 
     pub fn send_str(&self, s: &str) {
@@ -56,14 +64,14 @@ impl SerialConsoleWriter {
         }
     }
 }
-impl fmt::Write for SerialConsoleWriter {
+impl fmt::Write for SerialPort {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        let serial = SerialConsoleWriter::default();
+        let serial = Self::default();
         serial.send_str(s);
         Ok(())
     }
 }
-impl Default for SerialConsoleWriter {
+impl Default for SerialPort {
     fn default() -> Self {
         Self::new(IO_ADDR_COM2)
     }

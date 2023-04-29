@@ -220,7 +220,7 @@ impl<'a> LoadedElf<'a> {
         }
         Err(Error::Failed("vaddr not found"))
     }
-    pub fn exec(self) -> Result<usize> {
+    pub fn exec(self) -> Result<i64> {
         println!("LoadedElf::exec(file: {})", self.elf.file.name());
         let stack_size = 8 * 1024;
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
@@ -236,8 +236,8 @@ impl<'a> LoadedElf<'a> {
             *ctx = os_ctx;
             println!("CONTEXT_OS: {:?}", *ctx);
         }
+        let retcode: i64;
         unsafe {
-            let retcode: i64;
             asm!(
                 // Save current execution state in os_ctx
                 // General registers
@@ -329,7 +329,7 @@ impl<'a> LoadedElf<'a> {
             );
             println!("returned from the code! retcode = {}", retcode);
         }
-        Ok(0)
+        Ok(retcode)
     }
     pub fn slice_of_vaddr_range(&self, range_on_vaddr: AddressRange) -> Result<&[u8]> {
         let range = range_on_vaddr.into_range_in(&self.app_vaddr_range)?;

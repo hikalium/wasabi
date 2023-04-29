@@ -26,7 +26,9 @@ use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
 use os::init;
 use os::network::network_manager_thread;
+use os::print;
 use os::println;
+use os::serial::SerialPort;
 use os::x86_64;
 use os::x86_64::init_syscall;
 use os::x86_64::paging::write_cr3;
@@ -109,16 +111,62 @@ fn run_tasks() -> Result<()> {
             yield_execution().await;
         }
     };
+    let serial_task = async {
+        let sp = SerialPort::default();
+        let mut s = String::new();
+        loop {
+            if let Some(c) = sp.try_read() {
+                if let Some(c) = char::from_u32(c as u32) {
+                    if c == '\r' || c == '\n' {
+                        println!("\n{s}");
+                        let result = run_app(&s);
+                        println!("{result:?}");
+                        s.clear();
+                    }
+                    match c {
+                        'a'..='z' | 'A'..='Z' | '0'..='9' => {
+                            print!("{c}");
+                            s.push(c);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            TimeoutFuture::new_ms(20).await;
+            yield_execution().await;
+        }
+    };
     // This is safe since GlobalAllocator is already initialized.
     {
         let mut executor = ROOT_EXECUTOR.lock();
         executor.spawn(Task::new(task0));
         executor.spawn(Task::new(task1));
+        executor.spawn(Task::new(serial_task));
         executor.spawn(Task::new(async { network_manager_thread().await }));
     }
     init::init_pci();
     Executor::run(&ROOT_EXECUTOR);
     Ok(())
+}
+
+fn run_app(name: &str) -> Result<i64> {
+    let boot_info = BootInfo::take();
+    let root_files = boot_info.root_files();
+    let root_files: alloc::vec::Vec<&os::boot_info::File> =
+        root_files.iter().filter_map(|e| e.as_ref()).collect();
+    let name = EfiFileName::from_str(name)?;
+    let elf = root_files.iter().find(|&e| e.name() == &name);
+    if let Some(elf) = elf {
+        let elf = Elf::parse(elf)?;
+        let app = elf.load()?;
+        let result = app.exec()?;
+        #[cfg(test)]
+        debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
+        #[cfg(not(test))]
+        Ok(result)
+    } else {
+        Err(Error::Failed("Init app file not found"))
+    }
 }
 
 fn main() -> Result<()> {

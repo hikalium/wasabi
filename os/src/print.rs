@@ -1,5 +1,5 @@
 use crate::println;
-use crate::serial::SerialConsoleWriter;
+use crate::serial::SerialPort;
 use crate::text_area::TextArea;
 use crate::vram::VRAMBufferInfo;
 use core::cell::RefCell;
@@ -44,7 +44,7 @@ macro_rules! println {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    let mut writer = SerialConsoleWriter::default();
+    let mut writer = SerialPort::default();
     fmt::write(&mut writer, args).unwrap();
     match &mut *GLOBAL_PRINTER.text_area.borrow_mut() {
         Some(w) => fmt::write(w, args).unwrap(),

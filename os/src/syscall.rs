@@ -15,6 +15,7 @@ fn sys_exit(regs: &[u64; 15]) {
         unsafe {
             println!("{:?}", (*ctx).cpu);
             // c.f. https://rust-lang.github.io/unsafe-code-guidelines/layout/function-pointers.html
+            (*ctx).cpu.rax = regs[1];
 
             let f: extern "sysv64" fn(*const ExecutionContext) -> ! =
                 core::mem::transmute((*ctx).cpu.rip);
