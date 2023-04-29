@@ -42,7 +42,7 @@ pub const MSR_FMASK: u32 = 0xC0000084;
 pub const MSR_FS_BASE: u32 = 0xC0000100;
 pub const MSR_KERNEL_GS_BASE: u32 = 0xC0000102;
 
-pub static CONTEXT_OS: Mutex<*mut ExecutionContext> = Mutex::new(null_mut());
+pub static CONTEXT_OS: Mutex<*mut ExecutionContext> = Mutex::new(null_mut(), "CONTEXT_OS");
 
 #[repr(C)]
 #[derive(Clone, Debug)]

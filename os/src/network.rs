@@ -223,7 +223,7 @@ pub struct Network {
 impl Network {
     fn new() -> Self {
         Self {
-            interfaces: Mutex::new(Vec::new()),
+            interfaces: Mutex::new(Vec::new(), "Network"),
             interface_has_added: AtomicBool::new(false),
         }
     }
@@ -238,7 +238,7 @@ impl Network {
         self.interface_has_added.store(true, Ordering::SeqCst);
     }
 }
-static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None);
+static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
 
 pub async fn network_manager_thread() -> Result<()> {
     println!("Network manager is started!");

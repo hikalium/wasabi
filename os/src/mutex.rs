@@ -53,15 +53,17 @@ impl<'a, T> Drop for MutexGuard<'a, T> {
 pub struct Mutex<T> {
     data: SyncUnsafeCell<T>,
     is_taken: AtomicBool,
+    name: &'static str,
 }
 impl<T: Sized> Mutex<T> {
-    pub const fn new(data: T) -> Self {
+    pub const fn new(data: T, name: &'static str) -> Self {
         Self {
             data: SyncUnsafeCell::new(data),
             is_taken: AtomicBool::new(false),
+            name,
         }
     }
-    pub fn try_lock(&self) -> Result<MutexGuard<T>> {
+    fn try_lock(&self) -> Result<MutexGuard<T>> {
         if self
             .is_taken
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
@@ -73,7 +75,8 @@ impl<T: Sized> Mutex<T> {
         }
     }
     pub fn lock(&self) -> MutexGuard<T> {
-        self.try_lock().expect("unimplemented!")
+        self.try_lock()
+            .unwrap_or_else(|_| panic!("lock failed! name = {}", self.name))
     }
     pub fn under_locked<R: Sized>(&self, f: &dyn Fn(&mut T) -> Result<R>) -> Result<R> {
         let mut locked = self.lock();

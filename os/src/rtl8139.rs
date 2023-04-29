@@ -118,8 +118,8 @@ impl Rtl8139 {
             _bdf: bdf,
             io_base,
             eth_addr,
-            rx: Mutex::new(RxContext::new()),
-            tx: Mutex::new(TxContext::new()),
+            rx: Mutex::new(RxContext::new(), "rtl8139::RxContext"),
+            tx: Mutex::new(TxContext::new(), "rtl8139::TxContext"),
         };
         let rx_buf_ptr = {
             let rx = d.rx.lock();

@@ -63,7 +63,7 @@ fn dummy_raw_waker() -> RawWaker {
 fn dummy_waker() -> Waker {
     unsafe { Waker::from_raw(dummy_raw_waker()) }
 }
-pub static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default());
+pub static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default(), "ROOT_EXECUTOR");
 
 pub struct Executor {
     task_queue: Option<VecDeque<Task>>,

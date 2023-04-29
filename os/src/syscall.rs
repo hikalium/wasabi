@@ -6,17 +6,16 @@ use crate::x86_64::CONTEXT_OS;
 fn sys_exit(regs: &[u64; 15]) {
     println!("program exited with code {}", regs[1]);
     {
-        let ctx = CONTEXT_OS.lock();
-        let ctx = *ctx;
-        println!("CONTEXT_OS: {:?}", ctx);
+        let ctx = {
+            let ctx = CONTEXT_OS.lock();
+            *ctx
+        };
         if ctx.is_null() {
             panic!("context is invalid");
         }
         unsafe {
-            println!("{:?}", (*ctx).cpu);
-            // c.f. https://rust-lang.github.io/unsafe-code-guidelines/layout/function-pointers.html
             (*ctx).cpu.rax = regs[1];
-
+            // c.f. https://rust-lang.github.io/unsafe-code-guidelines/layout/function-pointers.html
             let f: extern "sysv64" fn(*const ExecutionContext) -> ! =
                 core::mem::transmute((*ctx).cpu.rip);
             f(ctx)

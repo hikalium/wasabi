@@ -317,13 +317,11 @@ impl<'a> LoadedElf<'a> {
                 "pop r14",
                 "pop r15",
                 "pop rsp", // ExecutionContext.rsp
-                // restore the context
                 in("rax") stack_range.end(), // stack grows toward 0, so empty stack pointer will be the end addr
                 in("rcx") crate::x86_64::USER64_CS,
                 in("rdx") crate::x86_64::USER_DS,
                 // rbx is used for LLVM internally
                 in("rsi") (os_ctx as *mut u8).add(size_of::<ExecutionContext>()),
-                // to easily load / store with pop / push
                 in("rdi") entry_point,
                 lateout("rax") retcode,
             );
