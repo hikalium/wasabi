@@ -110,17 +110,14 @@ rustcheck :
 
 run :
 	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
-	export INIT="${INIT}" && cd os/examples && cargo run --release
-
-run_debug :
-	# cd into os/examples to use internal_launch_qemu recipe instead of internal_run_os_test in scripts/launch_qemu.sh
-	cd os/examples && cargo run
-
-run_example :
-	cd os/examples && cargo run --example ch2_show_mmap
-
-run_dbgutil :
-	make run MORE_QEMU_FLAGS="-d int,cpu_reset --no-reboot" 2>&1 | cargo run --bin=dbgutil
+	export INIT="${INIT}" && \
+		cargo \
+		  --config "target.'cfg(target_arch = \"x86_64\")'.runner = '$(shell readlink -f scripts/launch_qemu.sh)'" \
+		  --config "build.target = 'x86_64-unknown-uefi'" \
+		  --config "lib.target = 'x86_64-unknown-uefi'" \
+		  --config 'unstable.build-std = ["core", "compiler_builtins", "alloc", "panic_abort"]' \
+		  --config 'unstable.build-std-features = ["compiler-builtins-mem"]' \
+		run --bin os --release
 
 pxe :
 	scp mnt/EFI/BOOT/BOOTX64.EFI deneb:/var/tftp/wasabios
