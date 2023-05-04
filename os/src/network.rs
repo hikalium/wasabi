@@ -147,12 +147,13 @@ impl Debug for ArpPacket {
 unsafe impl Sliceable for ArpPacket {}
 
 #[allow(unused)]
-mod ipv4_protocol {
-    pub const ICMP: u8 = 1;
-    pub const TCP: u8 = 6;
-    pub const UDP: u8 = 17;
-}
+const IP_V4_PROTOCOL_ICMP: u8 = 1;
+#[allow(unused)]
+const IP_V4_PROTOCOL_TCP: u8 = 6;
+#[allow(unused)]
+const IP_V4_PROTOCOL_UDP: u8 = 17;
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 #[allow(unused)]
 struct IpV4Packet {
@@ -164,11 +165,30 @@ struct IpV4Packet {
     flags: u16,
     ttl: u8,
     protocol: u8,
-    csum: InternetChecksum, // for this header
-    src_ip: IpV4Addr,
-    dst_ip: IpV4Addr,
+    csum: InternetChecksum,
+    src: IpV4Addr,
+    dst: IpV4Addr,
 }
 
+#[derive(Copy, Clone)]
+#[repr(packed)]
+#[allow(unused)]
+struct IpV4UdpPacket {
+    ip: IpV4Packet,
+    src_port: [u8; 2], // optional
+    dst_port: [u8; 2],
+    length: [u8; 2],
+    csum: InternetChecksum,
+}
+
+#[allow(unused)]
+mod ipv4_protocol {
+    pub const ICMP: u8 = 1;
+    pub const TCP: u8 = 6;
+    pub const UDP: u8 = 17;
+}
+
+#[derive(Copy, Clone)]
 #[repr(packed)]
 #[allow(unused)]
 struct InternetChecksum {
@@ -189,7 +209,7 @@ struct UdpPacket {
 #[repr(packed)]
 #[allow(unused)]
 struct DhcpPacket {
-    udp_header: UdpPacket,
+    udp_header: IpV4UdpPacket,
     op: u8,
     htype: u8,
     hlen: u8,
