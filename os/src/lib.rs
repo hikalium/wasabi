@@ -19,6 +19,9 @@
 #![feature(inherent_associated_types)]
 #![feature(asm_const)]
 #![feature(alloc_layout_extra)]
+#![feature(bigint_helper_methods)]
+#![feature(array_chunks)]
+#![feature(iter_array_chunks)]
 
 pub mod acpi;
 pub mod allocator;

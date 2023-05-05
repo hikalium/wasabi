@@ -20,6 +20,9 @@ pub const PAGE_SIZE: usize = 1 << PAGE_OFFSET_BITS;
 /// mutually between a byte sequence of the same size, which means that no ownership
 /// nor memory references are involved.
 pub unsafe trait Sliceable: Sized + Copy + Clone {
+    fn as_slice(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self as *const Self as *const u8, size_of::<Self>()) }
+    }
     fn copy_into_slice(&self) -> Box<[u8]> {
         let mut values = Box::<[u8]>::new_uninit_slice(size_of::<Self>());
         unsafe {

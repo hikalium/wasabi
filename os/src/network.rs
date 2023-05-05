@@ -14,11 +14,13 @@ use alloc::rc::Weak;
 use alloc::vec::Vec;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
+use core::mem::MaybeUninit;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 #[repr(packed)]
-#[derive(Clone, Copy)]
+#[allow(unused)]
+#[derive(Copy, Clone, Default)]
 pub struct EthernetAddr {
     mac: [u8; 6],
 }
@@ -47,39 +49,58 @@ impl Debug for EthernetAddr {
     }
 }
 
-#[derive(Copy, Clone)]
-#[repr(packed)]
-pub struct IpV4Addr {
-    ip: [u8; 4],
-}
+#[repr(transparent)]
+#[allow(unused)]
+#[derive(Copy, Clone, Default)]
+pub struct IpV4Addr([u8; 4]);
 impl IpV4Addr {
     pub fn new(ip: [u8; 4]) -> Self {
-        Self { ip }
+        Self(ip)
     }
 }
 impl Debug for IpV4Addr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}.{}.{}.{}",
-            self.ip[0], self.ip[1], self.ip[2], self.ip[3],
-        )
+        write!(f, "{}.{}.{}.{}", self.0[0], self.0[1], self.0[2], self.0[3],)
+    }
+}
+impl IpV4Addr {
+    const fn broardcast() -> Self {
+        Self([0xff, 0xff, 0xff, 0xff])
     }
 }
 
 #[repr(packed)]
 #[allow(unused)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+pub struct EthernetType {
+    value: [u8; 2],
+}
+impl EthernetType {
+    const fn ip_v4() -> Self {
+        Self {
+            value: [0x08, 0x00],
+        }
+    }
+    const fn arp() -> Self {
+        Self {
+            value: [0x08, 0x06],
+        }
+    }
+}
+
+#[repr(packed)]
+#[allow(unused)]
+#[derive(Copy, Clone, Default)]
 pub struct EthernetHeader {
-    dst_eth: EthernetAddr,
-    src_eth: EthernetAddr,
-    eth_type: [u8; 2],
+    dst: EthernetAddr,
+    src: EthernetAddr,
+    eth_type: EthernetType,
 }
 const _: () = assert!(size_of::<EthernetHeader>() == 14);
 
-#[derive(Copy, Clone)]
 #[repr(packed)]
 #[allow(unused)]
+#[derive(Copy, Clone, Default)]
 pub struct ArpPacket {
     eth_header: EthernetHeader,
     hw_type: [u8; 2],
@@ -109,9 +130,9 @@ impl ArpPacket {
     pub fn request(src_eth: EthernetAddr, src_ip: IpV4Addr, dst_ip: IpV4Addr) -> Self {
         Self {
             eth_header: EthernetHeader {
-                dst_eth: src_eth,
-                src_eth: EthernetAddr::broardcast(),
-                eth_type: [0x08, 0x06],
+                dst: src_eth,
+                src: EthernetAddr::broardcast(),
+                eth_type: EthernetType::arp(),
             },
             hw_type: [0x00, 0x01],
             proto_type: [0x08, 0x00],
@@ -146,70 +167,140 @@ impl Debug for ArpPacket {
 }
 unsafe impl Sliceable for ArpPacket {}
 
-#[allow(unused)]
-const IP_V4_PROTOCOL_ICMP: u8 = 1;
-#[allow(unused)]
-const IP_V4_PROTOCOL_TCP: u8 = 6;
-#[allow(unused)]
-const IP_V4_PROTOCOL_UDP: u8 = 17;
+#[repr(transparent)]
+#[derive(Copy, Clone, Default)]
+struct IpV4Protocol(u8);
+impl IpV4Protocol {
+    fn icmp() -> Self {
+        Self(1)
+    }
+    fn tcp() -> Self {
+        Self(6)
+    }
+    fn udp() -> Self {
+        Self(17)
+    }
+}
 
-#[derive(Copy, Clone)]
 #[repr(packed)]
 #[allow(unused)]
+#[derive(Copy, Clone, Default)]
 struct IpV4Packet {
-    eth_header: EthernetHeader,
+    eth: EthernetHeader,
     version_and_ihl: u8,
     dscp_and_ecn: u8,
     length: [u8; 2],
     ident: u16,
     flags: u16,
     ttl: u8,
-    protocol: u8,
+    protocol: IpV4Protocol,
     csum: InternetChecksum,
     src: IpV4Addr,
     dst: IpV4Addr,
 }
+impl IpV4Packet {
+    fn set_data_length(&mut self, mut size: u16) {
+        size += (size_of::<Self>() - size_of::<EthernetHeader>()) as u16; // IP header size
+        size = (size + 1) & !1; // make size odd
+        self.length = size.to_be_bytes()
+    }
+    fn calc_checksum(&mut self) {
+        self.csum = InternetChecksum::calc(&self.as_slice()[size_of::<EthernetHeader>()..]);
+    }
+}
+unsafe impl Sliceable for IpV4Packet {}
 
-#[derive(Copy, Clone)]
 #[repr(packed)]
 #[allow(unused)]
+#[derive(Copy, Clone, Default)]
+struct IpV4UdpFakeIpHeader {
+    protocol: IpV4Protocol,
+    csum: InternetChecksum,
+    src: IpV4Addr,
+    dst: IpV4Addr,
+    udp_length: [u8; 2],
+}
+impl IpV4UdpFakeIpHeader {
+    fn new(ip: &IpV4Packet, udp_length: [u8; 2]) -> Self {
+        Self {
+            protocol: IpV4Protocol::udp(),
+            src: ip.src,
+            dst: ip.dst,
+            udp_length,
+            ..Self::default()
+        }
+    }
+}
+unsafe impl Sliceable for IpV4UdpFakeIpHeader {}
+
+#[repr(packed)]
+#[allow(unused)]
+#[derive(Copy, Clone, Default)]
 struct IpV4UdpPacket {
     ip: IpV4Packet,
     src_port: [u8; 2], // optional
     dst_port: [u8; 2],
-    length: [u8; 2],
+    data_size: [u8; 2],
     csum: InternetChecksum,
 }
+impl IpV4UdpPacket {
+    fn set_src_port(&mut self, port: u16) {
+        self.src_port = port.to_be_bytes();
+    }
+    fn set_dst_port(&mut self, port: u16) {
+        self.dst_port = port.to_be_bytes();
+    }
+    fn set_data_size(&mut self, data_size: u16) {
+        self.data_size = data_size.to_be_bytes();
+    }
+}
+unsafe impl Sliceable for IpV4UdpPacket {}
 
+#[repr(packed)]
 #[allow(unused)]
-mod ipv4_protocol {
-    pub const ICMP: u8 = 1;
-    pub const TCP: u8 = 6;
-    pub const UDP: u8 = 17;
+#[derive(Copy, Clone, Default)]
+struct InternetChecksum([u8; 2]);
+impl InternetChecksum {
+    pub fn calc(data: &[u8]) -> Self {
+        // https://tools.ietf.org/html/rfc1071
+        InternetChecksumGenerator::new().feed(data).checksum()
+    }
 }
 
+// https://tools.ietf.org/html/rfc1071
+#[derive(Copy, Clone, Default)]
+struct InternetChecksumGenerator {
+    sum: u16,
+    carry: bool,
+}
+impl InternetChecksumGenerator {
+    fn new() -> Self {
+        Self::default()
+    }
+    fn feed(mut self, data: &[u8]) -> Self {
+        let iter = data.array_chunks::<2>();
+        for &w in iter {
+            (self.sum, self.carry) = self.sum.carrying_add(u16::from_be_bytes(w), self.carry)
+        }
+        (self.sum, self.carry) = self.sum.carrying_add(
+            u16::from_be_bytes([data.get(data.len() | 1).cloned().unwrap_or_default(), 0]),
+            self.carry,
+        );
+        self
+    }
+    fn checksum(mut self) -> InternetChecksum {
+        while self.carry {
+            (self.sum, self.carry) = self.sum.carrying_add(1, false);
+        }
+        InternetChecksum((!self.sum).to_be_bytes())
+    }
+}
+
+#[repr(packed)]
+#[allow(unused)]
 #[derive(Copy, Clone)]
-#[repr(packed)]
-#[allow(unused)]
-struct InternetChecksum {
-    // https://tools.ietf.org/html/rfc1071
-    csum: [u8; 2],
-}
-
-#[repr(packed)]
-#[allow(unused)]
-struct UdpPacket {
-    ip_header: IpV4Packet,
-    src_port: [u8; 2], // optional
-    dst_port: [u8; 2],
-    len: [u8; 2],
-    csum: InternetChecksum,
-}
-
-#[repr(packed)]
-#[allow(unused)]
-struct DhcpPacket {
-    udp_header: IpV4UdpPacket,
+struct IpV4DhcpPacket {
+    udp: IpV4UdpPacket,
     op: u8,
     htype: u8,
     hlen: u8,
@@ -228,7 +319,51 @@ struct DhcpPacket {
     cookie: [u8; 4],
     // Optional fields follow
 }
-const _: () = assert!(size_of::<DhcpPacket>() == 282);
+const _: () = assert!(size_of::<IpV4DhcpPacket>() == 282);
+impl IpV4DhcpPacket {
+    pub fn request(src_eth_addr: EthernetAddr) -> Self {
+        let mut this = Self::default();
+        // eth
+        this.udp.ip.eth.dst = EthernetAddr::broardcast();
+        this.udp.ip.eth.src = src_eth_addr;
+        this.udp.ip.eth.eth_type = EthernetType::ip_v4();
+        // ip
+        this.udp.ip.version_and_ihl = 0x45; // IPv4, header len = 5 * sizeof(uint32_t) = 20 bytes
+        this.udp
+            .ip
+            .set_data_length((size_of::<Self>() - size_of::<IpV4Packet>()) as u16);
+        this.udp.ip.ttl = 0xff;
+        this.udp.ip.protocol = IpV4Protocol::udp();
+        this.udp.ip.dst = IpV4Addr::broardcast();
+        this.udp.ip.calc_checksum();
+        // udp
+        this.udp.set_src_port(68);
+        this.udp.set_dst_port(67);
+        this.udp
+            .set_data_size((size_of::<Self>() - size_of::<IpV4UdpPacket>()) as u16);
+        // dhcp
+        this.op = 1;
+        this.htype = 1;
+        this.hlen = 6;
+        this.xid = 0x1234;
+        this.chaddr = src_eth_addr;
+        // https://tools.ietf.org/html/rfc2131
+        // 3. The Client-Server Protocol
+        this.cookie = [99, 130, 83, 99];
+        this.udp.csum = InternetChecksumGenerator::new()
+            .feed(&this.as_slice()[size_of::<IpV4UdpPacket>()..])
+            .feed(IpV4UdpFakeIpHeader::new(&this.udp.ip, this.udp.data_size).as_slice())
+            .checksum();
+        this
+    }
+}
+impl Default for IpV4DhcpPacket {
+    fn default() -> Self {
+        // SAFETY: This is safe since DhcpPacket is valid as a data for any contents
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+}
+unsafe impl Sliceable for IpV4DhcpPacket {}
 
 pub trait NetworkInterface {
     fn name(&self) -> &str;
