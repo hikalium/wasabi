@@ -38,6 +38,10 @@ make run MORE_QEMU_FLAGS="-d int,cpu_reset --no-reboot" 2>&1
 ```
 
 ```
+tshark -r log/dump_net1.pcap
+```
+
+```
 (qemu) info usbhost
   Bus 2, Addr 37, Port 3.2.1, Speed 5000 Mb/s
     Class ff: USB device 0b95:1790, AX88179

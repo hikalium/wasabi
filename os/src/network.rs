@@ -12,7 +12,6 @@ use alloc::fmt::Debug;
 use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::vec::Vec;
-use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::mem::MaybeUninit;
 use core::sync::atomic::AtomicBool;
@@ -167,13 +166,13 @@ unsafe impl Sliceable for ArpPacket {}
 #[derive(Copy, Clone, Default)]
 struct IpV4Protocol(u8);
 impl IpV4Protocol {
-    fn icmp() -> Self {
+    pub fn icmp() -> Self {
         Self(1)
     }
-    fn tcp() -> Self {
+    pub fn tcp() -> Self {
         Self(6)
     }
-    fn udp() -> Self {
+    pub fn udp() -> Self {
         Self(17)
     }
 }
@@ -210,18 +209,19 @@ unsafe impl Sliceable for IpV4Packet {}
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]
 struct IpV4UdpFakeIpHeader {
-    protocol: IpV4Protocol,
-    csum: InternetChecksum,
     src: IpV4Addr,
     dst: IpV4Addr,
+    padding: u8,
+    protocol: IpV4Protocol,
     udp_length: [u8; 2],
 }
+const _: () = assert!(size_of::<IpV4UdpFakeIpHeader>() == 12);
 impl IpV4UdpFakeIpHeader {
     fn new(ip: &IpV4Packet, udp_length: [u8; 2]) -> Self {
         Self {
-            protocol: IpV4Protocol::udp(),
             src: ip.src,
             dst: ip.dst,
+            protocol: IpV4Protocol::udp(),
             udp_length,
             ..Self::default()
         }
@@ -254,7 +254,7 @@ unsafe impl Sliceable for IpV4UdpPacket {}
 
 #[repr(packed)]
 #[allow(unused)]
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 struct InternetChecksum([u8; 2]);
 impl InternetChecksum {
     pub fn calc(data: &[u8]) -> Self {
@@ -266,30 +266,51 @@ impl InternetChecksum {
 // https://tools.ietf.org/html/rfc1071
 #[derive(Copy, Clone, Default)]
 struct InternetChecksumGenerator {
-    sum: u16,
-    carry: bool,
+    sum: u32,
 }
 impl InternetChecksumGenerator {
     fn new() -> Self {
         Self::default()
     }
     fn feed(mut self, data: &[u8]) -> Self {
-        let iter = data.array_chunks::<2>();
-        for &w in iter {
-            (self.sum, self.carry) = self.sum.carrying_add(u16::from_be_bytes(w), self.carry)
+        let iter = data.chunks(2);
+        for w in iter {
+            self.sum += ((w[0] as u32) << 8) | w.get(1).cloned().unwrap_or_default() as u32;
         }
-        (self.sum, self.carry) = self.sum.carrying_add(
-            u16::from_be_bytes([data.get(data.len() | 1).cloned().unwrap_or_default(), 0]),
-            self.carry,
-        );
         self
     }
     fn checksum(mut self) -> InternetChecksum {
-        while self.carry {
-            (self.sum, self.carry) = self.sum.carrying_add(1, false);
+        while (self.sum >> 16) != 0 {
+            self.sum = (self.sum & 0xffff) + (self.sum >> 16);
         }
-        InternetChecksum((!self.sum).to_be_bytes())
+        InternetChecksum((!self.sum as u16).to_be_bytes())
     }
+}
+
+#[test_case]
+fn internet_checksum() {
+    // https://datatracker.ietf.org/doc/html/rfc1071
+    assert_eq!(
+        InternetChecksumGenerator::new().checksum(),
+        InternetChecksum([0xff, 0xff])
+    );
+    assert_eq!(
+        InternetChecksumGenerator::new()
+            .feed(&[
+                0x00, 0x45, 0x73, 0x00, 0x00, 0x00, 0x00, 0x40, 0x11, 0x40, 0x00, 0x00, 0xa8, 0xc0,
+                0x01, 0x00, 0xa8, 0xc0, 0xc7, 0x00
+            ])
+            .checksum(),
+        InternetChecksum([0x61, 0xb8])
+    );
+    assert_eq!(
+        InternetChecksumGenerator::new()
+            .feed(&[0x00, 0x45, 0x73, 0x00, 0x00, 0x00])
+            .feed(&[0x00, 0x40, 0x11, 0x40, 0x00, 0x00, 0xa8, 0xc0])
+            .feed(&[0x01, 0x00, 0xa8, 0xc0, 0xc7, 0x00])
+            .checksum(),
+        InternetChecksum([0x61, 0xb8])
+    );
 }
 
 #[repr(packed)]
@@ -328,6 +349,7 @@ impl IpV4DhcpPacket {
         this.udp
             .ip
             .set_data_length((size_of::<Self>() - size_of::<IpV4Packet>()) as u16);
+        this.udp.ip.ident = 0x426b;
         this.udp.ip.ttl = 0xff;
         this.udp.ip.protocol = IpV4Protocol::udp();
         this.udp.ip.dst = IpV4Addr::broardcast();
@@ -346,10 +368,13 @@ impl IpV4DhcpPacket {
         // https://tools.ietf.org/html/rfc2131
         // 3. The Client-Server Protocol
         this.cookie = [99, 130, 83, 99];
+        // this.udp.csum can be 0 since it is optional
+        /*
         this.udp.csum = InternetChecksumGenerator::new()
-            .feed(&this.as_slice()[size_of::<IpV4UdpPacket>()..])
+            .feed(&this.as_slice()[size_of::<IpV4Packet>()..])
             .feed(IpV4UdpFakeIpHeader::new(&this.udp.ip, this.udp.data_size).as_slice())
             .checksum();
+        */
         this
     }
 }
@@ -415,6 +440,8 @@ pub async fn network_manager_thread() -> Result<()> {
                         IpV4Addr::new([10, 0, 2, 2]),
                     );
                     iface.push_packet(arp_req.copy_into_slice())?;
+                    let dhcp_req = IpV4DhcpPacket::request(iface.ethernet_addr());
+                    iface.push_packet(dhcp_req.copy_into_slice())?;
                 }
             }
         }
