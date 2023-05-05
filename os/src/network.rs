@@ -166,12 +166,14 @@ unsafe impl Sliceable for ArpPacket {}
 #[derive(Copy, Clone, Default)]
 struct IpV4Protocol(u8);
 impl IpV4Protocol {
+    /*
     pub fn icmp() -> Self {
         Self(1)
     }
     pub fn tcp() -> Self {
         Self(6)
     }
+    */
     pub fn udp() -> Self {
         Self(17)
     }
@@ -204,30 +206,6 @@ impl IpV4Packet {
     }
 }
 unsafe impl Sliceable for IpV4Packet {}
-
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default)]
-struct IpV4UdpFakeIpHeader {
-    src: IpV4Addr,
-    dst: IpV4Addr,
-    padding: u8,
-    protocol: IpV4Protocol,
-    udp_length: [u8; 2],
-}
-const _: () = assert!(size_of::<IpV4UdpFakeIpHeader>() == 12);
-impl IpV4UdpFakeIpHeader {
-    fn new(ip: &IpV4Packet, udp_length: [u8; 2]) -> Self {
-        Self {
-            src: ip.src,
-            dst: ip.dst,
-            protocol: IpV4Protocol::udp(),
-            udp_length,
-            ..Self::default()
-        }
-    }
-}
-unsafe impl Sliceable for IpV4UdpFakeIpHeader {}
 
 #[repr(packed)]
 #[allow(unused)]
