@@ -112,8 +112,6 @@ pub struct ArpPacket {
     sender_ip: IpV4Addr,
     target_mac: EthernetAddr,
     target_ip: IpV4Addr,
-    //
-    _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<ArpPacket>() == 42);
 impl ArpPacket {
@@ -143,8 +141,6 @@ impl ArpPacket {
             sender_ip: src_ip,
             target_mac: EthernetAddr::zero(), // target_mac = Unknown
             target_ip: dst_ip,
-            //
-            _pinned: PhantomPinned,
         }
     }
 }
@@ -413,14 +409,12 @@ pub async fn network_manager_thread() -> Result<()> {
             for iface in &*interfaces {
                 if let Some(iface) = iface.upgrade() {
                     println!("  {:?} {}", iface.ethernet_addr(), iface.name());
-                    for _ in 0..30 {
-                        let arp_req = Box::pin(ArpPacket::request(
-                            iface.ethernet_addr(),
-                            IpV4Addr::new([10, 0, 2, 15]),
-                            IpV4Addr::new([10, 0, 2, 2]),
-                        ));
-                        iface.push_packet(arp_req.copy_into_slice())?;
-                    }
+                    let arp_req = ArpPacket::request(
+                        iface.ethernet_addr(),
+                        IpV4Addr::new([10, 0, 2, 15]),
+                        IpV4Addr::new([10, 0, 2, 2]),
+                    );
+                    iface.push_packet(arp_req.copy_into_slice())?;
                 }
             }
         }

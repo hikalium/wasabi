@@ -14,6 +14,7 @@ use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
+use crate::print::hexdump;
 use crate::println;
 use crate::x86_64::busy_loop_hint;
 use crate::x86_64::read_io_port_u32;
@@ -226,6 +227,7 @@ impl Rtl8139 {
             let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
             println!("Rtl8139: recv! packet_len = {packet_len}");
             let packet = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
+            hexdump(packet);
             rx.pending_packets.push_back(packet.into());
 
             // Erase the packet for the next cycle
