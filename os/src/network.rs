@@ -187,6 +187,7 @@ impl IpV4Addr {
         Self([0xff, 0xff, 0xff, 0xff])
     }
 }
+unsafe impl Sliceable for IpV4Addr {}
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]
@@ -313,6 +314,24 @@ fn internet_checksum() {
     );
 }
 
+// https://datatracker.ietf.org/doc/html/rfc2132
+// 3.3. Subnet Mask (len = 4)
+const DHCP_OPT_NETMASK: u8 = 1;
+// 3.5. Router Option (len = 4 * n where n >= 1)
+const DHCP_OPT_ROUTER: u8 = 3;
+// 3.8. Domain Name Server Option (len = 4 * n where n >= 1)
+const DHCP_OPT_DNS: u8 = 6;
+// 9.6. DHCP Message Type (len = 1)
+const DHCP_OPT_MESSAGE_TYPE: u8 = 53;
+const DHCP_OPT_MESSAGE_TYPE_DISCOVER: u8 = 1;
+const DHCP_OPT_MESSAGE_TYPE_OFFER: u8 = 2;
+const DHCP_OPT_MESSAGE_TYPE_ACK: u8 = 5;
+
+// https://datatracker.ietf.org/doc/html/rfc2131#section-2
+// 1 = BOOTREQUEST, 2 = BOOTREPLY
+const DHCP_OP_BOOTREQUEST: u8 = 1; // CLIENT -> SERVER
+const DHCP_OP_BOOTREPLY: u8 = 2; // SERVER -> CLIENT
+
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone)]
@@ -360,21 +379,17 @@ impl DhcpPacket {
         this.udp
             .set_data_size((size_of::<Self>() - size_of::<UdpPacket>()) as u16);
         // dhcp
-        this.op = 1;
+        this.op = DHCP_OP_BOOTREQUEST;
         this.htype = 1;
         this.hlen = 6;
         this.xid = 0x1234;
         this.chaddr = src_eth_addr;
-        // https://tools.ietf.org/html/rfc2131
-        // 3. The Client-Server Protocol
+        // https://datatracker.ietf.org/doc/html/rfc2132#section-2
+        // 2. BOOTP Extension/DHCP Option Field Format
+        // > The value of the magic cookie is the 4 octet
+        // dotted decimal 99.130.83.99 ... in network byte order.
         this.cookie = [99, 130, 83, 99];
         // this.udp.csum can be 0 since it is optional
-        /*
-        this.udp.csum = InternetChecksumGenerator::new()
-            .feed(&this.as_slice()[size_of::<IpV4Packet>()..])
-            .feed(UdpFakeIpHeader::new(&this.udp.ip, this.udp.data_size).as_slice())
-            .checksum();
-        */
         this
     }
 }
@@ -434,6 +449,24 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                     }
                     let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
                     println!("op = {op}, data = {data:?}");
+                    match op {
+                        DHCP_OPT_NETMASK => {
+                            if let Ok(netmask) = IpV4Addr::from_slice(&data) {
+                                println!("netmask: {netmask}");
+                            }
+                        }
+                        DHCP_OPT_ROUTER => {
+                            if let Ok(router) = IpV4Addr::from_slice(&data) {
+                                println!("router: {router}");
+                            }
+                        }
+                        DHCP_OPT_DNS => {
+                            if let Ok(dns) = IpV4Addr::from_slice(&data) {
+                                println!("dns: {dns}");
+                            }
+                        }
+                        _ => {}
+                    }
                     it.advance_by(len as usize)
                         .or(Err(Error::Failed("Invalid op data len")))?;
                 }
