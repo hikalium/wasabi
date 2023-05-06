@@ -22,6 +22,7 @@
 #![feature(bigint_helper_methods)]
 #![feature(array_chunks)]
 #![feature(iter_array_chunks)]
+#![feature(iter_advance_by)]
 
 pub mod acpi;
 pub mod allocator;

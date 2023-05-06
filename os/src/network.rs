@@ -425,6 +425,19 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
         (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => {
             let dhcp = DhcpPacket::from_slice(packet)?;
             println!("DHCP SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr);
+            let options = &packet[size_of::<DhcpPacket>()..];
+            let mut it = options.iter();
+            while let Some(op) = it.next().cloned() {
+                if let Some(len) = it.next().cloned() {
+                    if len == 0 {
+                        break;
+                    }
+                    let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
+                    println!("op = {op}, data = {data:?}");
+                    it.advance_by(len as usize)
+                        .or(Err(Error::Failed("Invalid op data len")))?;
+                }
+            }
         }
         (src, dst) => {
             println!("UDP :{src} -> :{dst}");
