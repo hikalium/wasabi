@@ -225,7 +225,6 @@ impl Rtl8139 {
             // bit 2
             // - 1 if physical address is received.
             let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
-            println!("Rtl8139: recv! packet_len = {packet_len}");
             let packet = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
             hexdump(packet);
             rx.pending_packets.push_back(packet.into());

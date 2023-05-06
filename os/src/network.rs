@@ -9,6 +9,7 @@ use crate::util::Sliceable;
 use alloc::boxed::Box;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::fmt::Display;
 use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::vec::Vec;
@@ -19,7 +20,25 @@ use core::sync::atomic::Ordering;
 
 #[repr(packed)]
 #[allow(unused)]
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+pub struct EthernetType {
+    value: [u8; 2],
+}
+impl EthernetType {
+    const fn ip_v4() -> Self {
+        Self {
+            value: [0x08, 0x00],
+        }
+    }
+    const fn arp() -> Self {
+        Self {
+            value: [0x08, 0x06],
+        }
+    }
+}
+#[repr(packed)]
+#[allow(unused)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct EthernetAddr {
     mac: [u8; 6],
 }
@@ -47,46 +66,6 @@ impl Debug for EthernetAddr {
         )
     }
 }
-
-#[repr(transparent)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default)]
-pub struct IpV4Addr([u8; 4]);
-impl IpV4Addr {
-    pub fn new(ip: [u8; 4]) -> Self {
-        Self(ip)
-    }
-}
-impl Debug for IpV4Addr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}.{}.{}.{}", self.0[0], self.0[1], self.0[2], self.0[3],)
-    }
-}
-impl IpV4Addr {
-    const fn broardcast() -> Self {
-        Self([0xff, 0xff, 0xff, 0xff])
-    }
-}
-
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub struct EthernetType {
-    value: [u8; 2],
-}
-impl EthernetType {
-    const fn ip_v4() -> Self {
-        Self {
-            value: [0x08, 0x00],
-        }
-    }
-    const fn arp() -> Self {
-        Self {
-            value: [0x08, 0x06],
-        }
-    }
-}
-
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]
@@ -96,6 +75,12 @@ pub struct EthernetHeader {
     eth_type: EthernetType,
 }
 const _: () = assert!(size_of::<EthernetHeader>() == 14);
+impl EthernetHeader {
+    pub fn eth_type(&self) -> EthernetType {
+        self.eth_type
+    }
+}
+unsafe impl Sliceable for EthernetHeader {}
 
 #[repr(packed)]
 #[allow(unused)]
@@ -163,7 +148,7 @@ impl Debug for ArpPacket {
 unsafe impl Sliceable for ArpPacket {}
 
 #[repr(transparent)]
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 struct IpV4Protocol(u8);
 impl IpV4Protocol {
     /*
@@ -174,11 +159,34 @@ impl IpV4Protocol {
         Self(6)
     }
     */
-    pub fn udp() -> Self {
+    pub const fn udp() -> Self {
         Self(17)
     }
 }
-
+#[repr(transparent)]
+#[allow(unused)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+pub struct IpV4Addr([u8; 4]);
+impl IpV4Addr {
+    pub fn new(ip: [u8; 4]) -> Self {
+        Self(ip)
+    }
+}
+impl Display for IpV4Addr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}.{}.{}.{}", self.0[0], self.0[1], self.0[2], self.0[3],)
+    }
+}
+impl Debug for IpV4Addr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}.{}.{}.{}", self.0[0], self.0[1], self.0[2], self.0[3],)
+    }
+}
+impl IpV4Addr {
+    const fn broardcast() -> Self {
+        Self([0xff, 0xff, 0xff, 0xff])
+    }
+}
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]
@@ -196,6 +204,9 @@ struct IpV4Packet {
     dst: IpV4Addr,
 }
 impl IpV4Packet {
+    pub fn protocol(&self) -> IpV4Protocol {
+        self.protocol
+    }
     fn set_data_length(&mut self, mut size: u16) {
         size += (size_of::<Self>() - size_of::<EthernetHeader>()) as u16; // IP header size
         size = (size + 1) & !1; // make size odd
@@ -207,17 +218,28 @@ impl IpV4Packet {
 }
 unsafe impl Sliceable for IpV4Packet {}
 
+// https://datatracker.ietf.org/doc/html/rfc2131
+// 4.1 Constructing and sending DHCP messages
+const UDP_PORT_DHCP_SERVER: u16 = 67;
+const UDP_PORT_DHCP_CLIENT: u16 = 68;
+
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]
-struct IpV4UdpPacket {
+struct UdpPacket {
     ip: IpV4Packet,
     src_port: [u8; 2], // optional
     dst_port: [u8; 2],
     data_size: [u8; 2],
     csum: InternetChecksum,
 }
-impl IpV4UdpPacket {
+impl UdpPacket {
+    pub fn src_port(&self) -> u16 {
+        u16::from_be_bytes(self.src_port)
+    }
+    pub fn dst_port(&self) -> u16 {
+        u16::from_be_bytes(self.dst_port)
+    }
     fn set_src_port(&mut self, port: u16) {
         self.src_port = port.to_be_bytes();
     }
@@ -228,7 +250,7 @@ impl IpV4UdpPacket {
         self.data_size = data_size.to_be_bytes();
     }
 }
-unsafe impl Sliceable for IpV4UdpPacket {}
+unsafe impl Sliceable for UdpPacket {}
 
 #[repr(packed)]
 #[allow(unused)]
@@ -294,8 +316,8 @@ fn internet_checksum() {
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone)]
-struct IpV4DhcpPacket {
-    udp: IpV4UdpPacket,
+struct DhcpPacket {
+    udp: UdpPacket,
     op: u8,
     htype: u8,
     hlen: u8,
@@ -314,8 +336,8 @@ struct IpV4DhcpPacket {
     cookie: [u8; 4],
     // Optional fields follow
 }
-const _: () = assert!(size_of::<IpV4DhcpPacket>() == 282);
-impl IpV4DhcpPacket {
+const _: () = assert!(size_of::<DhcpPacket>() == 282);
+impl DhcpPacket {
     pub fn request(src_eth_addr: EthernetAddr) -> Self {
         let mut this = Self::default();
         // eth
@@ -333,10 +355,10 @@ impl IpV4DhcpPacket {
         this.udp.ip.dst = IpV4Addr::broardcast();
         this.udp.ip.calc_checksum();
         // udp
-        this.udp.set_src_port(68);
-        this.udp.set_dst_port(67);
+        this.udp.set_src_port(UDP_PORT_DHCP_CLIENT);
+        this.udp.set_dst_port(UDP_PORT_DHCP_SERVER);
         this.udp
-            .set_data_size((size_of::<Self>() - size_of::<IpV4UdpPacket>()) as u16);
+            .set_data_size((size_of::<Self>() - size_of::<UdpPacket>()) as u16);
         // dhcp
         this.op = 1;
         this.htype = 1;
@@ -350,19 +372,19 @@ impl IpV4DhcpPacket {
         /*
         this.udp.csum = InternetChecksumGenerator::new()
             .feed(&this.as_slice()[size_of::<IpV4Packet>()..])
-            .feed(IpV4UdpFakeIpHeader::new(&this.udp.ip, this.udp.data_size).as_slice())
+            .feed(UdpFakeIpHeader::new(&this.udp.ip, this.udp.data_size).as_slice())
             .checksum();
         */
         this
     }
 }
-impl Default for IpV4DhcpPacket {
+impl Default for DhcpPacket {
     fn default() -> Self {
         // SAFETY: This is safe since DhcpPacket is valid as a data for any contents
         unsafe { MaybeUninit::zeroed().assume_init() }
     }
 }
-unsafe impl Sliceable for IpV4DhcpPacket {}
+unsafe impl Sliceable for DhcpPacket {}
 
 pub trait NetworkInterface {
     fn name(&self) -> &str;
@@ -397,18 +419,54 @@ impl Network {
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
 
+fn handle_receive_udp(packet: &[u8]) -> Result<()> {
+    let udp = UdpPacket::from_slice(packet)?;
+    match (udp.src_port(), udp.dst_port()) {
+        (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => {
+            let dhcp = DhcpPacket::from_slice(packet)?;
+            println!("DHCP SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr);
+        }
+        (src, dst) => {
+            println!("UDP :{src} -> :{dst}");
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_receive(packet: &[u8]) -> Result<()> {
+    if let Ok(eth) = EthernetHeader::from_slice(packet) {
+        match eth.eth_type() {
+            e if e == EthernetType::ip_v4() => {
+                println!("IPv4");
+                if let Ok(ip_v4) = IpV4Packet::from_slice(packet) {
+                    match ip_v4.protocol() {
+                        e if e == IpV4Protocol::udp() => {
+                            println!("UDP");
+                            return handle_receive_udp(packet);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 pub async fn network_manager_thread() -> Result<()> {
     println!("Network manager started running");
     let network = Network::take();
 
     loop {
+        let interfaces = network.interfaces.lock();
         if network
             .interface_has_added
             .compare_exchange_weak(true, false, Ordering::SeqCst, Ordering::Relaxed)
             .is_ok()
         {
             println!("Network: network interfaces updated:");
-            let interfaces = network.interfaces.lock();
             for iface in &*interfaces {
                 if let Some(iface) = iface.upgrade() {
                     println!("  {:?} {}", iface.ethernet_addr(), iface.name());
@@ -418,11 +476,19 @@ pub async fn network_manager_thread() -> Result<()> {
                         IpV4Addr::new([10, 0, 2, 2]),
                     );
                     iface.push_packet(arp_req.copy_into_slice())?;
-                    let dhcp_req = IpV4DhcpPacket::request(iface.ethernet_addr());
+                    let dhcp_req = DhcpPacket::request(iface.ethernet_addr());
                     iface.push_packet(dhcp_req.copy_into_slice())?;
                 }
             }
         }
-        TimeoutFuture::new_ms(1000).await;
+        for iface in &*interfaces {
+            if let Some(iface) = iface.upgrade() {
+                if let Ok(packet) = iface.pop_packet() {
+                    handle_receive(&packet)?;
+                }
+            }
+        }
+
+        TimeoutFuture::new_ms(100).await;
     }
 }
