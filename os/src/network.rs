@@ -328,7 +328,6 @@ const DHCP_OPT_MESSAGE_TYPE_OFFER: u8 = 2;
 const DHCP_OPT_MESSAGE_TYPE_ACK: u8 = 5;
 
 // https://datatracker.ietf.org/doc/html/rfc2131#section-2
-// 1 = BOOTREQUEST, 2 = BOOTREPLY
 const DHCP_OP_BOOTREQUEST: u8 = 1; // CLIENT -> SERVER
 const DHCP_OP_BOOTREPLY: u8 = 2; // SERVER -> CLIENT
 
@@ -438,7 +437,12 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
     let udp = UdpPacket::from_slice(packet)?;
     match (udp.src_port(), udp.dst_port()) {
         (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => {
+            // TODO(hikalium): impl check for xid and cookie
             let dhcp = DhcpPacket::from_slice(packet)?;
+            if dhcp.op != DHCP_OP_BOOTREPLY {
+                // Not a reply, skip this message
+                return Ok(());
+            }
             println!("DHCP SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr);
             let options = &packet[size_of::<DhcpPacket>()..];
             let mut it = options.iter();
@@ -450,6 +454,20 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                     let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
                     println!("op = {op}, data = {data:?}");
                     match op {
+                        DHCP_OPT_MESSAGE_TYPE => match data[0] {
+                            DHCP_OPT_MESSAGE_TYPE_ACK => {
+                                println!("DHCPACK");
+                            }
+                            DHCP_OPT_MESSAGE_TYPE_OFFER => {
+                                println!("DHCPOFFER");
+                            }
+                            DHCP_OPT_MESSAGE_TYPE_DISCOVER => {
+                                println!("DHCPDISCOVER");
+                            }
+                            t => {
+                                println!("DHCP MESSAGE_TYPE = {t}");
+                            }
+                        },
                         DHCP_OPT_NETMASK => {
                             if let Ok(netmask) = IpV4Addr::from_slice(&data) {
                                 println!("netmask: {netmask}");
