@@ -26,6 +26,7 @@ use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
 use os::init;
 use os::network::network_manager_thread;
+use os::network::Network;
 use os::print;
 use os::println;
 use os::serial::SerialPort;
@@ -118,9 +119,20 @@ fn run_tasks() -> Result<()> {
             if let Some(c) = sp.try_read() {
                 if let Some(c) = char::from_u32(c as u32) {
                     if c == '\r' || c == '\n' {
-                        println!("\n{s}");
-                        let result = run_app(&s);
-                        println!("{result:?}");
+                        let cmd = s.trim();
+                        println!("\n{cmd}");
+                        match cmd {
+                            "ip" => {
+                                let network = Network::take();
+                                println!("netmask: {:?}", network.netmask());
+                                println!("router: {:?}", network.router());
+                                println!("dns: {:?}", network.dns());
+                            }
+                            _ => {
+                                let result = run_app(cmd);
+                                println!("{result:?}");
+                            }
+                        }
                         s.clear();
                     }
                     match c {

@@ -412,12 +412,18 @@ pub trait NetworkInterface {
 pub struct Network {
     interfaces: Mutex<Vec<Weak<dyn NetworkInterface>>>,
     interface_has_added: AtomicBool,
+    netmask: Mutex<Option<IpV4Addr>>,
+    router: Mutex<Option<IpV4Addr>>,
+    dns: Mutex<Option<IpV4Addr>>,
 }
 impl Network {
     fn new() -> Self {
         Self {
-            interfaces: Mutex::new(Vec::new(), "Network"),
+            interfaces: Mutex::new(Vec::new(), "Network.interfaces"),
             interface_has_added: AtomicBool::new(false),
+            netmask: Mutex::new(None, "Network.netmask"),
+            router: Mutex::new(None, "Network.router"),
+            dns: Mutex::new(None, "Network.dns"),
         }
     }
     pub fn take() -> Rc<Network> {
@@ -429,6 +435,24 @@ impl Network {
         let mut interfaces = self.interfaces.lock();
         interfaces.push(iface);
         self.interface_has_added.store(true, Ordering::SeqCst);
+    }
+    pub fn netmask(&self) -> Option<IpV4Addr> {
+        *self.netmask.lock()
+    }
+    pub fn router(&self) -> Option<IpV4Addr> {
+        *self.router.lock()
+    }
+    pub fn dns(&self) -> Option<IpV4Addr> {
+        *self.dns.lock()
+    }
+    pub fn set_netmask(&self, value: Option<IpV4Addr>) {
+        *self.netmask.lock() = value;
+    }
+    pub fn set_router(&self, value: Option<IpV4Addr>) {
+        *self.router.lock() = value;
+    }
+    pub fn set_dns(&self, value: Option<IpV4Addr>) {
+        *self.dns.lock() = value;
     }
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
@@ -453,6 +477,7 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                     }
                     let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
                     println!("op = {op}, data = {data:?}");
+                    let network = Network::take();
                     match op {
                         DHCP_OPT_MESSAGE_TYPE => match data[0] {
                             DHCP_OPT_MESSAGE_TYPE_ACK => {
@@ -471,16 +496,19 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                         DHCP_OPT_NETMASK => {
                             if let Ok(netmask) = IpV4Addr::from_slice(&data) {
                                 println!("netmask: {netmask}");
+                                network.set_netmask(Some(*netmask));
                             }
                         }
                         DHCP_OPT_ROUTER => {
                             if let Ok(router) = IpV4Addr::from_slice(&data) {
                                 println!("router: {router}");
+                                network.set_router(Some(*router));
                             }
                         }
                         DHCP_OPT_DNS => {
                             if let Ok(dns) = IpV4Addr::from_slice(&data) {
                                 println!("dns: {dns}");
+                                network.set_dns(Some(*dns));
                             }
                         }
                         _ => {}
