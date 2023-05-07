@@ -1,9 +1,26 @@
 extern crate alloc;
 
+mod checksum;
+mod dhcp;
+mod udp;
+
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::TimeoutFuture;
 use crate::mutex::Mutex;
+use crate::net::checksum::InternetChecksum;
+use crate::net::dhcp::DhcpPacket;
+use crate::net::dhcp::DHCP_OPT_DNS;
+use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE;
+use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_ACK;
+use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_DISCOVER;
+use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_OFFER;
+use crate::net::dhcp::DHCP_OPT_NETMASK;
+use crate::net::dhcp::DHCP_OPT_ROUTER;
+use crate::net::dhcp::DHCP_OP_BOOTREPLY;
+use crate::net::udp::UdpPacket;
+use crate::net::udp::UDP_PORT_DHCP_CLIENT;
+use crate::net::udp::UDP_PORT_DHCP_SERVER;
 use crate::println;
 use crate::util::Sliceable;
 use alloc::boxed::Box;
@@ -14,7 +31,6 @@ use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use core::mem::MaybeUninit;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
@@ -149,7 +165,7 @@ unsafe impl Sliceable for ArpPacket {}
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
-struct IpV4Protocol(u8);
+pub struct IpV4Protocol(u8);
 impl IpV4Protocol {
     /*
     pub fn icmp() -> Self {
@@ -191,7 +207,7 @@ unsafe impl Sliceable for IpV4Addr {}
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]
-struct IpV4Packet {
+pub struct IpV4Packet {
     eth: EthernetHeader,
     version_and_ihl: u8,
     dscp_and_ecn: u8,
@@ -218,187 +234,6 @@ impl IpV4Packet {
     }
 }
 unsafe impl Sliceable for IpV4Packet {}
-
-// https://datatracker.ietf.org/doc/html/rfc2131
-// 4.1 Constructing and sending DHCP messages
-const UDP_PORT_DHCP_SERVER: u16 = 67;
-const UDP_PORT_DHCP_CLIENT: u16 = 68;
-
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default)]
-struct UdpPacket {
-    ip: IpV4Packet,
-    src_port: [u8; 2], // optional
-    dst_port: [u8; 2],
-    data_size: [u8; 2],
-    csum: InternetChecksum,
-}
-impl UdpPacket {
-    pub fn src_port(&self) -> u16 {
-        u16::from_be_bytes(self.src_port)
-    }
-    pub fn dst_port(&self) -> u16 {
-        u16::from_be_bytes(self.dst_port)
-    }
-    fn set_src_port(&mut self, port: u16) {
-        self.src_port = port.to_be_bytes();
-    }
-    fn set_dst_port(&mut self, port: u16) {
-        self.dst_port = port.to_be_bytes();
-    }
-    fn set_data_size(&mut self, data_size: u16) {
-        self.data_size = data_size.to_be_bytes();
-    }
-}
-unsafe impl Sliceable for UdpPacket {}
-
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
-struct InternetChecksum([u8; 2]);
-impl InternetChecksum {
-    pub fn calc(data: &[u8]) -> Self {
-        // https://tools.ietf.org/html/rfc1071
-        InternetChecksumGenerator::new().feed(data).checksum()
-    }
-}
-
-// https://tools.ietf.org/html/rfc1071
-#[derive(Copy, Clone, Default)]
-struct InternetChecksumGenerator {
-    sum: u32,
-}
-impl InternetChecksumGenerator {
-    fn new() -> Self {
-        Self::default()
-    }
-    fn feed(mut self, data: &[u8]) -> Self {
-        let iter = data.chunks(2);
-        for w in iter {
-            self.sum += ((w[0] as u32) << 8) | w.get(1).cloned().unwrap_or_default() as u32;
-        }
-        self
-    }
-    fn checksum(mut self) -> InternetChecksum {
-        while (self.sum >> 16) != 0 {
-            self.sum = (self.sum & 0xffff) + (self.sum >> 16);
-        }
-        InternetChecksum((!self.sum as u16).to_be_bytes())
-    }
-}
-
-#[test_case]
-fn internet_checksum() {
-    // https://datatracker.ietf.org/doc/html/rfc1071
-    assert_eq!(
-        InternetChecksumGenerator::new().checksum(),
-        InternetChecksum([0xff, 0xff])
-    );
-    assert_eq!(
-        InternetChecksumGenerator::new()
-            .feed(&[
-                0x00, 0x45, 0x73, 0x00, 0x00, 0x00, 0x00, 0x40, 0x11, 0x40, 0x00, 0x00, 0xa8, 0xc0,
-                0x01, 0x00, 0xa8, 0xc0, 0xc7, 0x00
-            ])
-            .checksum(),
-        InternetChecksum([0x61, 0xb8])
-    );
-    assert_eq!(
-        InternetChecksumGenerator::new()
-            .feed(&[0x00, 0x45, 0x73, 0x00, 0x00, 0x00])
-            .feed(&[0x00, 0x40, 0x11, 0x40, 0x00, 0x00, 0xa8, 0xc0])
-            .feed(&[0x01, 0x00, 0xa8, 0xc0, 0xc7, 0x00])
-            .checksum(),
-        InternetChecksum([0x61, 0xb8])
-    );
-}
-
-// https://datatracker.ietf.org/doc/html/rfc2132
-// 3.3. Subnet Mask (len = 4)
-const DHCP_OPT_NETMASK: u8 = 1;
-// 3.5. Router Option (len = 4 * n where n >= 1)
-const DHCP_OPT_ROUTER: u8 = 3;
-// 3.8. Domain Name Server Option (len = 4 * n where n >= 1)
-const DHCP_OPT_DNS: u8 = 6;
-// 9.6. DHCP Message Type (len = 1)
-const DHCP_OPT_MESSAGE_TYPE: u8 = 53;
-const DHCP_OPT_MESSAGE_TYPE_DISCOVER: u8 = 1;
-const DHCP_OPT_MESSAGE_TYPE_OFFER: u8 = 2;
-const DHCP_OPT_MESSAGE_TYPE_ACK: u8 = 5;
-
-// https://datatracker.ietf.org/doc/html/rfc2131#section-2
-const DHCP_OP_BOOTREQUEST: u8 = 1; // CLIENT -> SERVER
-const DHCP_OP_BOOTREPLY: u8 = 2; // SERVER -> CLIENT
-
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone)]
-struct DhcpPacket {
-    udp: UdpPacket,
-    op: u8,
-    htype: u8,
-    hlen: u8,
-    hops: u8,
-    xid: u32,
-    secs: u16,
-    flags: u16,
-    ciaddr: IpV4Addr,
-    yiaddr: IpV4Addr,
-    siaddr: IpV4Addr,
-    giaddr: IpV4Addr,
-    chaddr: EthernetAddr,
-    chaddr_padding: [u8; 10],
-    sname: [u8; 64],
-    file: [u8; 128],
-    cookie: [u8; 4],
-    // Optional fields follow
-}
-const _: () = assert!(size_of::<DhcpPacket>() == 282);
-impl DhcpPacket {
-    pub fn request(src_eth_addr: EthernetAddr) -> Self {
-        let mut this = Self::default();
-        // eth
-        this.udp.ip.eth.dst = EthernetAddr::broardcast();
-        this.udp.ip.eth.src = src_eth_addr;
-        this.udp.ip.eth.eth_type = EthernetType::ip_v4();
-        // ip
-        this.udp.ip.version_and_ihl = 0x45; // IPv4, header len = 5 * sizeof(uint32_t) = 20 bytes
-        this.udp
-            .ip
-            .set_data_length((size_of::<Self>() - size_of::<IpV4Packet>()) as u16);
-        this.udp.ip.ident = 0x426b;
-        this.udp.ip.ttl = 0xff;
-        this.udp.ip.protocol = IpV4Protocol::udp();
-        this.udp.ip.dst = IpV4Addr::broardcast();
-        this.udp.ip.calc_checksum();
-        // udp
-        this.udp.set_src_port(UDP_PORT_DHCP_CLIENT);
-        this.udp.set_dst_port(UDP_PORT_DHCP_SERVER);
-        this.udp
-            .set_data_size((size_of::<Self>() - size_of::<UdpPacket>()) as u16);
-        // dhcp
-        this.op = DHCP_OP_BOOTREQUEST;
-        this.htype = 1;
-        this.hlen = 6;
-        this.xid = 0x1234;
-        this.chaddr = src_eth_addr;
-        // https://datatracker.ietf.org/doc/html/rfc2132#section-2
-        // 2. BOOTP Extension/DHCP Option Field Format
-        // > The value of the magic cookie is the 4 octet
-        // dotted decimal 99.130.83.99 ... in network byte order.
-        this.cookie = [99, 130, 83, 99];
-        // this.udp.csum can be 0 since it is optional
-        this
-    }
-}
-impl Default for DhcpPacket {
-    fn default() -> Self {
-        // SAFETY: This is safe since DhcpPacket is valid as a data for any contents
-        unsafe { MaybeUninit::zeroed().assume_init() }
-    }
-}
-unsafe impl Sliceable for DhcpPacket {}
 
 pub trait NetworkInterface {
     fn name(&self) -> &str;
@@ -463,11 +298,11 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
         (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => {
             // TODO(hikalium): impl check for xid and cookie
             let dhcp = DhcpPacket::from_slice(packet)?;
-            if dhcp.op != DHCP_OP_BOOTREPLY {
+            if dhcp.op() != DHCP_OP_BOOTREPLY {
                 // Not a reply, skip this message
                 return Ok(());
             }
-            println!("DHCP SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr);
+            println!("DHCP SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr());
             let options = &packet[size_of::<DhcpPacket>()..];
             let mut it = options.iter();
             while let Some(op) = it.next().cloned() {
