@@ -1,14 +1,17 @@
 extern crate alloc;
 
-mod checksum;
-mod dhcp;
-mod udp;
+pub mod arp;
+pub mod checksum;
+pub mod dhcp;
+pub mod eth;
+pub mod ip;
+pub mod udp;
 
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::TimeoutFuture;
 use crate::mutex::Mutex;
-use crate::net::checksum::InternetChecksum;
+use crate::net::arp::ArpPacket;
 use crate::net::dhcp::DhcpPacket;
 use crate::net::dhcp::DHCP_OPT_DNS;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE;
@@ -18,222 +21,24 @@ use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_OFFER;
 use crate::net::dhcp::DHCP_OPT_NETMASK;
 use crate::net::dhcp::DHCP_OPT_ROUTER;
 use crate::net::dhcp::DHCP_OP_BOOTREPLY;
+use crate::net::eth::EthernetAddr;
+use crate::net::eth::EthernetHeader;
+use crate::net::eth::EthernetType;
+use crate::net::ip::IpV4Addr;
+use crate::net::ip::IpV4Packet;
+use crate::net::ip::IpV4Protocol;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
 use crate::println;
 use crate::util::Sliceable;
 use alloc::boxed::Box;
-use alloc::fmt;
-use alloc::fmt::Debug;
-use alloc::fmt::Display;
 use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
-
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub struct EthernetType {
-    value: [u8; 2],
-}
-impl EthernetType {
-    const fn ip_v4() -> Self {
-        Self {
-            value: [0x08, 0x00],
-        }
-    }
-    const fn arp() -> Self {
-        Self {
-            value: [0x08, 0x06],
-        }
-    }
-}
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub struct EthernetAddr {
-    mac: [u8; 6],
-}
-impl EthernetAddr {
-    pub fn new(mac: [u8; 6]) -> Self {
-        Self { mac }
-    }
-    const fn broardcast() -> Self {
-        Self {
-            mac: [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
-        }
-    }
-    const fn zero() -> Self {
-        Self {
-            mac: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-        }
-    }
-}
-impl Debug for EthernetAddr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            self.mac[0], self.mac[1], self.mac[2], self.mac[3], self.mac[4], self.mac[5],
-        )
-    }
-}
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default)]
-pub struct EthernetHeader {
-    dst: EthernetAddr,
-    src: EthernetAddr,
-    eth_type: EthernetType,
-}
-const _: () = assert!(size_of::<EthernetHeader>() == 14);
-impl EthernetHeader {
-    pub fn eth_type(&self) -> EthernetType {
-        self.eth_type
-    }
-}
-unsafe impl Sliceable for EthernetHeader {}
-
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default)]
-pub struct ArpPacket {
-    eth_header: EthernetHeader,
-    hw_type: [u8; 2],
-    proto_type: [u8; 2],
-    hw_addr_size: u8,
-    proto_addr_size: u8,
-    op: [u8; 2],
-    sender_mac: EthernetAddr,
-    sender_ip: IpV4Addr,
-    target_mac: EthernetAddr,
-    target_ip: IpV4Addr,
-}
-const _: () = assert!(size_of::<ArpPacket>() == 42);
-impl ArpPacket {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        // SAFETY: any bytes can be parsed as the ARP packet
-        if bytes.len() >= size_of::<ArpPacket>() {
-            let mut tmp = [0u8; size_of::<ArpPacket>()];
-            tmp.copy_from_slice(&bytes[0..size_of::<ArpPacket>()]);
-            Ok(unsafe { core::mem::transmute(tmp) })
-        } else {
-            Err(Error::Failed("too short"))
-        }
-    }
-    pub fn request(src_eth: EthernetAddr, src_ip: IpV4Addr, dst_ip: IpV4Addr) -> Self {
-        Self {
-            eth_header: EthernetHeader {
-                dst: src_eth,
-                src: EthernetAddr::broardcast(),
-                eth_type: EthernetType::arp(),
-            },
-            hw_type: [0x00, 0x01],
-            proto_type: [0x08, 0x00],
-            hw_addr_size: 6,
-            proto_addr_size: 4,
-            op: [0x00, 0x01],
-            sender_mac: src_eth,
-            sender_ip: src_ip,
-            target_mac: EthernetAddr::zero(), // target_mac = Unknown
-            target_ip: dst_ip,
-        }
-    }
-}
-impl Debug for ArpPacket {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "ArpPacket {{ op: {}, sender: {:?} ({:?}), target: {:?} ({:?}) }}",
-            match (self.op[0], self.op[1]) {
-                (0, 1) => "request",
-                (0, 2) => "response",
-                (_, _) => "unknown",
-            },
-            self.sender_ip,
-            self.sender_mac,
-            self.target_ip,
-            self.target_mac,
-        )
-    }
-}
-unsafe impl Sliceable for ArpPacket {}
-
-#[repr(transparent)]
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub struct IpV4Protocol(u8);
-impl IpV4Protocol {
-    /*
-    pub fn icmp() -> Self {
-        Self(1)
-    }
-    pub fn tcp() -> Self {
-        Self(6)
-    }
-    */
-    pub const fn udp() -> Self {
-        Self(17)
-    }
-}
-#[repr(transparent)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
-pub struct IpV4Addr([u8; 4]);
-impl IpV4Addr {
-    pub fn new(ip: [u8; 4]) -> Self {
-        Self(ip)
-    }
-}
-impl Display for IpV4Addr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}.{}.{}.{}", self.0[0], self.0[1], self.0[2], self.0[3],)
-    }
-}
-impl Debug for IpV4Addr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}.{}.{}.{}", self.0[0], self.0[1], self.0[2], self.0[3],)
-    }
-}
-impl IpV4Addr {
-    const fn broardcast() -> Self {
-        Self([0xff, 0xff, 0xff, 0xff])
-    }
-}
-unsafe impl Sliceable for IpV4Addr {}
-#[repr(packed)]
-#[allow(unused)]
-#[derive(Copy, Clone, Default)]
-pub struct IpV4Packet {
-    eth: EthernetHeader,
-    version_and_ihl: u8,
-    dscp_and_ecn: u8,
-    length: [u8; 2],
-    ident: u16,
-    flags: u16,
-    ttl: u8,
-    protocol: IpV4Protocol,
-    csum: InternetChecksum,
-    src: IpV4Addr,
-    dst: IpV4Addr,
-}
-impl IpV4Packet {
-    pub fn protocol(&self) -> IpV4Protocol {
-        self.protocol
-    }
-    fn set_data_length(&mut self, mut size: u16) {
-        size += (size_of::<Self>() - size_of::<EthernetHeader>()) as u16; // IP header size
-        size = (size + 1) & !1; // make size odd
-        self.length = size.to_be_bytes()
-    }
-    fn calc_checksum(&mut self) {
-        self.csum = InternetChecksum::calc(&self.as_slice()[size_of::<EthernetHeader>()..]);
-    }
-}
-unsafe impl Sliceable for IpV4Packet {}
 
 pub trait NetworkInterface {
     fn name(&self) -> &str;

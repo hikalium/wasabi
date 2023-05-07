@@ -6,7 +6,7 @@ use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::executor::ROOT_EXECUTOR;
 use crate::mutex::Mutex;
-use crate::net::EthernetAddr;
+use crate::net::eth::EthernetAddr;
 use crate::net::Network;
 use crate::net::NetworkInterface;
 use crate::pci::BusDeviceFunction;

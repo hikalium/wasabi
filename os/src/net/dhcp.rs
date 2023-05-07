@@ -2,6 +2,7 @@ use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
 use crate::net::EthernetAddr;
+use crate::net::EthernetHeader;
 use crate::net::EthernetType;
 use crate::net::IpV4Addr;
 use crate::net::IpV4Packet;
@@ -61,20 +62,22 @@ impl DhcpPacket {
     pub fn request(src_eth_addr: EthernetAddr) -> Self {
         let mut this = Self::default();
         // eth
-        this.udp.ip.eth.dst = EthernetAddr::broardcast();
-        this.udp.ip.eth.src = src_eth_addr;
-        this.udp.ip.eth.eth_type = EthernetType::ip_v4();
+        let eth = EthernetHeader::new(
+            EthernetAddr::broardcast(),
+            src_eth_addr,
+            EthernetType::ip_v4(),
+        );
         // ip
-        this.udp.ip.version_and_ihl = 0x45; // IPv4, header len = 5 * sizeof(uint32_t) = 20 bytes
-        this.udp
-            .ip
-            .set_data_length((size_of::<Self>() - size_of::<IpV4Packet>()) as u16);
-        this.udp.ip.ident = 0x426b;
-        this.udp.ip.ttl = 0xff;
-        this.udp.ip.protocol = IpV4Protocol::udp();
-        this.udp.ip.dst = IpV4Addr::broardcast();
-        this.udp.ip.calc_checksum();
+        let data_length = size_of::<Self>() - size_of::<IpV4Packet>();
+        let ip = IpV4Packet::new(
+            eth,
+            IpV4Addr::broardcast(),
+            IpV4Addr::default(),
+            IpV4Protocol::udp(),
+            data_length,
+        );
         // udp
+        this.udp.ip = ip;
         this.udp.set_src_port(UDP_PORT_DHCP_CLIENT);
         this.udp.set_dst_port(UDP_PORT_DHCP_SERVER);
         this.udp
