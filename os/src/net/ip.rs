@@ -83,7 +83,6 @@ impl IpV4Packet {
             ..Self::default()
         };
         this.set_data_length(data_length as u16);
-        //this.ident = 0x426b;
         this.calc_checksum();
         this
     }
