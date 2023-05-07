@@ -1,7 +1,5 @@
 extern crate alloc;
 
-use crate::error::Error;
-use crate::error::Result;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
 use crate::net::eth::EthernetType;
@@ -28,15 +26,14 @@ pub struct ArpPacket {
 }
 const _: () = assert!(size_of::<ArpPacket>() == 42);
 impl ArpPacket {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        // SAFETY: any bytes can be parsed as the ARP packet
-        if bytes.len() >= size_of::<ArpPacket>() {
-            let mut tmp = [0u8; size_of::<ArpPacket>()];
-            tmp.copy_from_slice(&bytes[0..size_of::<ArpPacket>()]);
-            Ok(unsafe { core::mem::transmute(tmp) })
-        } else {
-            Err(Error::Failed("too short"))
-        }
+    pub fn is_response(&self) -> bool {
+        self.op == [0x00, 0x02]
+    }
+    pub fn sender_eth_addr(&self) -> EthernetAddr {
+        self.sender_mac
+    }
+    pub fn sender_ip_addr(&self) -> IpV4Addr {
+        self.sender_ip
     }
     pub fn request(src_eth: EthernetAddr, src_ip: IpV4Addr, dst_ip: IpV4Addr) -> Self {
         Self {

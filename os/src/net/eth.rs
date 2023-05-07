@@ -25,7 +25,7 @@ impl EthernetType {
 }
 #[repr(packed)]
 #[allow(unused)]
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd)]
 pub struct EthernetAddr {
     mac: [u8; 6],
 }

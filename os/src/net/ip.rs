@@ -12,10 +12,10 @@ use core::mem::size_of;
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct IpV4Protocol(u8);
 impl IpV4Protocol {
-    /*
     pub fn icmp() -> Self {
         Self(1)
     }
+    /*
     pub fn tcp() -> Self {
         Self(6)
     }
@@ -26,7 +26,7 @@ impl IpV4Protocol {
 }
 #[repr(transparent)]
 #[allow(unused)]
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IpV4Addr([u8; 4]);
 impl IpV4Addr {
     pub fn new(ip: [u8; 4]) -> Self {
@@ -49,6 +49,7 @@ impl IpV4Addr {
     }
 }
 unsafe impl Sliceable for IpV4Addr {}
+
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]

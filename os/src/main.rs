@@ -128,6 +128,10 @@ fn run_tasks() -> Result<()> {
                                 println!("router: {:?}", network.router());
                                 println!("dns: {:?}", network.dns());
                             }
+                            "arp" => {
+                                let network = Network::take();
+                                println!("{:?}", network.arp_table_cloned())
+                            }
                             _ => {
                                 let result = run_app(cmd);
                                 println!("{result:?}");

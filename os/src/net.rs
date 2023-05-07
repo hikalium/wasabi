@@ -4,6 +4,7 @@ pub mod arp;
 pub mod checksum;
 pub mod dhcp;
 pub mod eth;
+pub mod icmp;
 pub mod ip;
 pub mod udp;
 
@@ -33,6 +34,8 @@ use crate::net::udp::UDP_PORT_DHCP_SERVER;
 use crate::println;
 use crate::util::Sliceable;
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::vec::Vec;
@@ -55,6 +58,8 @@ pub struct Network {
     netmask: Mutex<Option<IpV4Addr>>,
     router: Mutex<Option<IpV4Addr>>,
     dns: Mutex<Option<IpV4Addr>>,
+    ip_tx_queue: Mutex<VecDeque<Box<[u8]>>>,
+    arp_table: Mutex<BTreeMap<IpV4Addr, EthernetAddr>>,
 }
 impl Network {
     fn new() -> Self {
@@ -64,6 +69,8 @@ impl Network {
             netmask: Mutex::new(None, "Network.netmask"),
             router: Mutex::new(None, "Network.router"),
             dns: Mutex::new(None, "Network.dns"),
+            ip_tx_queue: Mutex::new(VecDeque::new(), "Network.ip_tx_queue"),
+            arp_table: Mutex::new(BTreeMap::new(), "Network.arp_table"),
         }
     }
     pub fn take() -> Rc<Network> {
@@ -93,6 +100,15 @@ impl Network {
     }
     pub fn set_dns(&self, value: Option<IpV4Addr>) {
         *self.dns.lock() = value;
+    }
+    pub fn queue_ip_packet(&self, packet: Box<[u8]>) {
+        self.ip_tx_queue.lock().push_back(packet)
+    }
+    pub fn arp_table_cloned(&self) -> BTreeMap<IpV4Addr, EthernetAddr> {
+        self.arp_table.lock().clone()
+    }
+    pub fn arp_table_register(&self, ip_addr: IpV4Addr, eth_addr: EthernetAddr) {
+        self.arp_table.lock().insert(ip_addr, eth_addr);
     }
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
@@ -178,6 +194,15 @@ fn handle_receive(packet: &[u8]) -> Result<()> {
                             return handle_receive_udp(packet);
                         }
                         _ => {}
+                    }
+                }
+            }
+            e if e == EthernetType::arp() => {
+                if let Ok(arp) = ArpPacket::from_slice(packet) {
+                    println!("{arp:?}");
+                    if arp.is_response() {
+                        Network::take()
+                            .arp_table_register(arp.sender_ip_addr(), arp.sender_eth_addr())
                     }
                 }
             }
