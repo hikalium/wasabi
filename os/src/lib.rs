@@ -40,7 +40,7 @@ pub mod init;
 pub mod memory;
 pub mod memory_map_holder;
 pub mod mutex;
-pub mod network;
+pub mod net;
 pub mod panic;
 pub mod pci;
 pub mod print;
