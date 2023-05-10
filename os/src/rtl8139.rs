@@ -215,6 +215,7 @@ impl Rtl8139 {
             if rx_status == 0 {
                 break;
             }
+            println!("rx_status: {rx_status:#b}");
             // Rx Status Info
             // bit 0
             // - 1 if a good packet is received
@@ -234,10 +235,14 @@ impl Rtl8139 {
             self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());
             write_io_port_u16(self.io_base + 0x3E, 0x1);
             rx.next_index += packet_len + 4;
+            println!("rx.next_index: {}", rx.next_index);
             if rx.next_index >= 8192 {
                 rx.next_index %= 8192;
                 self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());
-                write_io_port_u16(self.io_base + 0x3E, 0x11 /*RxOverflow + RxOk*/);
+                write_io_port_u16(
+                    self.io_base + 0x3E,
+                    0x11, /* RxOverflow + RxOk (written bits will be cleared) */
+                );
             }
             rx.packet_count += 1;
         }
@@ -275,6 +280,7 @@ impl Rtl8139DriverInstance {
         }
         (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
             loop {
+                println!("*");
                 d.poll().await?
             }
         }));

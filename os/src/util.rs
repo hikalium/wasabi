@@ -33,6 +33,16 @@ pub unsafe trait Sliceable: Sized + Copy + Clone {
             Err(Error::Failed("Too small"))
         }
     }
+    fn from_slice_mut(slice: &mut [u8]) -> Result<&mut Self> {
+        if slice.len() >= size_of::<Self>() {
+            // SAFETY: the memory region referenced via the returned reference resides in the slice
+            // Also, the alignment restriction should be satisfied if Self is marked as packed <<
+            // really?
+            Ok(unsafe { &mut *(slice.as_ptr() as *mut Self) })
+        } else {
+            Err(Error::Failed("Too small"))
+        }
+    }
     fn copy_into_slice(&self) -> Box<[u8]> {
         let mut values = Box::<[u8]>::new_uninit_slice(size_of::<Self>());
         unsafe {

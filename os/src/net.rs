@@ -13,6 +13,7 @@ use crate::error::Result;
 use crate::executor::TimeoutFuture;
 use crate::mutex::Mutex;
 use crate::net::arp::ArpPacket;
+use crate::net::checksum::InternetChecksum;
 use crate::net::dhcp::DhcpPacket;
 use crate::net::dhcp::DHCP_OPT_DNS;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE;
@@ -25,12 +26,14 @@ use crate::net::dhcp::DHCP_OP_BOOTREPLY;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
 use crate::net::eth::EthernetType;
+use crate::net::icmp::IcmpPacket;
 use crate::net::ip::IpV4Addr;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
+use crate::print::hexdump;
 use crate::println;
 use crate::util::Sliceable;
 use alloc::boxed::Box;
@@ -58,6 +61,7 @@ pub struct Network {
     netmask: Mutex<Option<IpV4Addr>>,
     router: Mutex<Option<IpV4Addr>>,
     dns: Mutex<Option<IpV4Addr>>,
+    self_ip: Mutex<Option<IpV4Addr>>,
     ip_tx_queue: Mutex<VecDeque<Box<[u8]>>>,
     arp_table: Mutex<BTreeMap<IpV4Addr, EthernetAddr>>,
 }
@@ -69,6 +73,7 @@ impl Network {
             netmask: Mutex::new(None, "Network.netmask"),
             router: Mutex::new(None, "Network.router"),
             dns: Mutex::new(None, "Network.dns"),
+            self_ip: Mutex::new(None, "Network.self_ip"),
             ip_tx_queue: Mutex::new(VecDeque::new(), "Network.ip_tx_queue"),
             arp_table: Mutex::new(BTreeMap::new(), "Network.arp_table"),
         }
@@ -101,7 +106,10 @@ impl Network {
     pub fn set_dns(&self, value: Option<IpV4Addr>) {
         *self.dns.lock() = value;
     }
-    pub fn queue_ip_packet(&self, packet: Box<[u8]>) {
+    pub fn set_self_ip(&self, value: Option<IpV4Addr>) {
+        *self.self_ip.lock() = value;
+    }
+    pub fn send_ip_packet(&self, packet: Box<[u8]>) {
         self.ip_tx_queue.lock().push_back(packet)
     }
     pub fn arp_table_cloned(&self) -> BTreeMap<IpV4Addr, EthernetAddr> {
@@ -114,6 +122,7 @@ impl Network {
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
 
 fn handle_receive_udp(packet: &[u8]) -> Result<()> {
+    let network = Network::take();
     let udp = UdpPacket::from_slice(packet)?;
     match (udp.src_port(), udp.dst_port()) {
         (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => {
@@ -124,6 +133,7 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                 return Ok(());
             }
             println!("DHCP SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr());
+            network.set_self_ip(Some(dhcp.yiaddr()));
             let options = &packet[size_of::<DhcpPacket>()..];
             let mut it = options.iter();
             while let Some(op) = it.next().cloned() {
@@ -133,7 +143,6 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                     }
                     let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
                     println!("op = {op}, data = {data:?}");
-                    let network = Network::take();
                     match op {
                         DHCP_OPT_MESSAGE_TYPE => match data[0] {
                             DHCP_OPT_MESSAGE_TYPE_ACK => {
@@ -159,6 +168,10 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                             if let Ok(router) = IpV4Addr::from_slice(&data) {
                                 println!("router: {router}");
                                 network.set_router(Some(*router));
+                                // send ping
+                                network.send_ip_packet(
+                                    IcmpPacket::new_request(*router).copy_into_slice(),
+                                )
                             }
                         }
                         DHCP_OPT_DNS => {
@@ -182,7 +195,14 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn handle_receive_icmp(packet: &[u8]) -> Result<()> {
+    let icmp = IcmpPacket::from_slice(packet)?;
+    println!("{icmp:?}");
+    Ok(())
+}
+
 fn handle_receive(packet: &[u8]) -> Result<()> {
+    hexdump(packet);
     if let Ok(eth) = EthernetHeader::from_slice(packet) {
         match eth.eth_type() {
             e if e == EthernetType::ip_v4() => {
@@ -192,6 +212,10 @@ fn handle_receive(packet: &[u8]) -> Result<()> {
                         e if e == IpV4Protocol::udp() => {
                             println!("UDP");
                             return handle_receive_udp(packet);
+                        }
+                        e if e == IpV4Protocol::icmp() => {
+                            println!("ICMP!");
+                            return handle_receive_icmp(packet);
                         }
                         _ => {}
                     }
@@ -238,6 +262,36 @@ pub async fn network_manager_thread() -> Result<()> {
                 }
             }
         }
+        if let Some(mut org_packet) = network.ip_tx_queue.lock().pop_front() {
+            if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
+                let dst_ip = ip_packet.dst();
+                if let Some(dst_eth) = network.arp_table.lock().get(&dst_ip) {
+                    if let Some(src_ip) = *network.self_ip.lock() {
+                        ip_packet.set_src(src_ip);
+                        for iface in &*interfaces {
+                            if let Some(iface) = iface.upgrade() {
+                                ip_packet.eth = EthernetHeader::new(
+                                    *dst_eth,
+                                    iface.ethernet_addr(),
+                                    EthernetType::ip_v4(),
+                                );
+                                ip_packet.clear_checksum();
+                                let csum = InternetChecksum::calc(
+                                    &org_packet
+                                        [size_of::<EthernetHeader>()..size_of::<IpV4Packet>()],
+                                );
+                                if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
+                                    ip_packet.set_checksum(csum);
+                                    iface.push_packet(org_packet.clone())?;
+                                    iface.push_packet(org_packet)?;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for iface in &*interfaces {
             if let Some(iface) = iface.upgrade() {
                 if let Ok(packet) = iface.pop_packet() {
@@ -245,6 +299,7 @@ pub async fn network_manager_thread() -> Result<()> {
                 }
             }
         }
+        println!(".");
 
         TimeoutFuture::new_ms(100).await;
     }

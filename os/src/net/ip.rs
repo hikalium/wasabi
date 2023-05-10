@@ -54,7 +54,7 @@ unsafe impl Sliceable for IpV4Addr {}
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]
 pub struct IpV4Packet {
-    eth: EthernetHeader,
+    pub eth: EthernetHeader,
     version_and_ihl: u8,
     dscp_and_ecn: u8,
     length: [u8; 2],
@@ -66,7 +66,14 @@ pub struct IpV4Packet {
     src: IpV4Addr,
     dst: IpV4Addr,
 }
+const _: () = assert!(size_of::<IpV4Packet>() - size_of::<EthernetHeader>() == 20);
 impl IpV4Packet {
+    pub fn src(&self) -> IpV4Addr {
+        self.src
+    }
+    pub fn dst(&self) -> IpV4Addr {
+        self.dst
+    }
     pub fn new(
         eth: EthernetHeader,
         dst: IpV4Addr,
@@ -84,8 +91,10 @@ impl IpV4Packet {
             ..Self::default()
         };
         this.set_data_length(data_length as u16);
-        this.calc_checksum();
         this
+    }
+    pub fn set_src(&mut self, src: IpV4Addr) {
+        self.src = src;
     }
     pub fn protocol(&self) -> IpV4Protocol {
         self.protocol
@@ -95,8 +104,11 @@ impl IpV4Packet {
         size = (size + 1) & !1; // make size odd
         self.length = size.to_be_bytes()
     }
-    fn calc_checksum(&mut self) {
-        self.csum = InternetChecksum::calc(&self.as_slice()[size_of::<EthernetHeader>()..]);
+    pub fn clear_checksum(&mut self) {
+        self.csum = InternetChecksum::default();
+    }
+    pub fn set_checksum(&mut self, csum: InternetChecksum) {
+        self.csum = csum;
     }
 }
 unsafe impl Sliceable for IpV4Packet {}

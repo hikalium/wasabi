@@ -4,6 +4,7 @@ use crate::net::udp::UDP_PORT_DHCP_SERVER;
 use crate::net::EthernetAddr;
 use crate::net::EthernetHeader;
 use crate::net::EthernetType;
+use crate::net::InternetChecksum;
 use crate::net::IpV4Addr;
 use crate::net::IpV4Packet;
 use crate::net::IpV4Protocol;
@@ -94,6 +95,10 @@ impl DhcpPacket {
         // dotted decimal 99.130.83.99 ... in network byte order.
         this.cookie = [99, 130, 83, 99];
         // this.udp.csum can be 0 since it is optional
+        this.udp.ip.clear_checksum();
+        this.udp.ip.set_checksum(InternetChecksum::calc(
+            &this.udp.as_slice()[size_of::<EthernetHeader>()..size_of::<IpV4Packet>()],
+        ));
         this
     }
 }
