@@ -82,7 +82,8 @@ impl DhcpPacket {
         this.udp.set_src_port(UDP_PORT_DHCP_CLIENT);
         this.udp.set_dst_port(UDP_PORT_DHCP_SERVER);
         this.udp
-            .set_data_size((size_of::<Self>() - size_of::<UdpPacket>()) as u16);
+            .set_data_size((size_of::<Self>() - size_of::<IpV4Packet>()) as u16);
+        // udp checksum is omitted (set to zero) since it is optional
         // dhcp
         this.op = DHCP_OP_BOOTREQUEST;
         this.htype = 1;
@@ -94,7 +95,6 @@ impl DhcpPacket {
         // > The value of the magic cookie is the 4 octet
         // dotted decimal 99.130.83.99 ... in network byte order.
         this.cookie = [99, 130, 83, 99];
-        // this.udp.csum can be 0 since it is optional
         this.udp.ip.clear_checksum();
         this.udp.ip.set_checksum(InternetChecksum::calc(
             &this.udp.as_slice()[size_of::<EthernetHeader>()..size_of::<IpV4Packet>()],
