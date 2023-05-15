@@ -29,6 +29,10 @@ QEMU_ARGS=\
 		-D log/qemu_debug.txt \
 		${MORE_QEMU_FLAGS}
 
+ifndef DISPLAY
+QEMU_ARGS+=-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on
+endif
+
 #		-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on \
 #		-gdb tcp::3333 -S \
 # -device usb-host,hostbus=1,hostport=1 \
