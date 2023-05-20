@@ -21,6 +21,10 @@ pub const DHCP_OPT_ROUTER: u8 = 3;
 pub const DHCP_OPT_DNS: u8 = 6;
 // 9.6. DHCP Message Type (len = 1)
 pub const DHCP_OPT_MESSAGE_TYPE: u8 = 53;
+// Fixed length (1-byte) options
+pub const DHCP_OPT_MESSAGE_TYPE_PADDING: u8 = 0;
+pub const DHCP_OPT_MESSAGE_TYPE_END: u8 = 255;
+// Variable length ((2 + len) bytes) options
 pub const DHCP_OPT_MESSAGE_TYPE_DISCOVER: u8 = 1;
 pub const DHCP_OPT_MESSAGE_TYPE_OFFER: u8 = 2;
 pub const DHCP_OPT_MESSAGE_TYPE_ACK: u8 = 5;

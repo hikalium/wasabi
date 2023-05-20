@@ -280,7 +280,6 @@ impl Rtl8139DriverInstance {
         }
         (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
             loop {
-                println!("*");
                 d.poll().await?
             }
         }));

@@ -19,7 +19,9 @@ use crate::net::dhcp::DHCP_OPT_DNS;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_ACK;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_DISCOVER;
+use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_END;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_OFFER;
+use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_PADDING;
 use crate::net::dhcp::DHCP_OPT_NETMASK;
 use crate::net::dhcp::DHCP_OPT_ROUTER;
 use crate::net::dhcp::DHCP_OP_BOOTREPLY;
@@ -137,6 +139,12 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
             let options = &packet[size_of::<DhcpPacket>()..];
             let mut it = options.iter();
             while let Some(op) = it.next().cloned() {
+                if op == DHCP_OPT_MESSAGE_TYPE_PADDING {
+                    continue;
+                }
+                if op == DHCP_OPT_MESSAGE_TYPE_END {
+                    break;
+                }
                 if let Some(len) = it.next().cloned() {
                     if len == 0 {
                         break;
@@ -299,8 +307,6 @@ pub async fn network_manager_thread() -> Result<()> {
                 }
             }
         }
-        println!(".");
-
         TimeoutFuture::new_ms(100).await;
     }
 }
