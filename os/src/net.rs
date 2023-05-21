@@ -35,7 +35,6 @@ use crate::net::ip::IpV4Protocol;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
-use crate::print::hexdump;
 use crate::println;
 use crate::util::Sliceable;
 use alloc::boxed::Box;
@@ -123,7 +122,7 @@ impl Network {
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
 
-fn handle_receive_udp(packet: &[u8]) -> Result<()> {
+fn handle_rx_udp(packet: &[u8]) -> Result<()> {
     let network = Network::take();
     let udp = UdpPacket::from_slice(packet)?;
     match (udp.src_port(), udp.dst_port()) {
@@ -134,7 +133,7 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                 // Not a reply, skip this message
                 return Ok(());
             }
-            println!("DHCP SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr());
+            println!("net: rx: DHCP: SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr());
             network.set_self_ip(Some(dhcp.yiaddr()));
             let options = &packet[size_of::<DhcpPacket>()..];
             let mut it = options.iter();
@@ -176,10 +175,6 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
                             if let Ok(router) = IpV4Addr::from_slice(&data) {
                                 println!("router: {router}");
                                 network.set_router(Some(*router));
-                                // send ping
-                                network.send_ip_packet(
-                                    IcmpPacket::new_request(*router).copy_into_slice(),
-                                )
                             }
                         }
                         DHCP_OPT_DNS => {
@@ -196,52 +191,46 @@ fn handle_receive_udp(packet: &[u8]) -> Result<()> {
             }
         }
         (src, dst) => {
-            println!("UDP :{src} -> :{dst}");
+            println!("net: rx: UDP :{src} -> :{dst}");
         }
     }
 
     Ok(())
 }
 
-fn handle_receive_icmp(packet: &[u8]) -> Result<()> {
+fn handle_rx_icmp(packet: &[u8]) -> Result<()> {
     let icmp = IcmpPacket::from_slice(packet)?;
-    println!("{icmp:?}");
+    println!("net: rx: ICMP: {icmp:?}");
     Ok(())
+}
+fn handle_rx_arp(packet: &[u8]) -> Result<()> {
+    if let Ok(arp) = ArpPacket::from_slice(packet) {
+        println!("net: rx: ARP: {arp:?}");
+        if arp.is_response() {
+            Network::take().arp_table_register(arp.sender_ip_addr(), arp.sender_eth_addr())
+        }
+        Ok(())
+    } else {
+        Err(Error::Failed("handle_rx_arp: Not a valid ARP Packet"))
+    }
 }
 
 fn handle_receive(packet: &[u8]) -> Result<()> {
-    hexdump(packet);
-    if let Ok(eth) = EthernetHeader::from_slice(packet) {
-        match eth.eth_type() {
-            e if e == EthernetType::ip_v4() => {
-                println!("IPv4");
-                if let Ok(ip_v4) = IpV4Packet::from_slice(packet) {
-                    match ip_v4.protocol() {
-                        e if e == IpV4Protocol::udp() => {
-                            println!("UDP");
-                            return handle_receive_udp(packet);
-                        }
-                        e if e == IpV4Protocol::icmp() => {
-                            println!("ICMP!");
-                            return handle_receive_icmp(packet);
-                        }
-                        _ => {}
-                    }
-                }
+    match EthernetHeader::from_slice(packet)?.eth_type() {
+        e if e == EthernetType::ip_v4() => match IpV4Packet::from_slice(packet)?.protocol() {
+            e if e == IpV4Protocol::udp() => handle_rx_udp(packet),
+            e if e == IpV4Protocol::icmp() => handle_rx_icmp(packet),
+            e => {
+                println!("handle_receive: Unknown ip_v4.protocol: {e:?}");
+                Ok(())
             }
-            e if e == EthernetType::arp() => {
-                if let Ok(arp) = ArpPacket::from_slice(packet) {
-                    println!("{arp:?}");
-                    if arp.is_response() {
-                        Network::take()
-                            .arp_table_register(arp.sender_ip_addr(), arp.sender_eth_addr())
-                    }
-                }
-            }
-            _ => {}
+        },
+        e if e == EthernetType::arp() => handle_rx_arp(packet),
+        e => {
+            println!("handle_receive: Unknown eth_type {e:?}");
+            Ok(())
         }
     }
-    Ok(())
 }
 
 pub async fn network_manager_thread() -> Result<()> {

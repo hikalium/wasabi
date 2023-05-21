@@ -23,6 +23,15 @@ impl EthernetType {
         }
     }
 }
+impl Debug for EthernetType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "EthernetType({:#04X},{:#04X})",
+            self.value[0], self.value[1]
+        )
+    }
+}
 #[repr(packed)]
 #[allow(unused)]
 #[derive(Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd)]

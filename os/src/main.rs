@@ -9,6 +9,7 @@
 extern crate alloc;
 
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::pin::Pin;
 use core::str::FromStr;
 use os::boot_info::BootInfo;
@@ -25,11 +26,14 @@ use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
 use os::init;
+use os::net::icmp::IcmpPacket;
+use os::net::ip::IpV4Addr;
 use os::net::network_manager_thread;
 use os::net::Network;
 use os::print;
 use os::println;
 use os::serial::SerialPort;
+use os::util::Sliceable;
 use os::x86_64;
 use os::x86_64::init_syscall;
 use os::x86_64::paging::write_cr3;
@@ -113,34 +117,50 @@ fn run_tasks() -> Result<()> {
         }
     };
     let serial_task = async {
+        let network = Network::take();
         let sp = SerialPort::default();
         let mut s = String::new();
         loop {
             if let Some(c) = sp.try_read() {
                 if let Some(c) = char::from_u32(c as u32) {
                     if c == '\r' || c == '\n' {
-                        let cmd = s.trim();
-                        println!("\n{cmd}");
-                        match cmd {
-                            "ip" => {
-                                let network = Network::take();
-                                println!("netmask: {:?}", network.netmask());
-                                println!("router: {:?}", network.router());
-                                println!("dns: {:?}", network.dns());
-                            }
-                            "arp" => {
-                                let network = Network::take();
-                                println!("{:?}", network.arp_table_cloned())
-                            }
-                            _ => {
-                                let result = run_app(cmd);
-                                println!("{result:?}");
+                        let args = s.trim();
+                        let args: Vec<&str> = args.split(' ').collect();
+                        println!("\n{args:?}");
+                        if let Some(&cmd) = args.first() {
+                            match cmd {
+                                "ip" => {
+                                    println!("netmask: {:?}", network.netmask());
+                                    println!("router: {:?}", network.router());
+                                    println!("dns: {:?}", network.dns());
+                                }
+                                "ping" => {
+                                    if let Some(ip) = args.get(1) {
+                                        let ip = IpV4Addr::from_str(ip);
+                                        if let Ok(ip) = ip {
+                                            network.send_ip_packet(
+                                                IcmpPacket::new_request(ip).copy_into_slice(),
+                                            );
+                                        } else {
+                                            println!("{ip:?}")
+                                        }
+                                    } else {
+                                        println!("usage: ip <target_ipv4_addr>")
+                                    }
+                                }
+                                "arp" => {
+                                    println!("{:?}", network.arp_table_cloned())
+                                }
+                                app_name => {
+                                    let result = run_app(app_name);
+                                    println!("{result:?}");
+                                }
                             }
                         }
                         s.clear();
                     }
                     match c {
-                        'a'..='z' | 'A'..='Z' | '0'..='9' => {
+                        'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '.' => {
                             print!("{c}");
                             s.push(c);
                         }

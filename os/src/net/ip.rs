@@ -1,15 +1,19 @@
 extern crate alloc;
 
+use crate::error::Error;
+use crate::error::Result;
 use crate::net::checksum::InternetChecksum;
 use crate::net::eth::EthernetHeader;
 use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::fmt::Display;
+use alloc::vec::Vec;
 use core::mem::size_of;
+use core::str::FromStr;
 
 #[repr(transparent)]
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
 pub struct IpV4Protocol(u8);
 impl IpV4Protocol {
     pub fn icmp() -> Self {
@@ -46,6 +50,26 @@ impl Debug for IpV4Addr {
 impl IpV4Addr {
     pub const fn broardcast() -> Self {
         Self([0xff, 0xff, 0xff, 0xff])
+    }
+}
+impl FromStr for IpV4Addr {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        const REASON: Error = Error::Failed("Invalid IpV4 address format");
+        let s = s
+            .split('.')
+            .collect::<Vec<&str>>()
+            .iter()
+            .map(|s| u8::from_str(s).or(Err(REASON)))
+            .collect::<Result<Vec<u8>>>()
+            .or(Err(REASON))?;
+        if s.len() != 4 {
+            Err(REASON)
+        } else {
+            let mut values = [0u8; 4];
+            values.copy_from_slice(&s);
+            Ok(Self(values))
+        }
     }
 }
 unsafe impl Sliceable for IpV4Addr {}
