@@ -56,6 +56,7 @@ pub trait NetworkInterface {
     }
 }
 
+pub type ArpTable = BTreeMap<IpV4Addr, (EthernetAddr, Weak<dyn NetworkInterface>)>;
 pub struct Network {
     interfaces: Mutex<Vec<Weak<dyn NetworkInterface>>>,
     interface_has_added: AtomicBool,
@@ -64,7 +65,7 @@ pub struct Network {
     dns: Mutex<Option<IpV4Addr>>,
     self_ip: Mutex<Option<IpV4Addr>>,
     ip_tx_queue: Mutex<VecDeque<Box<[u8]>>>,
-    arp_table: Mutex<BTreeMap<IpV4Addr, EthernetAddr>>,
+    arp_table: Mutex<ArpTable>,
 }
 impl Network {
     fn new() -> Self {
@@ -113,11 +114,16 @@ impl Network {
     pub fn send_ip_packet(&self, packet: Box<[u8]>) {
         self.ip_tx_queue.lock().push_back(packet)
     }
-    pub fn arp_table_cloned(&self) -> BTreeMap<IpV4Addr, EthernetAddr> {
+    pub fn arp_table_cloned(&self) -> ArpTable {
         self.arp_table.lock().clone()
     }
-    pub fn arp_table_register(&self, ip_addr: IpV4Addr, eth_addr: EthernetAddr) {
-        self.arp_table.lock().insert(ip_addr, eth_addr);
+    pub fn arp_table_register(
+        &self,
+        ip_addr: IpV4Addr,
+        eth_addr: EthernetAddr,
+        iface: Weak<dyn NetworkInterface>,
+    ) {
+        self.arp_table.lock().insert(ip_addr, (eth_addr, iface));
     }
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
@@ -203,11 +209,15 @@ fn handle_rx_icmp(packet: &[u8]) -> Result<()> {
     println!("net: rx: ICMP: {icmp:?}");
     Ok(())
 }
-fn handle_rx_arp(packet: &[u8]) -> Result<()> {
+fn handle_rx_arp(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> {
     if let Ok(arp) = ArpPacket::from_slice(packet) {
         println!("net: rx: ARP: {arp:?}");
         if arp.is_response() {
-            Network::take().arp_table_register(arp.sender_ip_addr(), arp.sender_eth_addr())
+            Network::take().arp_table_register(
+                arp.sender_ip_addr(),
+                arp.sender_eth_addr(),
+                Rc::downgrade(iface),
+            )
         }
         Ok(())
     } else {
@@ -215,7 +225,7 @@ fn handle_rx_arp(packet: &[u8]) -> Result<()> {
     }
 }
 
-fn handle_receive(packet: &[u8]) -> Result<()> {
+fn handle_receive(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> {
     match EthernetHeader::from_slice(packet)?.eth_type() {
         e if e == EthernetType::ip_v4() => match IpV4Packet::from_slice(packet)?.protocol() {
             e if e == IpV4Protocol::udp() => handle_rx_udp(packet),
@@ -225,7 +235,7 @@ fn handle_receive(packet: &[u8]) -> Result<()> {
                 Ok(())
             }
         },
-        e if e == EthernetType::arp() => handle_rx_arp(packet),
+        e if e == EthernetType::arp() => handle_rx_arp(packet, iface),
         e => {
             println!("handle_receive: Unknown eth_type {e:?}");
             Ok(())
@@ -262,29 +272,39 @@ pub async fn network_manager_thread() -> Result<()> {
         if let Some(mut org_packet) = network.ip_tx_queue.lock().pop_front() {
             if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
                 let dst_ip = ip_packet.dst();
-                if let Some(dst_eth) = network.arp_table.lock().get(&dst_ip) {
-                    if let Some(src_ip) = *network.self_ip.lock() {
+                if let (Some(src_ip), Some(mask)) =
+                    (*network.self_ip.lock(), *network.netmask.lock())
+                {
+                    let network_prefix = src_ip.network_prefix(mask);
+                    let next_hop_info = if network_prefix == dst_ip.network_prefix(mask) {
+                        println!("Same network");
+                        network.arp_table.lock().get(&dst_ip).cloned()
+                    } else {
+                        println!("Different network");
+                        network
+                            .router
+                            .lock()
+                            .and_then(|router_ip| network.arp_table.lock().get(&router_ip).cloned())
+                    };
+                    if let Some((next_hop, iface)) = next_hop_info {
                         ip_packet.set_src(src_ip);
-                        for iface in &*interfaces {
-                            if let Some(iface) = iface.upgrade() {
-                                ip_packet.eth = EthernetHeader::new(
-                                    *dst_eth,
-                                    iface.ethernet_addr(),
-                                    EthernetType::ip_v4(),
-                                );
-                                ip_packet.clear_checksum();
-                                let csum = InternetChecksum::calc(
-                                    &org_packet
-                                        [size_of::<EthernetHeader>()..size_of::<IpV4Packet>()],
-                                );
-                                if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
-                                    ip_packet.set_checksum(csum);
-                                    iface.push_packet(org_packet.clone())?;
-                                    iface.push_packet(org_packet)?;
-                                }
-                                break;
+                        if let Some(iface) = iface.upgrade() {
+                            ip_packet.eth = EthernetHeader::new(
+                                next_hop,
+                                iface.ethernet_addr(),
+                                EthernetType::ip_v4(),
+                            );
+                            ip_packet.clear_checksum();
+                            let csum = InternetChecksum::calc(
+                                &org_packet[size_of::<EthernetHeader>()..size_of::<IpV4Packet>()],
+                            );
+                            if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
+                                ip_packet.set_checksum(csum);
+                                iface.push_packet(org_packet)?;
                             }
                         }
+                    } else {
+                        println!("No route to {dst_ip}. Dropping the packet.");
                     }
                 }
             }
@@ -292,7 +312,7 @@ pub async fn network_manager_thread() -> Result<()> {
         for iface in &*interfaces {
             if let Some(iface) = iface.upgrade() {
                 if let Ok(packet) = iface.pop_packet() {
-                    handle_receive(&packet)?;
+                    handle_receive(&packet, &iface)?;
                 }
             }
         }
