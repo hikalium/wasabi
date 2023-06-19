@@ -164,7 +164,13 @@ fn run_tasks() -> Result<()> {
                             print!("{c}");
                             s.push(c);
                         }
-                        _ => {}
+                        c if c as u8 == 0x7f => {
+                            print!("{0} {0}", 0x08 as char);
+                            s.pop();
+                        }
+                        c => {
+                            println!("unhandled: {:#04X}", c as usize)
+                        }
                     }
                 }
             }
