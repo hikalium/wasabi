@@ -14,7 +14,8 @@ QEMU_ARGS=\
 		-device qemu-xhci \
 		-device usb-kbd \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
-		-netdev user,id=net1 -device rtl8139,netdev=net1 \
+		-netdev user,id=net1,hostfwd=tcp::18080-:18080 \
+		-device rtl8139,netdev=net1 \
 		-object filter-dump,id=f2,netdev=net1,file=log/dump_net1.pcap \
 		-m 1024M \
 		-drive format=raw,file=fat:rw:mnt \

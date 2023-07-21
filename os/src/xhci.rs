@@ -592,6 +592,7 @@ impl Xhci {
     ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
         if portsc.port_speed() == UsbMode::FullSpeed {
+            // TODO: refactor this part out
             // For full speed device, we should read the first 8 bytes of the device descriptor to
             // get proper MaxPacketSize parameter.
             let device_descriptor = self
