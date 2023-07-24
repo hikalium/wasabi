@@ -6,6 +6,7 @@ pub mod dhcp;
 pub mod eth;
 pub mod icmp;
 pub mod ip;
+pub mod tcp;
 pub mod udp;
 
 use crate::error::Error;
@@ -32,6 +33,7 @@ use crate::net::icmp::IcmpPacket;
 use crate::net::ip::IpV4Addr;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
+use crate::net::tcp::TcpPacket;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
@@ -204,6 +206,21 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn handle_rx_tcp(packet: &[u8]) -> Result<()> {
+    let header = TcpPacket::from_slice(packet)?;
+    println!(
+        "net: rx: TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b}",
+        header.src_port(),
+        header.dst_port(),
+        header.seq_num(),
+        header.ack_num(),
+        header.flags(),
+    );
+    let data = &packet[header.header_len()..];
+    println!("net: rx: TCP: data: {data:X?}");
+    Ok(())
+}
+
 fn handle_rx_icmp(packet: &[u8]) -> Result<()> {
     let icmp = IcmpPacket::from_slice(packet)?;
     println!("net: rx: ICMP: {icmp:?}");
@@ -229,6 +246,7 @@ fn handle_receive(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()>
     match EthernetHeader::from_slice(packet)?.eth_type() {
         e if e == EthernetType::ip_v4() => match IpV4Packet::from_slice(packet)?.protocol() {
             e if e == IpV4Protocol::udp() => handle_rx_udp(packet),
+            e if e == IpV4Protocol::tcp() => handle_rx_tcp(packet),
             e if e == IpV4Protocol::icmp() => handle_rx_icmp(packet),
             e => {
                 println!("handle_receive: Unknown ip_v4.protocol: {e:?}");

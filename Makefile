@@ -167,8 +167,8 @@ generated/bin/os.efi:
 .PHONY : install
 install : run_deps generated/bin/os.efi
 	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
-	@read -p "Write LIUMOS to /Volumes/LIUMOS. Are you sure? [Enter to proceed, or Ctrl-C to abort] " REPLY && \
-		cp -r mnt/* /Volumes/LIUMOS/ && diskutil eject /Volumes/LIUMOS/ && echo "install done."
+	@TMPDIR=`mktemp -d` && DISK=`readlink -f /dev/disk/by-partlabel/WASABIOS` && read -p "Write WasabiOS to $${DISK}. Are you sure? [Enter to proceed, or Ctrl-C to abort] " REPLY && \
+		sudo mount $${DISK} $${TMPDIR} && sudo cp -r mnt/* $${TMPDIR}/ && sudo umount $${DISK}
 
 .PHONY : internal_launch_qemu
 internal_launch_qemu : run_deps

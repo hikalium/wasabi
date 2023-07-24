@@ -10,6 +10,7 @@ extern crate alloc;
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::arch::asm;
 use core::pin::Pin;
 use core::str::FromStr;
 use os::boot_info::BootInfo;
@@ -129,6 +130,9 @@ fn run_tasks() -> Result<()> {
                         println!("\n{args:?}");
                         if let Some(&cmd) = args.first() {
                             match cmd {
+                                "panic" => unsafe {
+                                    asm!("int3");
+                                },
                                 "ip" => {
                                     println!("netmask: {:?}", network.netmask());
                                     println!("router: {:?}", network.router());
@@ -168,8 +172,8 @@ fn run_tasks() -> Result<()> {
                             print!("{0} {0}", 0x08 as char);
                             s.pop();
                         }
-                        c => {
-                            println!("unhandled: {:#04X}", c as usize)
+                        _ => {
+                            // Do nothing
                         }
                     }
                 }
@@ -213,6 +217,7 @@ fn run_app(name: &str) -> Result<i64> {
 
 fn main() -> Result<()> {
     println!("Booting WasabiOS...");
+    println!("Wasabi OS booted. efi_main = {:#p}", efi_main as *const ());
     init::init_graphical_terminal();
     paint_wasabi_logo();
 

@@ -19,11 +19,9 @@ impl IpV4Protocol {
     pub fn icmp() -> Self {
         Self(1)
     }
-    /*
     pub fn tcp() -> Self {
         Self(6)
     }
-    */
     pub const fn udp() -> Self {
         Self(17)
     }
