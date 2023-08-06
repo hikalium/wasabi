@@ -97,9 +97,11 @@ commit :
 	git diff HEAD --color=always | less -R
 	git commit
 
-generated/font.rs: font/font.txt
+generated/font.rs: font/font.txt Makefile
 	mkdir -p generated
-	cargo run --bin font font/font.txt > $@
+	cargo run --bin font font/font.txt > $@.tmp
+	# Rename the file once the command above is succeeded to avoid issues.
+	mv $@.tmp $@
 
 .PHONY : filecheck
 filecheck:

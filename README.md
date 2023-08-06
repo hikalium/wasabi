@@ -15,7 +15,21 @@ Toy web browser and OS in Rust ("sabi" in Japanese) = WasabiOS
 - Replace the Linux kernel (of course it's too difficult, at least for now ;)
 - Support all the hardwares in the wild (it's too hard)
 
-## Getting started
+## Check prerequisites
+```
+rustup --version && \
+make --version && \
+clang --version && \
+qemu-system-x86_64 --version && \
+echo "This machine is ready to build WasabiOS!"
+
+# rustup can be installed via: https://www.rust-lang.org/tools/install
+# make can be installed with: `sudo apt install make`
+# clang can be installed with: `sudo apt install clang`
+# qemu-system-x86_64 can be installed with: `sudo apt install qemu-system-x86`
+```
+
+## Build and run WasabiOS
 
 ```
 make
