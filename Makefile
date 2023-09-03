@@ -12,7 +12,6 @@ QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
 		-bios $(OVMF) \
 		-device qemu-xhci \
-		-device usb-kbd \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
 		-netdev user,id=net1,hostfwd=tcp::18080-:18080 \
 		-device rtl8139,netdev=net1 \
@@ -29,6 +28,10 @@ QEMU_ARGS=\
 		-d int,cpu_reset \
 		-D log/qemu_debug.txt \
 		${MORE_QEMU_FLAGS}
+
+ifndef USE_PS2_KBD
+QEMU_ARGS+=-device usb-kbd
+endif
 
 ifndef DISPLAY
 QEMU_ARGS+=-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on
@@ -168,9 +171,7 @@ generated/bin/os.efi:
 
 .PHONY : install
 install : run_deps generated/bin/os.efi
-	cp  generated/bin/os.efi mnt/EFI/BOOT/BOOTX64.EFI
-	@TMPDIR=`mktemp -d` && DISK=`readlink -f /dev/disk/by-partlabel/WASABIOS` && read -p "Write WasabiOS to $${DISK}. Are you sure? [Enter to proceed, or Ctrl-C to abort] " REPLY && \
-		sudo mount $${DISK} $${TMPDIR} && sudo cp -r mnt/* $${TMPDIR}/ && sudo umount $${DISK}
+	bash ./scripts/install.sh
 
 .PHONY : internal_launch_qemu
 internal_launch_qemu : run_deps

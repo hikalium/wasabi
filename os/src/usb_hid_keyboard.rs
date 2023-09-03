@@ -23,14 +23,14 @@ use alloc::vec::Vec;
 use core::cmp::max;
 use core::pin::Pin;
 
-pub async fn attach_usb_device(
+pub async fn init_usb_hid_keyboard(
     xhci: &mut Xhci,
     port: usize,
     slot: u8,
     input_context: &mut Pin<&mut InputContext>,
     ctrl_ep_ring: &mut CommandRing,
     descriptors: &Vec<UsbDescriptor>,
-) -> Result<()> {
+) -> Result<[Option<TransferRing>; 32]> {
     let mut last_config: Option<ConfigDescriptor> = None;
     let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
     let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
@@ -121,7 +121,21 @@ pub async fn attach_usb_device(
             None => {}
         }
     }
-    println!("USB Keyboard initialized!");
+    Ok(ep_rings)
+}
+
+pub async fn attach_usb_device(
+    xhci: &mut Xhci,
+    port: usize,
+    slot: u8,
+    input_context: &mut Pin<&mut InputContext>,
+    ctrl_ep_ring: &mut CommandRing,
+    descriptors: &Vec<UsbDescriptor>,
+) -> Result<()> {
+    let mut ep_rings =
+        init_usb_hid_keyboard(xhci, port, slot, input_context, ctrl_ep_ring, descriptors).await?;
+
+    let portsc = xhci.portsc(port)?;
     let mut prev_pressed_keys = BitSet::<32>::new();
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;

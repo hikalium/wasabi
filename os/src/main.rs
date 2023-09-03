@@ -117,6 +117,20 @@ fn run_tasks() -> Result<()> {
             yield_execution().await;
         }
     };
+    let ps2_keyboard_task = async {
+        loop {
+            const PORT_PS2_KBD_CMD_AND_STATUS: u16 = 0x64;
+            const PORT_PS2_KBD_DATA: u16 = 0x60;
+            const BIT_PS2_KBD_CMD_AND_STATUS_DATA_READY: u8 = 0x01;
+            let kbd_status = x86_64::read_io_port_u8(PORT_PS2_KBD_CMD_AND_STATUS);
+            if kbd_status & BIT_PS2_KBD_CMD_AND_STATUS_DATA_READY != 0 {
+                let kbd_data = x86_64::read_io_port_u8(PORT_PS2_KBD_DATA);
+                println!("KBD: {kbd_data}");
+            }
+            TimeoutFuture::new_ms(10).await;
+            yield_execution().await;
+        }
+    };
     let serial_task = async {
         let network = Network::take();
         let sp = SerialPort::default();
@@ -187,6 +201,7 @@ fn run_tasks() -> Result<()> {
         let mut executor = ROOT_EXECUTOR.lock();
         executor.spawn(Task::new(task0));
         executor.spawn(Task::new(task1));
+        executor.spawn(Task::new(ps2_keyboard_task));
         executor.spawn(Task::new(serial_task));
         executor.spawn(Task::new(async { network_manager_thread().await }));
     }
