@@ -1,9 +1,0 @@
-[unstable]
-build-std = ["core", "compiler_builtins", "alloc"]
-build-std-features = ["compiler_builtins_mem"]
-
-[build]
-target = "x86_64-unknown-elf.json"
-
-[target.lib]
-target = "x86_64-unknown-elf.json"
