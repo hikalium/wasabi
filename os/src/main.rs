@@ -78,6 +78,45 @@ fn paint_wasabi_logo() {
     }
 }
 
+fn run_command(cmdline: &str) -> Result<()> {
+    let network = Network::take();
+    let args = cmdline.trim();
+    let args: Vec<&str> = args.split(' ').collect();
+    println!("\n{args:?}");
+    if let Some(&cmd) = args.first() {
+        match cmd {
+            "panic" => unsafe {
+                asm!("int3");
+            },
+            "ip" => {
+                println!("netmask: {:?}", network.netmask());
+                println!("router: {:?}", network.router());
+                println!("dns: {:?}", network.dns());
+            }
+            "ping" => {
+                if let Some(ip) = args.get(1) {
+                    let ip = IpV4Addr::from_str(ip);
+                    if let Ok(ip) = ip {
+                        network.send_ip_packet(IcmpPacket::new_request(ip).copy_into_slice());
+                    } else {
+                        println!("{ip:?}")
+                    }
+                } else {
+                    println!("usage: ip <target_ipv4_addr>")
+                }
+            }
+            "arp" => {
+                println!("{:?}", network.arp_table_cloned())
+            }
+            app_name => {
+                let result = run_app(app_name);
+                println!("{result:?}");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn run_tasks() -> Result<()> {
     let task0 = async {
         let mut vram = BootInfo::take().vram();
@@ -132,49 +171,13 @@ fn run_tasks() -> Result<()> {
         }
     };
     let serial_task = async {
-        let network = Network::take();
         let sp = SerialPort::default();
         let mut s = String::new();
         loop {
             if let Some(c) = sp.try_read() {
                 if let Some(c) = char::from_u32(c as u32) {
                     if c == '\r' || c == '\n' {
-                        let args = s.trim();
-                        let args: Vec<&str> = args.split(' ').collect();
-                        println!("\n{args:?}");
-                        if let Some(&cmd) = args.first() {
-                            match cmd {
-                                "panic" => unsafe {
-                                    asm!("int3");
-                                },
-                                "ip" => {
-                                    println!("netmask: {:?}", network.netmask());
-                                    println!("router: {:?}", network.router());
-                                    println!("dns: {:?}", network.dns());
-                                }
-                                "ping" => {
-                                    if let Some(ip) = args.get(1) {
-                                        let ip = IpV4Addr::from_str(ip);
-                                        if let Ok(ip) = ip {
-                                            network.send_ip_packet(
-                                                IcmpPacket::new_request(ip).copy_into_slice(),
-                                            );
-                                        } else {
-                                            println!("{ip:?}")
-                                        }
-                                    } else {
-                                        println!("usage: ip <target_ipv4_addr>")
-                                    }
-                                }
-                                "arp" => {
-                                    println!("{:?}", network.arp_table_cloned())
-                                }
-                                app_name => {
-                                    let result = run_app(app_name);
-                                    println!("{result:?}");
-                                }
-                            }
-                        }
+                        run_command(&s)?;
                         s.clear();
                     }
                     match c {
