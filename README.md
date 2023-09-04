@@ -16,34 +16,43 @@ Toy web browser and OS in Rust ("sabi" in Japanese) = WasabiOS
 - Support all the hardwares in the wild (it's too hard)
 
 ## Check prerequisites
+
+### Ubuntu
+
 ```
 rustup --version && \
 make --version && \
 clang --version && \
 qemu-system-x86_64 --version && \
 echo "This machine is ready to build WasabiOS!"
-
-# rustup can be installed via: https://www.rust-lang.org/tools/install
-# make can be installed with: `sudo apt install make`
-# clang can be installed with: `sudo apt install clang`
-# qemu-system-x86_64 can be installed with: `sudo apt install qemu-system-x86`
 ```
 
-## Build and run WasabiOS
+- `rustup` can be installed via: https://www.rust-lang.org/tools/install
+- `make` can be installed with: `sudo apt install make`
+- `clang` can be installed with: `sudo apt install clang`
+- `qemu-system-x86_64` can be installed with: `sudo apt install qemu-system-x86`
+
+### Crostini (Linux environment on ChromeOS)
+
+```
+./scripts/setup_dev_crostini.sh
+bash # to reload environment variables
+```
+
+## Build and run WasabiOS on QEMU
 
 ```
 make
 make run
 ```
-## Running app
+
+### Running app
 
 ```
 make internal_run_app_test INIT="app_name_here"
 ```
 
 ## Debugging tips
-
-
 
 ```
 make run MORE_QEMU_FLAGS='-nographic'
