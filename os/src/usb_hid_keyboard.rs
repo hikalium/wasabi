@@ -124,6 +124,34 @@ pub async fn init_usb_hid_keyboard(
     Ok(ep_rings)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum KeyEvent {
+    None,
+    Char(char),
+    Enter,
+}
+
+impl KeyEvent {
+    fn to_char(&self) -> Option<char> {
+        match self {
+            KeyEvent::Char(c) => Some(*c),
+            KeyEvent::Enter => Some('\n'),
+            _ => None,
+        }
+    }
+}
+
+fn usage_id_to_char(usage_id: u8) -> Result<KeyEvent> {
+    match usage_id {
+        0 => Ok(KeyEvent::None),
+        4..=30 => Ok(KeyEvent::Char((b'a' + usage_id - 4) as char)),
+        40 => Ok(KeyEvent::Enter),
+        _ => Err(Error::FailedString(format!(
+            "Unhandled USB HID Keyboard Usage ID {usage_id:}"
+        ))),
+    }
+}
+
 pub async fn attach_usb_device(
     xhci: &mut Xhci,
     port: usize,
@@ -156,12 +184,25 @@ pub async fn attach_usb_device(
                     xhci.notify_ep(slot, trb.dci());
                 }
                 let mut next_pressed_keys = BitSet::<32>::new();
-                for value in report.iter() {
+                // First two bytes are modifiers, so skip them
+                let keycodes = report.iter().skip(2);
+                for value in keycodes {
                     next_pressed_keys.insert(*value as usize).unwrap();
                 }
                 let change = prev_pressed_keys.symmetric_difference(&next_pressed_keys);
                 for id in change.iter() {
-                    println!("key changed: {id}");
+                    let c = usage_id_to_char(id as u8);
+                    if let Ok(c) = c {
+                        if !prev_pressed_keys.get(id).unwrap_or(false) {
+                            // the key state was changed from released to pressed
+                            if c == KeyEvent::None {
+                                continue;
+                            }
+                            println!("key pressed: {id} => {c:?} {:?}", c.to_char());
+                        }
+                    } else {
+                        println!("{c:?}");
+                    }
                 }
                 prev_pressed_keys = next_pressed_keys;
             }

@@ -83,13 +83,16 @@ test:
 	make run_os_test
 	make run_os_lib_test
 
+.PHONY : fmt
+fmt :
+	rustup component add rustfmt
+	cargo fmt
+
 .PHONY : commit
 commit :
+	make fmt
 	git add .
 	make filecheck
-	rustup component add rustfmt
-	rustup component add clippy
-	cargo fmt
 	make rustcheck
 	make clippy
 	make spellcheck
