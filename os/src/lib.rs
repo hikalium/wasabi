@@ -37,6 +37,7 @@ pub mod executor;
 pub mod graphics;
 pub mod hpet;
 pub mod init;
+pub mod input;
 pub mod memory;
 pub mod memory_map_holder;
 pub mod mutex;

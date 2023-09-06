@@ -27,6 +27,7 @@ use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
 use os::graphics::BitmapImageBuffer;
 use os::init;
+use os::input::InputManager;
 use os::net::icmp::IcmpPacket;
 use os::net::ip::IpV4Addr;
 use os::net::network_manager_thread;
@@ -172,26 +173,37 @@ fn run_tasks() -> Result<()> {
     };
     let serial_task = async {
         let sp = SerialPort::default();
-        let mut s = String::new();
         loop {
             if let Some(c) = sp.try_read() {
                 if let Some(c) = char::from_u32(c as u32) {
-                    if c == '\r' || c == '\n' {
-                        run_command(&s)?;
-                        s.clear();
+                    InputManager::take().push_input(c);
+                }
+            }
+            TimeoutFuture::new_ms(20).await;
+            yield_execution().await;
+        }
+    };
+    let console_task = async {
+        let mut s = String::new();
+        loop {
+            if let Some(c) = InputManager::take().pop_input() {
+                if c == '\r' || c == '\n' {
+                    if let Err(e) = run_command(&s) {
+                        println!("{e:?}");
+                    };
+                    s.clear();
+                }
+                match c {
+                    'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '.' => {
+                        print!("{c}");
+                        s.push(c);
                     }
-                    match c {
-                        'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '.' => {
-                            print!("{c}");
-                            s.push(c);
-                        }
-                        c if c as u8 == 0x7f => {
-                            print!("{0} {0}", 0x08 as char);
-                            s.pop();
-                        }
-                        _ => {
-                            // Do nothing
-                        }
+                    c if c as u8 == 0x7f => {
+                        print!("{0} {0}", 0x08 as char);
+                        s.pop();
+                    }
+                    _ => {
+                        // Do nothing
                     }
                 }
             }
@@ -206,6 +218,7 @@ fn run_tasks() -> Result<()> {
         executor.spawn(Task::new(task1));
         executor.spawn(Task::new(ps2_keyboard_task));
         executor.spawn(Task::new(serial_task));
+        executor.spawn(Task::new(console_task));
         executor.spawn(Task::new(async { network_manager_thread().await }));
     }
     init::init_pci();
