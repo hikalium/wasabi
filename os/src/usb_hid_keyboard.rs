@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::bitset::BitSet;
 use crate::error::Error;
 use crate::error::Result;
+use crate::input::InputManager;
 use crate::memory::Mmio;
 use crate::println;
 use crate::usb::ConfigDescriptor;
@@ -198,7 +199,9 @@ pub async fn attach_usb_device(
                             if c == KeyEvent::None {
                                 continue;
                             }
-                            println!("key pressed: {id} => {c:?} {:?}", c.to_char());
+                            if let Some(c) = c.to_char() {
+                                InputManager::take().push_input(c);
+                            }
                         }
                     } else {
                         println!("{c:?}");
