@@ -7,5 +7,6 @@ members = [
     "app/hello1",
     "app/uname",
     "app/loop",
+    "app/window0",
     "noli",
 ]
