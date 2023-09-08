@@ -7,7 +7,7 @@ build-std-features = ["compiler-builtins-mem"]
 
 [build]
 # See this json for rustflags
-target = "x86_64-wasabi-elf.json"
+target = "../../noli/x86_64-wasabi-elf.json"
 # c.f. https://users.rust-lang.org/t/how-to-pass-cargo-linker-args/3163/3
 # c.f. https://darkcoding.net/software/a-very-small-rust-binary-indeed/
 # c.f. https://doc.rust-lang.org/rustc/codegen-options/index.html
@@ -17,4 +17,4 @@ strip = false
 opt-level = 0
 
 [lib]
-target = "x86_64-wasabi-elf.json"
+target = "../../noli/x86_64-wasabi-elf.json"

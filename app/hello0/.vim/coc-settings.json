@@ -7,8 +7,6 @@
         "clippy",
         "--message-format=json",
         "--bins",
-        "--all-features",
-        "--target",
-        "x86_64-unknown-elf.json"
+        "--all-features"
     ]
 }
