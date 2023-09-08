@@ -13,14 +13,18 @@ use core::panic::PanicInfo;
 
 /*
 Wasabi OS calling convention:
-    args[0]: rax (syscall number)
-    args[1]: rdi
-    args[2]: rsi
-    args[3]: rdx
-    args[4]: r10
-    args[5]: r8
-    args[6]: r9
-    return: rax
+    args:
+        args[0]: rax (syscall number)
+        args[1]: rdi
+        args[2]: rsi
+        args[3]: rdx
+        args[4]: r10
+        args[5]: r8
+        args[6]: r9
+    return:
+        retv[0]: rax
+    scratch: (will be destroyed)
+        rcx
 */
 
 #[panic_handler]
@@ -56,6 +60,18 @@ pub fn _print(args: fmt::Arguments) {
     fmt::write(&mut writer, args).unwrap();
 }
 
+pub fn sys_exit(code: i64) -> ! {
+    unsafe {
+        asm!(
+        "mov rax, 0",
+        "syscall",
+        out("rcx") _, // will be broken by syscall
+        in("rdi") code,
+        )
+    }
+    unreachable!()
+}
+
 pub fn sys_print(s: &str) -> i64 {
     let len = s.len();
     let s = s.as_ptr() as u64;
@@ -72,16 +88,16 @@ pub fn sys_print(s: &str) -> i64 {
     result
 }
 
-pub fn sys_exit(code: i64) -> ! {
+pub fn sys_draw_point() -> u64 {
+    let mut result;
     unsafe {
         asm!(
-        "mov rax, 0",
+        "mov rax, 2",
+        "mov rcx, 0",
         "syscall",
-        out("rcx") _, // will be broken by syscall
-        in("rdi") code,
-        )
+        lateout("rcx") result);
     }
-    unreachable!()
+    result
 }
 
 pub fn sys_noop() -> u64 {
