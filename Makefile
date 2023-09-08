@@ -149,8 +149,8 @@ run_os_lib_test :
 app :
 	-rm -r generated/bin
 	make -C app/hello0
-	make -C app/hello1 install
-	make -C app/uname install
+	make -C app/hello1
+	make -C app/uname
 	make -C app/loop
 
 .PHONY : run_deps

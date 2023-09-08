@@ -5,20 +5,22 @@
   "features": "-mmx,-sse,+soft-float",
   "linker": "rust-lld",
   "linker-flavor": "ld.lld",
-  "llvm-target": "x86_64-unknown-none-elf",
+  "llvm-target": "x86_64-unknown-none",
   "panic-strategy": "abort",
   "pre-link-args": {
     "ld.lld": [
-      "-n",
-      "-N",
-      "-e", "entry",
+      "-e",
+      "entry",
       "--static",
-      "--no-rosegment",
+      "--hash-style=sysv",
       "--no-dynamic-linker",
-      "--build-id=none"
+      "--build-id=none",
+      "--no-eh-frame-hdr",
+      "-z",
+      "norelro",
+      "-z",
+      "execstack"
     ]
   },
-  "relocation-model": "pie",
-  "relro-level": "off",
   "target-pointer-width": "64"
 }
