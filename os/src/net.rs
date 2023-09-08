@@ -209,12 +209,13 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
 fn handle_rx_tcp(packet: &[u8]) -> Result<()> {
     let header = TcpPacket::from_slice(packet)?;
     println!(
-        "net: rx: TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b}",
+        "net: rx: TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b} ({})",
         header.src_port(),
         header.dst_port(),
         header.seq_num(),
         header.ack_num(),
         header.flags(),
+        if header.is_syn() { "SYN" } else { "" },
     );
     let data = &packet[header.header_len()..];
     println!("net: rx: TCP: data: {data:X?}");
