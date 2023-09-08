@@ -88,14 +88,17 @@ pub fn sys_print(s: &str) -> i64 {
     result
 }
 
-pub fn sys_draw_point() -> u64 {
+pub fn sys_draw_point(x: i64, y: i64, c: u32) -> i64 {
     let mut result;
     unsafe {
         asm!(
         "mov rax, 2",
-        "mov rcx, 0",
         "syscall",
-        lateout("rcx") result);
+        out("rcx") _, // will be broken by syscall
+        in("rdi") x,
+        in("rsi") y,
+        in("rdx") c,
+        lateout("rax") result);
     }
     result
 }

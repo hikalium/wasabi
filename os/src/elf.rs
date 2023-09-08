@@ -221,20 +221,16 @@ impl<'a> LoadedElf<'a> {
         Err(Error::Failed("vaddr not found"))
     }
     pub fn exec(self) -> Result<i64> {
-        println!("LoadedElf::exec(file: {})", self.elf.file.name());
         let stack_size = 8 * 1024;
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
         let stack_range = stack.range();
-        println!("Stack allocated = {stack_range:?}",);
         stack.fill_with_bytes(0);
         stack.set_page_attr(PageAttr::ReadWriteUser)?;
         let entry_point = self.resolve_vaddr(self.elf.entry_vaddr as usize)?;
-        println!("entry_point = {:#018X}", entry_point);
         let os_ctx = ExecutionContext::allocate();
         {
             let mut ctx = CONTEXT_OS.lock();
             *ctx = os_ctx;
-            println!("CONTEXT_OS: {:?}", *ctx);
         }
         let retcode: i64;
         unsafe {
@@ -348,7 +344,7 @@ pub struct Elf<'a> {
     file: &'a File,
     entry_vaddr: u64,
     segments: Vec<SegmentHeader>,
-    sections: BTreeMap<String, SectionHeader>,
+    _sections: BTreeMap<String, SectionHeader>,
     string_table: Option<&'a [u8]>,
 }
 impl<'a> Elf<'a> {
@@ -375,7 +371,6 @@ impl<'a> Elf<'a> {
         Self::read_string_from_table(&self.string_table, name_ofs)
     }
     pub fn parse(file: &'a File) -> Result<Self> {
-        println!("Elf::parse(file: {})", file.name());
         let data = file.data();
         // https://wiki.osdev.org/ELF#Header
         if &data[0..4] != b"\x7fELF".as_slice() {
@@ -470,7 +465,7 @@ impl<'a> Elf<'a> {
             file,
             entry_vaddr,
             segments,
-            sections,
+            _sections: sections,
             string_table,
         })
     }
@@ -495,15 +490,6 @@ impl<'a> Elf<'a> {
         Ok(())
     }
     pub fn load(&self) -> Result<LoadedElf> {
-        println!("Elf::load(file: {})", self.file.name());
-        println!("Segments:");
-        for s in &self.segments {
-            println!("{s:?}");
-        }
-        println!("Sections:");
-        for (i, s) in &self.sections {
-            println!("{i:16} {s:?}");
-        }
         let segments_to_be_loaded: Vec<&SegmentHeader> = self
             .segments
             .iter()
@@ -511,9 +497,6 @@ impl<'a> Elf<'a> {
             .collect();
         if segments_to_be_loaded.is_empty() {
             return Err(Error::Failed("LOAD segment not found"));
-        }
-        for s in &segments_to_be_loaded {
-            println!("{s:?}");
         }
         let app_vaddr_range: AddressRange = AddressRange::from(
             segments_to_be_loaded
@@ -583,7 +566,6 @@ impl<'a> Elf<'a> {
                     .map(RelocationEntry::try_from)
                     .collect::<Result<Vec<RelocationEntry>>>()?;
                 for e in rela_entries {
-                    println!("{:?}", e);
                     let rel_type = e.info & 0xffffffff;
                     if rel_type == R_386_RELATIVE {
                         let resolved = loaded.resolve_vaddr(e.addend as usize)?;

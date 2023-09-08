@@ -1,25 +1,9 @@
+use crate::boot_info::BootInfo;
+use crate::graphics::draw_line;
 use crate::print;
 use crate::println;
 use crate::x86_64::ExecutionContext;
 use crate::x86_64::CONTEXT_OS;
-
-/*
-    0 rax: u64,
-    1 rcx: u64,
-    2 rdx: u64,
-    3 rbx: u64,
-    4 rbp: u64,
-    5 rsi: u64,
-    6 rdi: u64,
-    7 r8: u64,
-    8 r9: u64,
-    9 r10: u64,
-    10 r11: u64,
-    11 r12: u64,
-    12 r13: u64,
-    13 r14: u64,
-    14 r15: u64,
-*/
 
 fn write_return_value(retv: u64) {
     let ctx = {
@@ -66,7 +50,18 @@ fn sys_print(regs: &[u64; 15]) {
 
     print!("{}", s)
 }
+
 fn sys_noop(_args: &[u64; 15]) {}
+
+fn sys_draw_point(regs: &[u64; 15]) {
+    let mut vram = BootInfo::take().vram();
+    let x = regs[1] as i64;
+    let y = regs[2] as i64;
+    let c = regs[3] as u32;
+    let result = draw_line(&mut vram, c, 0, 0, x, y);
+    let retv = if result.is_err() { 1 } else { 0 };
+    write_return_value(retv);
+}
 
 #[no_mangle]
 pub extern "sysv64" fn syscall_handler(regs: &[u64; 15] /* rdi */) {
@@ -89,6 +84,7 @@ pub extern "sysv64" fn syscall_handler(regs: &[u64; 15] /* rdi */) {
     match op {
         0 => sys_exit(regs),
         1 => sys_print(regs),
+        2 => sys_draw_point(regs),
         3 => sys_noop(regs),
         op => {
             println!("syscall: unimplemented syscall: {}", op);
