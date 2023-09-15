@@ -124,7 +124,7 @@ fn run_tasks() -> Result<()> {
         let mut vram = BootInfo::take().vram();
         let h = 10;
         let colors = [0xFF0000, 0x00FF00, 0x0000FF];
-        let y = vram.height() / 3;
+        let y = vram.height() / 16 * 14;
         let xbegin = vram.width() / 2;
         let mut x = xbegin;
         let mut c = 0;
@@ -143,7 +143,7 @@ fn run_tasks() -> Result<()> {
         let mut vram = BootInfo::take().vram();
         let h = 10;
         let colors = [0xFF0000, 0x00FF00, 0x0000FF];
-        let y = vram.height() / 3 * 2;
+        let y = vram.height() / 16 * 15;
         let xbegin = vram.width() / 2;
         let mut x = xbegin;
         let mut c = 0;
@@ -206,7 +206,9 @@ fn run_tasks() -> Result<()> {
         executor.spawn(Task::new(async { keyboard_task().await }));
         executor.spawn(Task::new(serial_task));
         executor.spawn(Task::new(console_task));
-        executor.spawn(Task::new(async { network_manager_thread().await }));
+        if false {
+            executor.spawn(Task::new(async { network_manager_thread().await }));
+        }
     }
     init::init_pci();
     Executor::run(&ROOT_EXECUTOR);

@@ -27,6 +27,7 @@ QEMU_ARGS=\
 		--no-reboot \
 		-d int,cpu_reset \
 		-D log/qemu_debug.txt \
+		-device usb-tablet \
 		${MORE_QEMU_FLAGS}
 
 ifndef USE_PS2_KBD

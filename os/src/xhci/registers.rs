@@ -180,9 +180,10 @@ impl Debug for PortScWrapper {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "PORTSC: value={:#010X}, state={:?}, link_state={:?}, mode={:?}",
+            "PORTSC: {:#010X} {:?} (PP={:?}, PLS={:?}, Speed={:?})",
             self.value(),
             self.state(),
+            self.pp(),
             self.pls(),
             self.port_speed(),
         )
@@ -195,31 +196,31 @@ pub struct PortScIteratorItem {
 }
 pub struct PortScIterator<'a> {
     list: &'a PortSc,
-    next_index: usize,
-    next_index_back: usize,
+    next_port: usize,
+    next_port_back: usize,
 }
 impl<'a> Iterator for PortScIterator<'a> {
     type Item = PortScIteratorItem;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next_index > self.next_index_back {
-            None
-        } else {
-            let port = self.next_index + 1;
+        if self.next_port <= self.next_port_back {
+            let port = self.next_port;
             let portsc = self.list.get(port).ok()?;
-            self.next_index += 1;
+            self.next_port += 1;
             Some(PortScIteratorItem { port, portsc })
+        } else {
+            None
         }
     }
 }
 impl<'a> DoubleEndedIterator for PortScIterator<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.next_index > self.next_index_back {
-            None
-        } else {
-            let port = self.next_index_back - 1;
+        if self.next_port <= self.next_port_back {
+            let port = self.next_port_back;
             let portsc = self.list.get(port).ok()?;
-            self.next_index_back -= 1;
+            self.next_port_back -= 1;
             Some(PortScIteratorItem { port, portsc })
+        } else {
+            None
         }
     }
 }
@@ -250,13 +251,13 @@ impl PortSc {
     pub fn iter(&self) -> PortScIterator {
         PortScIterator {
             list: self,
-            next_index: 0,
-            next_index_back: self.num_ports,
+            // Note: valid ports are 1..=self.num_ports
+            next_port: 1,
+            next_port_back: self.num_ports,
         }
     }
 }
 
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct CapabilityRegisters {
     length: Volatile<u8>,

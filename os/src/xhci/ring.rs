@@ -3,7 +3,6 @@ extern crate alloc;
 use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
-use crate::println;
 use crate::x86_64::paging::disable_cache;
 use crate::x86_64::paging::IoBox;
 use crate::xhci::trb::GenericTrbEntry;
@@ -93,7 +92,7 @@ impl TrbRing {
 impl Debug for TrbRing {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "TrbRing: state: ",)?;
-        for e in self.trb {
+        for e in &self.trb {
             write!(f, "{}", e.cycle_state() as u8)?;
         }
         Ok(())
@@ -205,7 +204,6 @@ impl TransferRing {
             let mut_ring = unsafe { self.ring.get_unchecked_mut() };
             mut_ring.advance_index(!self.cycle_state_ours)?;
         }
-        println!("ring filled: {:?}", self);
         Ok(())
     }
     pub fn dequeue_trb(&mut self, trb_ptr: usize) -> Result<()> {

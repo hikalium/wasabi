@@ -19,6 +19,7 @@ use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
+use crate::print;
 use crate::println;
 use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorIterator;
@@ -475,7 +476,9 @@ impl Xhci {
             buf.as_mut(),
         )
         .await?;
-        Ok(String::from_utf8_lossy(&buf[2..]).to_string())
+        Ok(String::from_utf8_lossy(&buf[2..])
+            .to_string()
+            .replace('\0', ""))
     }
     async fn request_string_descriptor_zero(
         &mut self,
@@ -622,39 +625,46 @@ impl Xhci {
             .await
         {
             let lang_id = e[1];
-            if device_descriptor.manufacturer_idx != 0 {
-                let vendor_name = self
-                    .request_string_descriptor(
+            let vendor = if device_descriptor.manufacturer_idx != 0 {
+                Some(
+                    self.request_string_descriptor(
                         slot,
                         ctrl_ep_ring,
                         lang_id,
                         device_descriptor.manufacturer_idx,
                     )
-                    .await?;
-                println!("Vendor: {}", vendor_name);
-            }
-            if device_descriptor.product_idx != 0 {
-                let product_name = self
-                    .request_string_descriptor(
+                    .await?,
+                )
+            } else {
+                None
+            };
+            let product = if device_descriptor.product_idx != 0 {
+                Some(
+                    self.request_string_descriptor(
                         slot,
                         ctrl_ep_ring,
                         lang_id,
                         device_descriptor.product_idx,
                     )
-                    .await?;
-                println!("Product: {}", product_name);
-            }
-            if device_descriptor.serial_idx != 0 {
-                let serial = self
-                    .request_string_descriptor(
+                    .await?,
+                )
+            } else {
+                None
+            };
+            let serial = if device_descriptor.serial_idx != 0 {
+                Some(
+                    self.request_string_descriptor(
                         slot,
                         ctrl_ep_ring,
                         lang_id,
                         device_descriptor.serial_idx,
                     )
-                    .await?;
-                println!("Serial: {}", serial);
-            }
+                    .await?,
+                )
+            } else {
+                None
+            };
+            println!("USB device detected: {vendor:?} {product:?} {serial:?}");
         }
         if device_descriptor.vendor_id == 2965 && device_descriptor.product_id == 6032 {
             ax88179::attach_usb_device(self, port, slot, input_context, ctrl_ep_ring, &descriptors)
@@ -764,7 +774,6 @@ impl Xhci {
         if let Some((port, portsc)) =
             self.portsc
                 .iter()
-                .rev()
                 .find_map(|PortScIteratorItem { port, portsc }| {
                     if portsc.csc() {
                         portsc.clear_csc();
@@ -775,9 +784,10 @@ impl Xhci {
                 })
         {
             if portsc.ccs() {
-                println!("Port {}: Device attached: {:?}", port, portsc);
+                print!("Port {port}: Device attached: {portsc:?}: ");
                 if portsc.state() == PortState::Disabled {
                     // USB2
+                    println!("USB2");
                     if let Err(e) = self.enable_port(port).await {
                         println!(
                             "Failed to initialize an USB2 device on port {}: {:?}",
@@ -786,12 +796,17 @@ impl Xhci {
                     }
                 } else if portsc.state() == PortState::Enabled {
                     // USB3
+                    println!("USB3 (Skipping)");
+                    /*
                     if let Err(e) = self.enable_slot(port).await {
                         println!(
                             "Failed to initialize an USB3 device on port {}: {:?}",
                             port, e
                         );
                     }
+                    */
+                } else {
+                    println!("Unexpected state");
                 }
             } else {
                 println!("Port {}: Device detached: {:?}", port, portsc);

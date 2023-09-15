@@ -102,6 +102,7 @@ where
 
 #[test_case]
 fn extract_bits_tests() {
+    assert_eq!(extract_bits(30u32 << 24, 24, 8), 30u32);
     assert_eq!(extract_bits(0x123u64, 0, 12), 0x123u64);
     assert_eq!(extract_bits(0x123u64, 4, 12), 0x12u64);
     assert_eq!(extract_bits(0x123u64, 4, 8), 0x12u64);
