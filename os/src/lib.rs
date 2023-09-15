@@ -53,6 +53,7 @@ pub mod test_runner;
 pub mod text_area;
 pub mod usb;
 pub mod usb_hid_keyboard;
+pub mod usb_hid_tablet;
 pub mod util;
 pub mod volatile;
 pub mod vram;

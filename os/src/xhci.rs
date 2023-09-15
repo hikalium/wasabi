@@ -26,9 +26,9 @@ use crate::usb::DescriptorIterator;
 use crate::usb::DescriptorType;
 use crate::usb::DeviceDescriptor;
 use crate::usb::EndpointDescriptor;
-use crate::usb::InterfaceDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::usb_hid_keyboard;
+use crate::usb_hid_tablet;
 use crate::util::IntoPinnedMutableSlice;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::paging::IoBox;
@@ -666,33 +666,48 @@ impl Xhci {
             };
             println!("USB device detected: {vendor:?} {product:?} {serial:?}");
         }
-        if device_descriptor.vendor_id == 2965 && device_descriptor.product_id == 6032 {
+        let device_vendor_id = device_descriptor.vendor_id;
+        let device_product_id = device_descriptor.product_id;
+        println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
+        if device_vendor_id == 2965 && device_product_id == 6032 {
             ax88179::attach_usb_device(self, port, slot, input_context, ctrl_ep_ring, &descriptors)
                 .await?;
-        } else if device_descriptor.vendor_id == 0x0bda
-            && (device_descriptor.product_id == 0x8153 || device_descriptor.product_id == 0x8151)
+        } else if device_vendor_id == 0x0bda
+            && (device_product_id == 0x8153 || device_product_id == 0x8151)
         {
             println!("rtl8153/8151 is not supported yet...");
         } else if device_descriptor.device_class == 0 {
             // Device class is derived from Interface Descriptor
-            let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
-            for d in &descriptors {
+            'desc_loop: for d in &descriptors {
                 if let UsbDescriptor::Interface(e) = d {
-                    if let (3, 1, 1) = e.triple() {
-                        boot_keyboard_interface = Some(*e)
+                    match e.triple() {
+                        (3, 0, 0) => {
+                            usb_hid_tablet::attach_usb_device(
+                                self,
+                                port,
+                                slot,
+                                input_context,
+                                ctrl_ep_ring,
+                                &descriptors,
+                            )
+                            .await?;
+                            break 'desc_loop;
+                        }
+                        (3, 1, 1) => {
+                            usb_hid_keyboard::attach_usb_device(
+                                self,
+                                port,
+                                slot,
+                                input_context,
+                                ctrl_ep_ring,
+                                &descriptors,
+                            )
+                            .await?;
+                            break 'desc_loop;
+                        }
+                        triple => println!("Skipping unknown interface triple: {triple:?}"),
                     }
                 }
-            }
-            if boot_keyboard_interface.is_some() {
-                usb_hid_keyboard::attach_usb_device(
-                    self,
-                    port,
-                    slot,
-                    input_context,
-                    ctrl_ep_ring,
-                    &descriptors,
-                )
-                .await?;
             }
         } else {
             println!(
