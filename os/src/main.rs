@@ -25,6 +25,7 @@ use os::executor::Task;
 use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
+use os::graphics::draw_rect;
 use os::graphics::BitmapImageBuffer;
 use os::init;
 use os::input::InputManager;
@@ -198,7 +199,26 @@ fn run_tasks() -> Result<()> {
             yield_execution().await;
         }
     };
-    // This is safe since GlobalAllocator is already initialized.
+    let mouse_cursor_task = async {
+        let mut vram = BootInfo::take().vram();
+        let iw = vram.width();
+        let ih = vram.height();
+        let w = iw as f32;
+        let h = ih as f32;
+        let color = 0xffff00;
+        loop {
+            if let Some((px, py)) = InputManager::take().pop_cursor_input_absolute() {
+                let px = (px * w) as i64;
+                let py = (py * h) as i64;
+                let px = px.clamp(0, iw - 1);
+                let py = py.clamp(0, ih - 1);
+                draw_rect(&mut vram, color, px, py, 1, 1)?;
+            }
+            TimeoutFuture::new_ms(15).await;
+            yield_execution().await;
+        }
+    };
+    // Enqueue tasks
     {
         let mut executor = ROOT_EXECUTOR.lock();
         executor.spawn(Task::new(task0));
@@ -206,11 +226,11 @@ fn run_tasks() -> Result<()> {
         executor.spawn(Task::new(async { keyboard_task().await }));
         executor.spawn(Task::new(serial_task));
         executor.spawn(Task::new(console_task));
-        if false {
-            executor.spawn(Task::new(async { network_manager_thread().await }));
-        }
+        executor.spawn(Task::new(mouse_cursor_task));
+        executor.spawn(Task::new(async { network_manager_thread().await }));
     }
     init::init_pci();
+    // Start executing tasks
     Executor::run(&ROOT_EXECUTOR);
     Ok(())
 }
