@@ -45,6 +45,7 @@ pub mod net;
 pub mod panic;
 pub mod pci;
 pub mod print;
+pub mod ps2;
 pub mod rtl8139;
 pub mod serial;
 pub mod syscall;
