@@ -9,8 +9,6 @@
 extern crate alloc;
 
 use alloc::string::String;
-use alloc::vec::Vec;
-use core::arch::asm;
 use core::pin::Pin;
 use core::str::FromStr;
 use os::boot_info::BootInfo;
@@ -25,19 +23,10 @@ use os::executor::Task;
 use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
-use os::graphics::draw_rect;
 use os::graphics::BitmapImageBuffer;
 use os::init;
-use os::input::InputManager;
-use os::net::icmp::IcmpPacket;
-use os::net::ip::IpV4Addr;
-use os::net::network_manager_thread;
-use os::net::Network;
-use os::print;
+use os::input::enqueue_input_tasks;
 use os::println;
-use os::ps2::keyboard_task;
-use os::serial::SerialPort;
-use os::util::Sliceable;
 use os::x86_64;
 use os::x86_64::init_syscall;
 use os::x86_64::paging::write_cr3;
@@ -81,45 +70,6 @@ fn paint_wasabi_logo() {
     }
 }
 
-fn run_command(cmdline: &str) -> Result<()> {
-    let network = Network::take();
-    let args = cmdline.trim();
-    let args: Vec<&str> = args.split(' ').collect();
-    println!("\n{args:?}");
-    if let Some(&cmd) = args.first() {
-        match cmd {
-            "panic" => unsafe {
-                asm!("int3");
-            },
-            "ip" => {
-                println!("netmask: {:?}", network.netmask());
-                println!("router: {:?}", network.router());
-                println!("dns: {:?}", network.dns());
-            }
-            "ping" => {
-                if let Some(ip) = args.get(1) {
-                    let ip = IpV4Addr::from_str(ip);
-                    if let Ok(ip) = ip {
-                        network.send_ip_packet(IcmpPacket::new_request(ip).copy_into_slice());
-                    } else {
-                        println!("{ip:?}")
-                    }
-                } else {
-                    println!("usage: ip <target_ipv4_addr>")
-                }
-            }
-            "arp" => {
-                println!("{:?}", network.arp_table_cloned())
-            }
-            app_name => {
-                let result = run_app(app_name);
-                println!("{result:?}");
-            }
-        }
-    }
-    Ok(())
-}
-
 fn run_tasks() -> Result<()> {
     let task0 = async {
         let mut vram = BootInfo::take().vram();
@@ -159,100 +109,17 @@ fn run_tasks() -> Result<()> {
             yield_execution().await;
         }
     };
-    let serial_task = async {
-        let sp = SerialPort::default();
-        loop {
-            if let Some(c) = sp.try_read() {
-                if let Some(c) = char::from_u32(c as u32) {
-                    InputManager::take().push_input(c);
-                }
-            }
-            TimeoutFuture::new_ms(20).await;
-            yield_execution().await;
-        }
-    };
-    let console_task = async {
-        let mut s = String::new();
-        loop {
-            if let Some(c) = InputManager::take().pop_input() {
-                if c == '\r' || c == '\n' {
-                    if let Err(e) = run_command(&s) {
-                        println!("{e:?}");
-                    };
-                    s.clear();
-                }
-                match c {
-                    'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '.' => {
-                        print!("{c}");
-                        s.push(c);
-                    }
-                    c if c as u8 == 0x7f => {
-                        print!("{0} {0}", 0x08 as char);
-                        s.pop();
-                    }
-                    _ => {
-                        // Do nothing
-                    }
-                }
-            }
-            TimeoutFuture::new_ms(20).await;
-            yield_execution().await;
-        }
-    };
-    let mouse_cursor_task = async {
-        let mut vram = BootInfo::take().vram();
-        let iw = vram.width();
-        let ih = vram.height();
-        let w = iw as f32;
-        let h = ih as f32;
-        let color = 0xffff00;
-        loop {
-            if let Some((px, py)) = InputManager::take().pop_cursor_input_absolute() {
-                let px = (px * w) as i64;
-                let py = (py * h) as i64;
-                let px = px.clamp(0, iw - 1);
-                let py = py.clamp(0, ih - 1);
-                draw_rect(&mut vram, color, px, py, 1, 1)?;
-            }
-            TimeoutFuture::new_ms(15).await;
-            yield_execution().await;
-        }
-    };
     // Enqueue tasks
     {
         let mut executor = ROOT_EXECUTOR.lock();
+        enqueue_input_tasks(&mut executor);
         executor.spawn(Task::new(task0));
         executor.spawn(Task::new(task1));
-        executor.spawn(Task::new(async { keyboard_task().await }));
-        executor.spawn(Task::new(serial_task));
-        executor.spawn(Task::new(console_task));
-        executor.spawn(Task::new(mouse_cursor_task));
-        executor.spawn(Task::new(async { network_manager_thread().await }));
     }
     init::init_pci();
     // Start executing tasks
     Executor::run(&ROOT_EXECUTOR);
     Ok(())
-}
-
-fn run_app(name: &str) -> Result<i64> {
-    let boot_info = BootInfo::take();
-    let root_files = boot_info.root_files();
-    let root_files: alloc::vec::Vec<&os::boot_info::File> =
-        root_files.iter().filter_map(|e| e.as_ref()).collect();
-    let name = EfiFileName::from_str(name)?;
-    let elf = root_files.iter().find(|&e| e.name() == &name);
-    if let Some(elf) = elf {
-        let elf = Elf::parse(elf)?;
-        let app = elf.load()?;
-        let result = app.exec()?;
-        #[cfg(test)]
-        debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
-        #[cfg(not(test))]
-        Ok(result)
-    } else {
-        Err(Error::Failed("Init app file not found"))
-    }
 }
 
 fn main() -> Result<()> {

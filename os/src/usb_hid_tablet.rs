@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::error::Error;
 use crate::error::Result;
 use crate::input::InputManager;
+use crate::input::MouseButtonState;
 use crate::memory::Mmio;
 use crate::println;
 use crate::usb::ConfigDescriptor;
@@ -156,12 +157,10 @@ pub async fn attach_usb_device(
                 }
 
                 let b = report[0];
-                let bl = b & 1 != 0;
-                let br = b & 2 != 0;
-                let bc = b & 4 != 0;
-                let bl = if bl { 'L' } else { 'l' };
-                let br = if br { 'R' } else { 'r' };
-                let bc = if bc { 'C' } else { 'c' };
+                let l = b & 1 != 0;
+                let r = b & 2 != 0;
+                let c = b & 4 != 0;
+                let b = MouseButtonState { l, c, r };
 
                 // 0~32767, top left origin (on QEMU)
                 let px = [report[1], report[2]];
@@ -170,8 +169,7 @@ pub async fn attach_usb_device(
                 let py = u16::from_le_bytes(py);
                 let px = px as f32 / 32768f32;
                 let py = py as f32 / 32768f32;
-                println!("{report:?} {bl}{br}{bc} ({px}, {py})",);
-                InputManager::take().push_cursor_input_absolute(px, py);
+                InputManager::take().push_cursor_input_absolute(px, py, b);
             }
             Ok(None) => {
                 // Timed out. Do nothing.
