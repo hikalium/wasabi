@@ -7,7 +7,7 @@ use crate::executor::Executor;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::graphics::draw_rect;
-use crate::graphics::BitmapImageBuffer;
+use crate::graphics::Bitmap;
 use crate::mutex::Mutex;
 use crate::net::network_manager_thread;
 use crate::print;

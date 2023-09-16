@@ -64,6 +64,7 @@ default: bin
 bin: generated/font.rs
 	rustup component add rust-src
 	cd os && cargo build
+	cd os && cargo build --tests --lib
 
 .PHONY : clippy
 clippy:
@@ -72,7 +73,7 @@ clippy:
 	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd dbgutil && cargo clippy
 	# cd font && cargo clippy --all-features --all-targets -- -D warnings
-	# cd os && cargo clippy --all-features --all-targets -- -D warnings
+	cd os && cargo clippy --all-features --all-targets -- -D warnings
 
 .PHONY : dump_config
 dump_config:

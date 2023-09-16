@@ -93,17 +93,7 @@ mod test {
         assert!(b.insert(24).is_err());
 
         for i in 0..24 {
-            assert_eq!(
-                b.get(i),
-                Ok(match i {
-                    0 | 1 | 5 | 9 | 23 => {
-                        true
-                    }
-                    _ => {
-                        false
-                    }
-                })
-            );
+            assert_eq!(b.get(i), Ok(matches!(i, 0 | 1 | 5 | 9 | 23)));
         }
         assert!(b.get(24).is_err());
     }
@@ -123,17 +113,7 @@ mod test {
         assert!(b.remove(24).is_err());
 
         for i in 0..24 {
-            assert_eq!(
-                b.get(i),
-                Ok(match i {
-                    5 | 23 => {
-                        true
-                    }
-                    _ => {
-                        false
-                    }
-                })
-            );
+            assert_eq!(b.get(i), Ok(matches!(i, 5 | 23)));
         }
         assert!(b.get(24).is_err());
     }
@@ -168,17 +148,7 @@ mod test {
         assert!(b.insert(23).is_ok());
         let c = a.symmetric_difference(&b);
         for i in 0..24 {
-            assert_eq!(
-                c.get(i),
-                Ok(match i {
-                    2 | 3 | 5 | 9 | 23 => {
-                        true
-                    }
-                    _ => {
-                        false
-                    }
-                })
-            );
+            assert_eq!(c.get(i), Ok(matches!(i, 2 | 3 | 5 | 9 | 23)));
         }
     }
     #[test_case]

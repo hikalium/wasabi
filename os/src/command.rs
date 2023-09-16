@@ -28,7 +28,11 @@ fn run_app(name: &str) -> Result<i64> {
         let app = elf.load()?;
         let result = app.exec()?;
         #[cfg(test)]
-        debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
+        if result == 0 {
+            debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
+        } else {
+            debug_exit::exit_qemu(debug_exit::QemuExitCode::Fail);
+        }
         #[cfg(not(test))]
         Ok(result)
     } else {

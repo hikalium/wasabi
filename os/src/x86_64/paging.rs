@@ -328,7 +328,7 @@ impl PML4 {
 
 #[test_case]
 fn page_translation() {
-    use TranslationResult::*;
+    use TranslationResult::PageMapped4K;
     // Identity-mapped 4K
     let mut table = PML4::new();
     table

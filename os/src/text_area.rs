@@ -2,7 +2,7 @@ use crate::graphics::draw_char;
 use crate::graphics::draw_line;
 use crate::graphics::draw_rect;
 use crate::graphics::transfer_rect;
-use crate::graphics::BitmapImageBuffer;
+use crate::graphics::Bitmap;
 use crate::graphics::GraphicsResult;
 use core::fmt;
 
@@ -11,7 +11,7 @@ pub enum TextAreaMode {
     Ring,
 }
 
-pub struct TextArea<T: BitmapImageBuffer> {
+pub struct TextArea<T: Bitmap> {
     buf: T,
     x: i64,
     y: i64,
@@ -23,7 +23,7 @@ pub struct TextArea<T: BitmapImageBuffer> {
     ring_count: usize,
 }
 
-impl<T: BitmapImageBuffer> TextArea<T> {
+impl<T: Bitmap> TextArea<T> {
     pub fn new(buf: T, x: i64, y: i64, w: i64, h: i64) -> TextArea<T> {
         let mut text_area = TextArea {
             buf,
@@ -133,7 +133,7 @@ impl<T: BitmapImageBuffer> TextArea<T> {
     }
 }
 
-impl<T: BitmapImageBuffer> fmt::Write for TextArea<T> {
+impl<T: Bitmap> fmt::Write for TextArea<T> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.print_string(s).or(Err(fmt::Error))?;
         Ok(())

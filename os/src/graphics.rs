@@ -1,6 +1,9 @@
+extern crate alloc;
+
+use alloc::vec::Vec;
 use core::cmp::Ordering;
 
-pub trait BitmapImageBuffer {
+pub trait Bitmap {
     fn bytes_per_pixel(&self) -> i64;
     fn pixels_per_line(&self) -> i64;
     fn width(&self) -> i64;
@@ -44,7 +47,7 @@ pub enum GraphicsError {
 
 pub type GraphicsResult = core::result::Result<(), GraphicsError>;
 
-unsafe fn unchecked_draw_point<T: BitmapImageBuffer>(
+unsafe fn unchecked_draw_point<T: Bitmap>(
     buf: &mut T,
     color: u32,
     x: i64,
@@ -59,7 +62,7 @@ unsafe fn unchecked_draw_point<T: BitmapImageBuffer>(
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn draw_point<T: BitmapImageBuffer>(buf: &mut T, color: u32, x: i64, y: i64) -> GraphicsResult {
+pub fn draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> GraphicsResult {
     if !buf.is_in_x_range(x) || !buf.is_in_x_range(x) {
         return Err(GraphicsError::OutOfRange);
     }
@@ -69,7 +72,7 @@ pub fn draw_point<T: BitmapImageBuffer>(buf: &mut T, color: u32, x: i64, y: i64)
     Ok(())
 }
 
-pub fn draw_line<T: BitmapImageBuffer>(
+pub fn draw_line<T: Bitmap>(
     buf: &mut T,
     color: u32,
     x0: i64,
@@ -119,7 +122,7 @@ pub fn draw_line<T: BitmapImageBuffer>(
     Ok(())
 }
 
-pub fn draw_rect<T: BitmapImageBuffer>(
+pub fn draw_rect<T: Bitmap>(
     buf: &mut T,
     color: u32,
     px: i64,
@@ -146,7 +149,7 @@ pub fn draw_rect<T: BitmapImageBuffer>(
 
 include!("../../generated/font.rs");
 
-pub fn draw_char<T: BitmapImageBuffer>(
+pub fn draw_char<T: Bitmap>(
     buf: &mut T,
     fg_color: u32,
     bg_color: u32,
@@ -180,7 +183,7 @@ pub fn draw_char<T: BitmapImageBuffer>(
 /// Transfers the pixels in a rect sized (w, h) from at (sx, sy) to (dx, dy).
 /// Both rects should be in the buffer coordinates.
 #[allow(clippy::many_single_char_names)]
-pub fn transfer_rect<T: BitmapImageBuffer>(
+pub fn transfer_rect<T: Bitmap>(
     buf: &mut T,
     dx: i64,
     dy: i64,
@@ -239,68 +242,67 @@ pub fn transfer_rect<T: BitmapImageBuffer>(
     Ok(())
 }
 
+pub struct BitmapBuffer {
+    buf: Vec<u8>,
+    width: i64,
+    height: i64,
+    pixels_per_line: i64,
+}
+
+impl BitmapBuffer {
+    pub fn new(width: i64, height: i64, pixels_per_line: i64) -> Self {
+        assert!(width >= 0);
+        assert!(height >= 0);
+        assert!(pixels_per_line >= 0);
+        assert!(pixels_per_line >= width);
+        let mut buf = Self {
+            buf: Vec::new(),
+            width,
+            height,
+            pixels_per_line,
+        };
+        buf.buf.resize((pixels_per_line * height * 4) as usize, 0);
+        buf
+    }
+}
+
+impl Bitmap for BitmapBuffer {
+    fn bytes_per_pixel(&self) -> i64 {
+        4
+    }
+    fn pixels_per_line(&self) -> i64 {
+        self.pixels_per_line
+    }
+    fn width(&self) -> i64 {
+        self.width
+    }
+    fn height(&self) -> i64 {
+        self.height
+    }
+    fn buf(&self) -> *const u8 {
+        self.buf.as_ptr()
+    }
+    fn buf_mut(&mut self) -> *mut u8 {
+        self.buf.as_mut_ptr()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    extern crate alloc;
-
+    use super::Bitmap;
     use super::*;
     use alloc::vec;
-    use alloc::vec::Vec;
 
-    pub struct TestBuffer {
-        buf: Vec<u8>,
-        width: i64,
-        height: i64,
-        pixels_per_line: i64,
-    }
-
-    impl TestBuffer {
-        fn new(width: i64, height: i64, pixels_per_line: i64) -> Self {
-            assert!(width >= 0);
-            assert!(height >= 0);
-            assert!(pixels_per_line >= 0);
-            assert!(pixels_per_line >= width);
-            let mut buf = TestBuffer {
-                buf: Vec::new(),
-                width,
-                height,
-                pixels_per_line,
-            };
-            buf.buf.resize((pixels_per_line * height * 4) as usize, 0);
-            buf
-        }
-    }
-
-    impl BitmapImageBuffer for TestBuffer {
-        fn bytes_per_pixel(&self) -> i64 {
-            4
-        }
-        fn pixels_per_line(&self) -> i64 {
-            self.pixels_per_line as i64
-        }
-        fn width(&self) -> i64 {
-            self.width as i64
-        }
-        fn height(&self) -> i64 {
-            self.height as i64
-        }
-        fn buf(&self) -> *const u8 {
-            self.buf.as_ptr()
-        }
-        fn buf_mut(&mut self) -> *mut u8 {
-            self.buf.as_mut_ptr()
-        }
-    }
     #[test_case]
     fn test_buf_default() {
         let h = 13_i64;
         let w = 17_i64;
         let pixels_per_line = 19_i64;
-        let mut buf = TestBuffer::new(w, h, pixels_per_line);
-        assert!(buf.pixel_at(-1, 0) == None);
-        assert!(buf.pixel_at(0, -1) == None);
-        assert!(buf.pixel_at(w - 1, h) == None);
-        assert!(buf.pixel_at(w, h - 1) == None);
+        let mut buf = BitmapBuffer::new(w, h, pixels_per_line);
+        assert!(buf.pixel_at(-1, 0).is_none());
+        assert!(buf.pixel_at(0, -1).is_none());
+        assert!(buf.pixel_at(w - 1, h).is_none());
+        assert!(buf.pixel_at(w, h - 1).is_none());
         for y in 0..h {
             for x in 0..w {
                 assert!(buf.pixel_at(x, y) == Some(&mut 0))
@@ -312,7 +314,7 @@ mod tests {
         let h = 13_i64;
         let w = 17_i64;
         let pixels_per_line = 19_i64;
-        let mut buf = TestBuffer::new(w, h, pixels_per_line);
+        let mut buf = BitmapBuffer::new(w, h, pixels_per_line);
         assert!(draw_rect(&mut buf, 0xff0000, 0, 0, w, h).is_ok());
         for y in 0..h {
             for x in 0..w {
@@ -364,7 +366,7 @@ mod tests {
 
         #[test_case]
         fn transfer_rect_all_dir() {
-            let mut buf = TestBuffer::new(W, H, PIXELS_PER_LINE);
+            let mut buf = BitmapBuffer::new(W, H, PIXELS_PER_LINE);
             let dirs = vec![
                 (0, 0, &INIT),
                 (-1, 0, &TR_L),

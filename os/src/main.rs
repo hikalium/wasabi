@@ -23,7 +23,7 @@ use os::executor::Task;
 use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
-use os::graphics::BitmapImageBuffer;
+use os::graphics::Bitmap;
 use os::init;
 use os::input::enqueue_input_tasks;
 use os::println;
