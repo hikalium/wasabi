@@ -17,9 +17,9 @@ use os::efi::EfiFileName;
 use os::elf::Elf;
 use os::error::Error;
 use os::error::Result;
+use os::executor::spawn_global;
 use os::executor::yield_execution;
 use os::executor::Executor;
-use os::executor::Task;
 use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
@@ -111,10 +111,12 @@ fn run_tasks() -> Result<()> {
     };
     // Enqueue tasks
     {
-        let mut executor = ROOT_EXECUTOR.lock();
-        enqueue_input_tasks(&mut executor);
-        executor.spawn(Task::new(task0));
-        executor.spawn(Task::new(task1));
+        {
+            let mut executor = ROOT_EXECUTOR.lock();
+            enqueue_input_tasks(&mut executor);
+        }
+        spawn_global(task0);
+        spawn_global(task1);
     }
     init::init_pci();
     // Start executing tasks

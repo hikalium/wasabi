@@ -64,6 +64,10 @@ fn dummy_waker() -> Waker {
     unsafe { Waker::from_raw(dummy_raw_waker()) }
 }
 pub static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default(), "ROOT_EXECUTOR");
+pub fn spawn_global(future: impl Future<Output = Result<()>> + 'static) {
+    let mut executor = ROOT_EXECUTOR.lock();
+    executor.spawn(Task::new(future));
+}
 
 pub struct Executor {
     task_queue: Option<VecDeque<Task>>,

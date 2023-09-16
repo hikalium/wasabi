@@ -28,11 +28,8 @@ QEMU_ARGS=\
 		-d int,cpu_reset \
 		-D log/qemu_debug.txt \
 		-device usb-tablet \
+		-device usb-kbd \
 		${MORE_QEMU_FLAGS}
-
-ifndef USE_PS2_KBD
-QEMU_ARGS+=-device usb-kbd
-endif
 
 ifndef DISPLAY
 QEMU_ARGS+=-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on
@@ -63,8 +60,7 @@ default: bin
 .PHONY : bin
 bin: generated/font.rs
 	rustup component add rust-src
-	cd os && cargo build
-	cd os && cargo build --tests --lib
+	cd os && cargo build --all-targets --all-features
 
 .PHONY : clippy
 clippy:

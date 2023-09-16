@@ -691,6 +691,7 @@ impl Xhci {
                                 &descriptors,
                             )
                             .await?;
+                            println!("usb hid tabled attached!!!!!!!!!!");
                             break 'desc_loop;
                         }
                         (3, 1, 1) => {
