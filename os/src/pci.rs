@@ -7,7 +7,7 @@ use crate::println;
 use crate::rtl8139::Rtl8139Driver;
 use crate::x86_64::paging::with_current_page_table;
 use crate::x86_64::paging::PageAttr;
-use crate::xhci::XhciDriver;
+use crate::xhci::driver::XhciDriver;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
