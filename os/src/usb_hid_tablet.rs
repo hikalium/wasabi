@@ -23,6 +23,7 @@ use alloc::format;
 use alloc::vec::Vec;
 use core::cmp::max;
 use core::pin::Pin;
+use crate::xhci::device::UsbDeviceDriverContext;
 
 pub async fn init_usb_hid_tablet(
     xhci: &mut Xhci,
@@ -127,12 +128,13 @@ pub async fn init_usb_hid_tablet(
 
 pub async fn attach_usb_device(
     xhci: &mut Xhci,
-    port: usize,
-    slot: u8,
+    ddc: &UsbDeviceDriverContext,
     input_context: &mut Pin<&mut InputContext>,
     ctrl_ep_ring: &mut CommandRing,
     descriptors: &Vec<UsbDescriptor>,
 ) -> Result<()> {
+    let port = ddc.port();
+    let slot = ddc.slot();
     let mut ep_rings =
         init_usb_hid_tablet(xhci, port, slot, input_context, ctrl_ep_ring, descriptors).await?;
 

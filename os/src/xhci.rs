@@ -6,6 +6,7 @@ pub mod registers;
 pub mod ring;
 pub mod trb;
 pub mod driver;
+pub mod device;
 
 use crate::allocator::ALLOCATOR;
 use crate::ax88179;
@@ -67,6 +68,7 @@ use trb::DataStageTrb;
 use trb::GenericTrbEntry;
 use trb::SetupStageTrb;
 use trb::StatusStageTrb;
+use device::UsbDeviceDriverContext;
 
 #[repr(C, align(4096))]
 struct EventRingSegmentTableEntry {
@@ -650,10 +652,12 @@ impl Xhci {
                 if let UsbDescriptor::Interface(e) = d {
                     match e.triple() {
                         (3, 0, 0) => {
+                            let ddc = UsbDeviceDriverContext::new(
+
+                                port, slot);
                             usb_hid_tablet::attach_usb_device(
                                 self,
-                                port,
-                                slot,
+                                &ddc,
                                 input_context,
                                 ctrl_ep_ring,
                                 &descriptors,
