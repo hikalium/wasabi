@@ -560,7 +560,7 @@ impl Xhci {
         &mut self,
         port: usize,
         slot: u8,
-        input_context: &mut Pin<&mut InputContext>,
+        mut input_context: Pin<&mut InputContext>,
         mut ctrl_ep_ring: Pin<&mut CommandRing>,
     ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
@@ -640,7 +640,7 @@ impl Xhci {
         let device_product_id = device_descriptor.product_id;
         println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
         if device_vendor_id == 2965 && device_product_id == 6032 {
-            ax88179::attach_usb_device(self, port, slot, input_context, &mut ctrl_ep_ring, &descriptors)
+            ax88179::attach_usb_device(self, port, slot, &mut input_context, &mut ctrl_ep_ring, &descriptors)
                 .await?;
         } else if device_vendor_id == 0x0bda
             && (device_product_id == 0x8153 || device_product_id == 0x8151)
@@ -658,7 +658,7 @@ impl Xhci {
                             usb_hid_tablet::attach_usb_device(
                                 self,
                                 &ddc,
-                                input_context,
+                                &mut input_context,
                                 ctrl_ep_ring,
                             )
                             .await?;
@@ -670,7 +670,7 @@ impl Xhci {
                                 self,
                                 port,
                                 slot,
-                                input_context,
+                                &mut input_context,
                                 &mut ctrl_ep_ring,
                                 &descriptors,
                             )
@@ -720,7 +720,7 @@ impl Xhci {
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
-        self.device_ready(port, slot, &mut input_context, ctrl_ep_ring)
+        self.device_ready(port, slot, input_context, ctrl_ep_ring)
             .await
     }
     async fn enable_slot(&mut self, port: usize) -> Result<()> {
