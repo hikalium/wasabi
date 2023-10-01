@@ -561,7 +561,7 @@ impl Xhci {
         port: usize,
         slot: u8,
         input_context: &mut Pin<&mut InputContext>,
-        ctrl_ep_ring: &mut CommandRing,
+        mut ctrl_ep_ring: Pin<&mut CommandRing>,
     ) -> Result<()> {
         let portsc = self.portsc.get(port)?;
         if portsc.port_speed() == UsbMode::FullSpeed {
@@ -569,7 +569,7 @@ impl Xhci {
             // For full speed device, we should read the first 8 bytes of the device descriptor to
             // get proper MaxPacketSize parameter.
             let device_descriptor = self
-                .request_initial_device_descriptor(slot, ctrl_ep_ring)
+                .request_initial_device_descriptor(slot, &mut ctrl_ep_ring)
                 .await?;
             let max_packet_size = device_descriptor.max_packet_size;
             let mut input_ctrl_ctx = InputControlContext::default();
@@ -586,12 +586,12 @@ impl Xhci {
             let cmd = GenericTrbEntry::cmd_evaluate_context(input_context.as_ref(), slot);
             self.send_command(cmd).await?.completed()?;
         }
-        let device_descriptor = self.request_device_descriptor(slot, ctrl_ep_ring).await?;
+        let device_descriptor = self.request_device_descriptor(slot, &mut ctrl_ep_ring).await?;
         let descriptors = self
-            .request_config_descriptor_and_rest(slot, ctrl_ep_ring)
+            .request_config_descriptor_and_rest(slot, &mut ctrl_ep_ring)
             .await?;
         if let Ok(e) = self
-            .request_string_descriptor_zero(slot, ctrl_ep_ring)
+            .request_string_descriptor_zero(slot, &mut ctrl_ep_ring)
             .await
         {
             let lang_id = e[1];
@@ -599,7 +599,7 @@ impl Xhci {
                 Some(
                     self.request_string_descriptor(
                         slot,
-                        ctrl_ep_ring,
+                        &mut ctrl_ep_ring,
                         lang_id,
                         device_descriptor.manufacturer_idx,
                     )
@@ -612,7 +612,7 @@ impl Xhci {
                 Some(
                     self.request_string_descriptor(
                         slot,
-                        ctrl_ep_ring,
+                        &mut ctrl_ep_ring,
                         lang_id,
                         device_descriptor.product_idx,
                     )
@@ -625,7 +625,7 @@ impl Xhci {
                 Some(
                     self.request_string_descriptor(
                         slot,
-                        ctrl_ep_ring,
+                        &mut ctrl_ep_ring,
                         lang_id,
                         device_descriptor.serial_idx,
                     )
@@ -640,7 +640,7 @@ impl Xhci {
         let device_product_id = device_descriptor.product_id;
         println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
         if device_vendor_id == 2965 && device_product_id == 6032 {
-            ax88179::attach_usb_device(self, port, slot, input_context, ctrl_ep_ring, &descriptors)
+            ax88179::attach_usb_device(self, port, slot, input_context, &mut ctrl_ep_ring, &descriptors)
                 .await?;
         } else if device_vendor_id == 0x0bda
             && (device_product_id == 0x8153 || device_product_id == 0x8151)
@@ -659,7 +659,7 @@ impl Xhci {
                                 self,
                                 &ddc,
                                 input_context,
-                                ctrl_ep_ring,
+                                &mut ctrl_ep_ring,
                             )
                             .await?;
                             println!("usb hid tabled attached!!!!!!!!!!");
@@ -671,7 +671,7 @@ impl Xhci {
                                 port,
                                 slot,
                                 input_context,
-                                ctrl_ep_ring,
+                                &mut ctrl_ep_ring,
                                 &descriptors,
                             )
                             .await?;
@@ -709,7 +709,7 @@ impl Xhci {
         let portsc = self.portsc.get(port)?;
         input_context.set_port_speed(portsc.port_speed())?;
         let mut ctrl_ep_ring = Box::pin(CommandRing::default());
-        let mut ctrl_ep_ring = ctrl_ep_ring.as_mut();
+        let ctrl_ep_ring = ctrl_ep_ring.as_mut();
         input_context.set_ep_ctx(
             1,
             EndpointContext::new_control_endpoint(
@@ -720,7 +720,7 @@ impl Xhci {
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
-        self.device_ready(port, slot, &mut input_context, &mut ctrl_ep_ring)
+        self.device_ready(port, slot, &mut input_context, ctrl_ep_ring)
             .await
     }
     async fn enable_slot(&mut self, port: usize) -> Result<()> {
