@@ -654,13 +654,12 @@ impl Xhci {
                         (3, 0, 0) => {
                             let ddc = UsbDeviceDriverContext::new(
 
-                                port, slot);
+                                port, slot, descriptors);
                             usb_hid_tablet::attach_usb_device(
                                 self,
                                 &ddc,
                                 input_context,
                                 ctrl_ep_ring,
-                                &descriptors,
                             )
                             .await?;
                             println!("usb hid tabled attached!!!!!!!!!!");
