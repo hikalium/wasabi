@@ -659,7 +659,7 @@ impl Xhci {
                                 self,
                                 &ddc,
                                 input_context,
-                                &mut ctrl_ep_ring,
+                                ctrl_ep_ring,
                             )
                             .await?;
                             println!("usb hid tabled attached!!!!!!!!!!");

@@ -130,13 +130,13 @@ pub async fn attach_usb_device(
     xhci: &mut Xhci,
     ddc: &UsbDeviceDriverContext,
     input_context: &mut Pin<&mut InputContext>,
-    ctrl_ep_ring: &mut CommandRing,
+    mut ctrl_ep_ring: Pin<&mut CommandRing>,
 ) -> Result<()> {
     let port = ddc.port();
     let slot = ddc.slot();
     let descriptors = ddc.descriptors();
     let mut ep_rings =
-        init_usb_hid_tablet(xhci, port, slot, input_context, ctrl_ep_ring, descriptors).await?;
+        init_usb_hid_tablet(xhci, port, slot, input_context, &mut ctrl_ep_ring, descriptors).await?;
 
     let portsc = xhci.portsc(port)?;
     loop {
