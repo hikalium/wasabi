@@ -1,12 +1,12 @@
 extern crate alloc;
 
 pub mod context;
+pub mod device;
+pub mod driver;
 pub mod future;
 pub mod registers;
 pub mod ring;
 pub mod trb;
-pub mod driver;
-pub mod device;
 
 use crate::allocator::ALLOCATOR;
 use crate::ax88179;
@@ -25,7 +25,7 @@ use crate::usb::DeviceDescriptor;
 use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::usb_hid_keyboard;
-use crate::usb_hid_tablet;
+//use crate::usb_hid_tablet;
 use crate::util::IntoPinnedMutableSlice;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::paging::IoBox;
@@ -49,6 +49,7 @@ use context::InputContext;
 use context::InputControlContext;
 use context::OutputContext;
 use context::RawDeviceContextBaseAddressArray;
+//use device::UsbDeviceDriverContext;
 use future::CommandCompletionEventFuture;
 use future::TransferEventFuture;
 use registers::CapabilityRegisters;
@@ -68,7 +69,6 @@ use trb::DataStageTrb;
 use trb::GenericTrbEntry;
 use trb::SetupStageTrb;
 use trb::StatusStageTrb;
-use device::UsbDeviceDriverContext;
 
 #[repr(C, align(4096))]
 struct EventRingSegmentTableEntry {
@@ -586,7 +586,9 @@ impl Xhci {
             let cmd = GenericTrbEntry::cmd_evaluate_context(input_context.as_ref(), slot);
             self.send_command(cmd).await?.completed()?;
         }
-        let device_descriptor = self.request_device_descriptor(slot, &mut ctrl_ep_ring).await?;
+        let device_descriptor = self
+            .request_device_descriptor(slot, &mut ctrl_ep_ring)
+            .await?;
         let descriptors = self
             .request_config_descriptor_and_rest(slot, &mut ctrl_ep_ring)
             .await?;
@@ -640,8 +642,15 @@ impl Xhci {
         let device_product_id = device_descriptor.product_id;
         println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
         if device_vendor_id == 2965 && device_product_id == 6032 {
-            ax88179::attach_usb_device(self, port, slot, &mut input_context, &mut ctrl_ep_ring, &descriptors)
-                .await?;
+            ax88179::attach_usb_device(
+                self,
+                port,
+                slot,
+                &mut input_context,
+                &mut ctrl_ep_ring,
+                &descriptors,
+            )
+            .await?;
         } else if device_vendor_id == 0x0bda
             && (device_product_id == 0x8153 || device_product_id == 0x8151)
         {
@@ -804,4 +813,3 @@ impl Xhci {
         Ok(())
     }
 }
-

@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use alloc::vec::Vec;
 use crate::usb::UsbDescriptor;
+use alloc::vec::Vec;
 
 pub struct UsbDeviceDriverContext {
     port: usize,
@@ -11,7 +11,9 @@ pub struct UsbDeviceDriverContext {
 impl UsbDeviceDriverContext {
     pub fn new(port: usize, slot: u8, descriptors: Vec<UsbDescriptor>) -> Self {
         Self {
-            port, slot, descriptors
+            port,
+            slot,
+            descriptors,
         }
     }
     pub fn port(&self) -> usize {

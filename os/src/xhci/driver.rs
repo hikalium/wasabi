@@ -1,15 +1,15 @@
 extern crate alloc;
 
+use crate::error::Result;
+use crate::executor::yield_execution;
 use crate::executor::Task;
 use crate::executor::ROOT_EXECUTOR;
+use crate::pci::BusDeviceFunction;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
-use alloc::boxed::Box;
-use crate::pci::BusDeviceFunction;
-use crate::error::Result;
 use crate::xhci::Xhci;
-use crate::executor::yield_execution;
+use alloc::boxed::Box;
 
 #[derive(Default)]
 pub struct XhciDriver {}

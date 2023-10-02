@@ -88,6 +88,49 @@ pub fn sys_print(s: &str) -> i64 {
     result
 }
 
+pub fn draw_line(color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<(), ()> {
+    if x1 < x0 {
+        return draw_line(color, x1, y1, x0, y0);
+    }
+    if x1 == x0 {
+        if y0 <= y1 {
+            for i in y0..=y1 {
+                draw_point(color, x0, i)?;
+            }
+        } else {
+            for i in y1..=y0 {
+                draw_point(color, x0, i)?;
+            }
+        }
+        return Ok(());
+    }
+    assert!(x0 < x1);
+    let lx = x1 - x0 + 1;
+    const MULTIPLIER: i64 = 1024 * 1024;
+    let a = (y1 - y0) * MULTIPLIER / lx;
+    for i in 0..lx {
+        draw_line(
+            color,
+            x0 + i,
+            y0 + (a * i / MULTIPLIER),
+            x0 + i,
+            y0 + (a * (i + 1) / MULTIPLIER),
+        )?;
+    }
+    draw_point(color, x0, y0)?;
+    draw_point(color, x1, y1)?;
+    Ok(())
+}
+
+pub fn draw_point(c: u32, x: i64, y: i64) -> Result<(), ()> {
+    let result = sys_draw_point(x, y, c);
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
 pub fn sys_draw_point(x: i64, y: i64, c: u32) -> i64 {
     let mut result;
     unsafe {

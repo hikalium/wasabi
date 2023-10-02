@@ -18,7 +18,7 @@ fn write_return_value(retv: u64) {
     }
 }
 
-fn return_to_os() {
+fn return_to_os() -> ! {
     let ctx = {
         let ctx = CONTEXT_OS.lock();
         *ctx
@@ -34,7 +34,7 @@ fn return_to_os() {
     }
 }
 
-fn sys_exit(regs: &[u64; 15]) {
+fn sys_exit(regs: &[u64; 15]) -> ! {
     println!("program exited with code {}", regs[1]);
     {
         let retv = regs[1];
@@ -43,28 +43,35 @@ fn sys_exit(regs: &[u64; 15]) {
     }
 }
 
-fn sys_print(regs: &[u64; 15]) {
+fn sys_print(regs: &[u64; 15]) -> u64 {
+    // TODO(hikalium): validate the buffer
     let s = regs[1] as *const u8;
     let len = regs[2] as usize;
     let s = unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(s, len)) };
 
-    print!("{}", s)
+    print!("{}", s);
+    0
 }
 
-fn sys_noop(_args: &[u64; 15]) {}
+fn sys_noop(_args: &[u64; 15]) -> u64 {
+    0
+}
 
-fn sys_draw_point(regs: &[u64; 15]) {
+fn sys_draw_point(regs: &[u64; 15]) -> u64 {
     let mut vram = BootInfo::take().vram();
     let x = regs[1] as i64;
     let y = regs[2] as i64;
     let c = regs[3] as u32;
     let result = draw_point(&mut vram, c, x, y);
-    let retv = if result.is_err() { 1 } else { 0 };
-    write_return_value(retv);
+    if result.is_err() {
+        1
+    } else {
+        0
+    }
 }
 
 #[no_mangle]
-pub extern "sysv64" fn syscall_handler(regs: &[u64; 15] /* rdi */) {
+pub extern "sysv64" fn syscall_handler(regs: &mut [u64; 15] /* rdi */) {
     /*
         Wasabi OS calling convention:
         args:
@@ -81,14 +88,15 @@ pub extern "sysv64" fn syscall_handler(regs: &[u64; 15] /* rdi */) {
             rcx
     */
     let op = regs[0];
-    match op {
+    let ret = match op {
         0 => sys_exit(regs),
         1 => sys_print(regs),
         2 => sys_draw_point(regs),
         3 => sys_noop(regs),
         op => {
             println!("syscall: unimplemented syscall: {}", op);
-            write_return_value(1);
+            1
         }
-    }
+    };
+    regs[0] = ret;
 }
