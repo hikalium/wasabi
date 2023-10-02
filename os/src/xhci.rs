@@ -651,6 +651,7 @@ impl Xhci {
             'desc_loop: for d in &descriptors {
                 if let UsbDescriptor::Interface(e) = d {
                     match e.triple() {
+                        /*
                         (3, 0, 0) => {
                             let ddc = UsbDeviceDriverContext::new(
 
@@ -665,6 +666,7 @@ impl Xhci {
                             println!("usb hid tabled attached!!!!!!!!!!");
                             break 'desc_loop;
                         }
+                        */
                         (3, 1, 1) => {
                             usb_hid_keyboard::attach_usb_device(
                                 self,
