@@ -1,5 +1,5 @@
 use crate::boot_info::BootInfo;
-use crate::graphics::draw_line;
+use crate::graphics::draw_point;
 use crate::print;
 use crate::println;
 use crate::x86_64::ExecutionContext;
@@ -58,7 +58,7 @@ fn sys_draw_point(regs: &[u64; 15]) {
     let x = regs[1] as i64;
     let y = regs[2] as i64;
     let c = regs[3] as u32;
-    let result = draw_line(&mut vram, c, 0, 0, x, y);
+    let result = draw_point(&mut vram, c, x, y);
     let retv = if result.is_err() { 1 } else { 0 };
     write_return_value(retv);
 }
