@@ -88,6 +88,14 @@ pub fn sys_print(s: &str) -> i64 {
     result
 }
 
+pub fn draw_rect(color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<(), ()> {
+    draw_line(color, x, y, x + width, y)?;
+    draw_line(color, x, y, x, y + height)?;
+    draw_line(color, x + width, y, x + width, y + height)?;
+    draw_line(color, x, y + height, x + width, y + height)?;
+    Ok(())
+}
+
 pub fn draw_line(color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<(), ()> {
     if x1 < x0 {
         return draw_line(color, x1, y1, x0, y0);

@@ -13,6 +13,8 @@ fn main() -> i64 {
     }
     draw_line(0x00ff00, 100, 100, 163, 163).unwrap();
     draw_line(0x00ff00, 163, 100, 100, 163).unwrap();
+
+    draw_rect(0x0000ff, 100, 200, 100, 100).unwrap();
     0
 }
 
