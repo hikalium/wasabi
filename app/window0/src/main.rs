@@ -17,6 +17,11 @@ fn main() -> i64 {
     draw_rect(0x0000ff, 100, 200, 100, 100).unwrap();
 
     fill_circle(0xffff00, 100, 300, 50).unwrap();
+
+    draw_char(0xffffff, 100, 400, 'A').unwrap();
+    draw_char(0xffffff, 110, 400, 'b').unwrap();
+    draw_char(0xffffff, 120, 400, 'c').unwrap();
+    draw_char(0xffffff, 130, 400, '!').unwrap();
     0
 }
 

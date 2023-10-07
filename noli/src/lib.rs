@@ -2,10 +2,13 @@
 //#![feature(alloc_error_handler)]
 #![feature(core_intrinsics)]
 
+mod font;
+
 //extern crate alloc;
 
 //use alloc::alloc::GlobalAlloc;
 //use alloc::alloc::Layout;
+use crate::font::BITMAP_FONT;
 use core::arch::asm;
 use core::fmt;
 use core::panic::PanicInfo;
@@ -86,6 +89,18 @@ pub fn sys_print(s: &str) -> i64 {
         lateout("rax") result);
     }
     result
+}
+
+pub fn draw_char(color: u32, x: i64, y: i64, c: char) -> Result<(), ()> {
+    let font_map = BITMAP_FONT[c as usize];
+    for i in 0..font_map.len() {
+        for j in 0..8 {
+            if (font_map[i] >> j) & 0b1 == 0b1 {
+                draw_point(color, x + j, y + i as i64)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn fill_circle(color: u32, center_x: i64, center_y: i64, radius: i64) -> Result<(), ()> {
