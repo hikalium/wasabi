@@ -88,6 +88,20 @@ pub fn sys_print(s: &str) -> i64 {
     result
 }
 
+pub fn fill_circle(color: u32, center_x: i64, center_y: i64, radius: i64) -> Result<(), ()> {
+    for i in 0..radius * 2 + 1 {
+        for j in 0..radius * 2 + 1 {
+            let x = i - radius;
+            let y = j - radius;
+
+            if x * x + y * y <= radius * radius + 1 {
+                draw_point(color, i + center_x, j + center_y)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn draw_rect(color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<(), ()> {
     draw_line(color, x, y, x + width, y)?;
     draw_line(color, x, y, x, y + height)?;
