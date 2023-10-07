@@ -22,6 +22,9 @@ fn main() -> i64 {
     draw_char(0xffffff, 110, 400, 'b').unwrap();
     draw_char(0xffffff, 120, 400, 'c').unwrap();
     draw_char(0xffffff, 130, 400, '!').unwrap();
+
+    draw_string(0xffffff, 100, 450, "Hello World").unwrap();
+    draw_string(0xffffff, 100, 470, "#$*@^&!").unwrap();
     0
 }
 

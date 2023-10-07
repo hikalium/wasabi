@@ -91,11 +91,23 @@ pub fn sys_print(s: &str) -> i64 {
     result
 }
 
+/// Draws string in one line. New lines are ignored.
+pub fn draw_string(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
+    let mut pos = 0;
+    for c in s.chars() {
+        draw_char(color, x + pos, y, c)?;
+        pos += 9;
+    }
+    Ok(())
+}
+
+/// Draws a character to the position of `x` and `y`. Upper case characters, lower case characters
+/// and symbols are supported.
 pub fn draw_char(color: u32, x: i64, y: i64, c: char) -> Result<(), ()> {
-    let font_map = BITMAP_FONT[c as usize];
-    for i in 0..font_map.len() {
+    let font_data = BITMAP_FONT[c as usize];
+    for i in 0..font_data.len() {
         for j in 0..8 {
-            if (font_map[i] >> j) & 0b1 == 0b1 {
+            if (font_data[i] >> j) & 0b1 == 0b1 {
                 draw_point(color, x + j, y + i as i64)?;
             }
         }
