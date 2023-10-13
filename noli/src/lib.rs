@@ -184,8 +184,10 @@ pub fn sys_draw_point(x: i64, y: i64, c: u32) -> i64 {
     let mut result;
     unsafe {
         asm!(
+        //"push r11",
         "mov rax, 2",
         "syscall",
+        //"pop r11",
         out("rcx") _, // will be broken by syscall
         in("rdi") x,
         in("rsi") y,
