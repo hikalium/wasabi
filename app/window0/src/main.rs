@@ -3,7 +3,7 @@
 
 use noli::*;
 
-fn main() -> i64 {
+fn main() -> u64 {
     println!("window0!!!!");
     println!("window0 {}x{}", 32, 64);
     for y in 0..64 {

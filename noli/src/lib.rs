@@ -1,34 +1,105 @@
 #![cfg_attr(not(test), no_std)]
-//#![feature(alloc_error_handler)]
 #![feature(core_intrinsics)]
 
 mod font;
 
-//extern crate alloc;
-
-//use alloc::alloc::GlobalAlloc;
-//use alloc::alloc::Layout;
 use crate::font::BITMAP_FONT;
 use core::arch::asm;
 use core::fmt;
 use core::panic::PanicInfo;
-//use core::ptr::null_mut;
 
-/*
-Wasabi OS calling convention:
-    args:
-        args[0]: rax (syscall number)
-        args[1]: rdi
-        args[2]: rsi
-        args[3]: rdx
-        args[4]: r10
-        args[5]: r8
-        args[6]: r9
-    return:
-        retv[0]: rax
-    scratch: (will be destroyed)
-        rcx
-*/
+// See os/src/x86_64.rs for the calling conventions
+pub fn syscall_0(func: u64) -> u64 {
+    let mut retv;
+    unsafe {
+        asm!(
+        "syscall",
+        out("rax") retv,
+        out("rcx") _, // destroyed by the syscall instruction
+        in("rdx") func,
+        out("r11") _, // destroyed by the syscall instruction
+        )
+    }
+    retv
+}
+pub fn syscall_1(func: u64, arg1: u64) -> u64 {
+    let mut retv;
+    unsafe {
+        asm!(
+        "syscall",
+        out("rax") retv,
+        out("rcx") _, // destroyed by the syscall instruction
+        in("rdx") func,
+        in("rsi") arg1,
+        out("r11") _, // destroyed by the syscall instruction
+        )
+    }
+    retv
+}
+pub fn syscall_2(func: u64, arg1: u64, arg2: u64) -> u64 {
+    let mut retv;
+    unsafe {
+        asm!(
+        "syscall",
+        out("rax") retv,
+        out("rcx") _, // destroyed by the syscall instruction
+        in("rdx") func,
+        in("rsi") arg1,
+        in("rdi") arg2,
+        out("r11") _, // destroyed by the syscall instruction
+        )
+    }
+    retv
+}
+pub fn syscall_3(func: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
+    let mut retv;
+    unsafe {
+        asm!(
+        "syscall",
+        out("rax") retv,
+        out("rcx") _, // destroyed by the syscall instruction
+        in("rdx") func,
+        in("rsi") arg1,
+        in("rdi") arg2,
+        in("r8") arg3,
+        out("r11") _, // destroyed by the syscall instruction
+        )
+    }
+    retv
+}
+pub fn syscall_4(func: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> u64 {
+    let mut retv;
+    unsafe {
+        asm!(
+        "syscall",
+        out("rax") retv,
+        out("rcx") _, // destroyed by the syscall instruction
+        in("rdx") func,
+        in("rsi") arg1,
+        in("rdi") arg2,
+        in("r8") arg3,
+        in("r9") arg4,
+        out("r11") _, // destroyed by the syscall instruction
+        )
+    }
+    retv
+}
+pub fn sys_exit(code: u64) -> ! {
+    syscall_1(0, code);
+    unreachable!()
+}
+pub fn sys_print(s: &str) -> u64 {
+    let len = s.len() as u64;
+    let s = s.as_ptr() as u64;
+    syscall_2(1, s, len)
+}
+pub fn sys_draw_point(x: i64, y: i64, c: u32) -> u64 {
+    syscall_3(2, x as u64, y as u64, c as u64)
+}
+
+pub fn sys_noop() -> u64 {
+    syscall_0(3)
+}
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -61,34 +132,6 @@ impl fmt::Write for StdIoWriter {
 pub fn _print(args: fmt::Arguments) {
     let mut writer = crate::StdIoWriter {};
     fmt::write(&mut writer, args).unwrap();
-}
-
-pub fn sys_exit(code: i64) -> ! {
-    unsafe {
-        asm!(
-        "mov rax, 0",
-        "syscall",
-        out("rcx") _, // will be broken by syscall
-        in("rdi") code,
-        )
-    }
-    unreachable!()
-}
-
-pub fn sys_print(s: &str) -> i64 {
-    let len = s.len();
-    let s = s.as_ptr() as u64;
-    let mut result;
-    unsafe {
-        asm!(
-        "mov rax, 1",
-        "syscall",
-        out("rcx") _, // will be broken by syscall
-        in("rdi") s,
-        in("rsi") len,
-        lateout("rax") result);
-    }
-    result
 }
 
 /// Draws string in one line. New lines are ignored.
@@ -180,35 +223,6 @@ pub fn draw_point(c: u32, x: i64, y: i64) -> Result<(), ()> {
     }
 }
 
-pub fn sys_draw_point(x: i64, y: i64, c: u32) -> i64 {
-    let mut result;
-    unsafe {
-        asm!(
-        //"push r11",
-        "mov rax, 2",
-        "syscall",
-        //"pop r11",
-        out("rcx") _, // will be broken by syscall
-        in("rdi") x,
-        in("rsi") y,
-        in("rdx") c,
-        lateout("rax") result);
-    }
-    result
-}
-
-pub fn sys_noop() -> u64 {
-    let mut result;
-    unsafe {
-        asm!(
-        "mov rax, 3",
-        "mov rcx, 0",
-        "syscall",
-        lateout("rcx") result);
-    }
-    result
-}
-
 #[macro_export]
 macro_rules! entry_point {
     // c.f. https://docs.rs/bootloader/0.6.4/bootloader/macro.entry_point.html
@@ -216,7 +230,7 @@ macro_rules! entry_point {
         #[no_mangle]
         pub unsafe extern "C" fn entry() -> ! {
             // validate the signature of the program entry point
-            let f: fn() -> i64 = $path;
+            let f: fn() -> u64 = $path;
             let ret = f();
             sys_exit(ret);
         }

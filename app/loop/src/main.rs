@@ -3,7 +3,7 @@
 
 use noli::*;
 
-fn main() -> i64 {
+fn main() -> u64 {
     loop {}
 }
 
