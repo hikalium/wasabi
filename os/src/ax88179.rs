@@ -464,7 +464,7 @@ pub async fn attach_usb_device(
         }
         println!("dci {}: {:?}", dci, tring);
     }
-    let portsc = xhci.portsc(port)?;
+    let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {

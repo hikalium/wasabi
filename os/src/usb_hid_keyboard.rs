@@ -59,7 +59,7 @@ pub async fn init_usb_hid_keyboard(
     let interface_desc =
         boot_keyboard_interface.ok_or(Error::Failed("No USB KBD Boot interface found"))?;
 
-    let portsc = xhci.portsc(port)?;
+    let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut input_ctrl_ctx = InputControlContext::default();
     input_ctrl_ctx.add_context(0)?;
     const EP_RING_NONE: Option<TransferRing> = None;
@@ -165,7 +165,7 @@ pub async fn attach_usb_device(
     let mut ep_rings =
         init_usb_hid_keyboard(xhci, port, slot, input_context, ctrl_ep_ring, descriptors).await?;
 
-    let portsc = xhci.portsc(port)?;
+    let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut prev_pressed_keys = BitSet::<32>::new();
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;

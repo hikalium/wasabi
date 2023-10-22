@@ -33,6 +33,8 @@ use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::fmt::Debug;
 use alloc::format;
+use alloc::rc::Rc;
+use alloc::rc::Weak;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -170,7 +172,7 @@ impl Xhci {
 
         Ok(xhc)
     }
-    pub fn portsc(&mut self, port: usize) -> Result<PortScWrapper> {
+    pub fn portsc(&mut self, port: usize) -> Result<Weak<PortScWrapper>> {
         self.portsc.get(port)
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
@@ -489,7 +491,11 @@ impl Xhci {
         // Configure Endpoint Command and a successful USB SET_CONFIGURATION
         // request may software schedule data transfers through a newly enabled endpoint
         // or Stream Transfer Ring of the Device Slot.
-        let portsc = self.portsc.get(port)?;
+        let portsc = self
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC became invalid")?;
         let mut input_ctrl_ctx = InputControlContext::default();
         input_ctrl_ctx.add_context(0)?;
         const EP_RING_NONE: Option<TransferRing> = None;
@@ -563,7 +569,11 @@ impl Xhci {
         mut input_context: Pin<&mut InputContext>,
         mut ctrl_ep_ring: Pin<&mut CommandRing>,
     ) -> Result<()> {
-        let portsc = self.portsc.get(port)?;
+        let portsc = self
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC was invalid")?;
         if portsc.port_speed() == UsbMode::FullSpeed {
             // TODO: refactor this part out
             // For full speed device, we should read the first 8 bytes of the device descriptor to
@@ -717,7 +727,11 @@ impl Xhci {
         input_context.set_last_valid_dci(1)?;
         // 4. Initialize the Transfer Ring for the Default Control Endpoint
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
-        let portsc = self.portsc.get(port)?;
+        let portsc = self
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC was invalid")?;
         input_context.set_port_speed(portsc.port_speed())?;
         let mut ctrl_ep_ring = Box::pin(CommandRing::default());
         let ctrl_ep_ring = ctrl_ep_ring.as_mut();
@@ -735,7 +749,11 @@ impl Xhci {
             .await
     }
     async fn enable_slot(&mut self, port: usize) -> Result<()> {
-        let portsc = self.portsc.get(port)?;
+        let portsc = self
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC was invalid")?;
         if !portsc.ccs() {
             return Err(Error::FailedString(format!(
                 "port {} disconnected while initialization",
@@ -749,7 +767,11 @@ impl Xhci {
         self.address_device(port, slot).await
     }
     async fn reset_port(&mut self, port: usize) -> Result<()> {
-        let portsc = self.portsc.get(port)?;
+        let portsc = self
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC was invalid")?;
         portsc.reset();
         Ok(())
     }
@@ -757,7 +779,11 @@ impl Xhci {
         // Reset port to enable the port (via Reset state)
         self.reset_port(port).await?;
         loop {
-            let portsc = self.portsc.get(port)?;
+            let portsc = self
+                .portsc
+                .get(port)?
+                .upgrade()
+                .ok_or("PORTSC was invalid")?;
             if let (PortState::Enabled, PortLinkState::U0) = (portsc.state(), portsc.pls()) {
                 break;
             }
@@ -769,18 +795,17 @@ impl Xhci {
         // 4.3 USB Device Initialization
         // USB3: Disconnected -> Polling -> Enabled
         // USB2: Disconnected -> Disabled
-        if let Some((port, portsc)) =
-            self.portsc
-                .iter()
-                .find_map(|PortScIteratorItem { port, portsc }| {
-                    if portsc.csc() {
-                        portsc.clear_csc();
-                        Some((port, portsc))
-                    } else {
-                        None
-                    }
-                })
-        {
+        if let Some((port, portsc)) = self.portsc.iter().find_map(
+            |PortScIteratorItem { port, portsc }| -> Option<(usize, Rc<PortScWrapper>)> {
+                let portsc = portsc.upgrade()?;
+                if portsc.csc() {
+                    portsc.clear_csc();
+                    Some((port, portsc))
+                } else {
+                    None
+                }
+            },
+        ) {
             if portsc.ccs() {
                 print!("Port {port}: Device attached: {portsc:?}: ");
                 if portsc.state() == PortState::Disabled {

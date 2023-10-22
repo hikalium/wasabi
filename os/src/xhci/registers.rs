@@ -17,6 +17,9 @@ use crate::xhci::RawDeviceContextBaseAddressArray;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::format;
+use alloc::rc::Rc;
+use alloc::rc::Weak;
+use alloc::vec::Vec;
 use core::mem::size_of;
 use core::mem::transmute;
 use core::ptr::read_volatile;
@@ -202,7 +205,7 @@ impl Debug for PortScWrapper {
 // Iterator over PortSc
 pub struct PortScIteratorItem {
     pub port: usize,
-    pub portsc: PortScWrapper,
+    pub portsc: Weak<PortScWrapper>,
 }
 pub struct PortScIterator<'a> {
     list: &'a PortSc,
@@ -235,36 +238,40 @@ impl<'a> DoubleEndedIterator for PortScIterator<'a> {
     }
 }
 // Interface to access PORTSC registers
+//
+// [xhci] 5.4.8: PORTSC
+// OperationalBase + (0x400 + 0x10 * (n - 1))
+// where n = Port Number (1, 2, ..., MaxPorts)
 pub struct PortSc {
-    base: *mut u32,
-    num_ports: usize,
+    entries: Vec<Rc<PortScWrapper>>,
 }
 impl PortSc {
     pub fn new(bar: &BarMem64, cap_regs: &CapabilityRegisters) -> Self {
         let base = unsafe { bar.addr().add(cap_regs.length()).add(0x400) } as *mut u32;
         let num_ports = cap_regs.num_of_ports();
         println!("PORTSC @ {:p}, max_port_num = {}", base, num_ports);
-        Self { base, num_ports }
-    }
-    pub fn get(&self, port: usize) -> Result<PortScWrapper> {
-        // [xhci] 5.4.8: PORTSC
-        // OperationalBase + (0x400 + 0x10 * (n - 1))
-        // where n = Port Number (1, 2, ..., MaxPorts)
-        if (1..=self.num_ports).contains(&port) {
+        let mut entries = Vec::new();
+        for port in 1..=num_ports {
             // SAFETY: This is safe since the result of ptr calculation
             // always points to a valid PORTSC entry under the condition.
-            let ptr = unsafe { self.base.add((port - 1) * 4) };
-            Ok(PortScWrapper::new(ptr))
-        } else {
-            Err("xHC: Port Number Out of Range".into())
+            let ptr = unsafe { base.add((port - 1) * 4) };
+            entries.push(Rc::new(PortScWrapper::new(ptr)));
         }
+        assert!(entries.len() == num_ports);
+        Self { entries }
+    }
+    pub fn get(&self, port: usize) -> Result<Weak<PortScWrapper>> {
+        self.entries
+            .get(port.wrapping_sub(1))
+            .ok_or("xHC: Port Number Out of Range".into())
+            .map(Rc::downgrade)
     }
     pub fn iter(&self) -> PortScIterator {
         PortScIterator {
             list: self,
             // Note: valid ports are 1..=self.num_ports
             next_port: 1,
-            next_port_back: self.num_ports,
+            next_port_back: self.entries.len(),
         }
     }
 }
