@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::mutex::Mutex;
 use crate::pci::BarMem64;
 use crate::print;
 use crate::println;
@@ -60,10 +61,7 @@ pub enum PortLinkState {
     TestMode,
     Resume = 15,
 }
-#[repr(C)]
-pub struct PortScWrapper {
-    ptr: *mut u32,
-}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum PortState {
     // Figure 4-25: USB2 Root Hub Port State Machine
@@ -79,6 +77,11 @@ pub enum PortState {
         pr: bool,
     },
 }
+
+#[repr(C)]
+pub struct PortScWrapper {
+    ptr: Mutex<*mut u32>,
+}
 impl PortScWrapper {
     const PRESERVE_MASK: u32 = 0b01001111000000011111111111101001;
     const BIT_CURRENT_CONNECT_STATUS: u32 = 1 << 0;
@@ -87,12 +90,19 @@ impl PortScWrapper {
     const BIT_PORT_POWER: u32 = 1 << 9;
     const BIT_CONNECT_STATUS_CHANGE: u32 = 1 << 17;
     const BIT_PORT_RESET_CHANGE: u32 = 1 << 21;
+    fn new(ptr: *mut u32) -> Self {
+        Self {
+            ptr: Mutex::new(ptr, "portsc"),
+        }
+    }
     pub fn value(&self) -> u32 {
-        unsafe { read_volatile(self.ptr) }
+        let portsc = self.ptr.lock();
+        unsafe { read_volatile(*portsc) }
     }
     pub fn set_bits(&self, bits: u32) {
-        let old = self.value();
-        unsafe { write_volatile(self.ptr, (old & Self::PRESERVE_MASK) | bits) }
+        let portsc = self.ptr.lock();
+        let old = unsafe { read_volatile(*portsc) };
+        unsafe { write_volatile(*portsc, (old & Self::PRESERVE_MASK) | bits) }
     }
     pub fn reset(&self) {
         self.set_bits(Self::BIT_PORT_POWER);
@@ -241,9 +251,10 @@ impl PortSc {
         // OperationalBase + (0x400 + 0x10 * (n - 1))
         // where n = Port Number (1, 2, ..., MaxPorts)
         if (1..=self.num_ports).contains(&port) {
-            Ok(PortScWrapper {
-                ptr: unsafe { self.base.add((port - 1) * 4) },
-            })
+            // SAFETY: This is safe since the result of ptr calculation
+            // always points to a valid PORTSC entry under the condition.
+            let ptr = unsafe { self.base.add((port - 1) * 4) };
+            Ok(PortScWrapper::new(ptr))
         } else {
             Err("xHC: Port Number Out of Range".into())
         }
