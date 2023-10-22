@@ -114,7 +114,7 @@ async fn read_from_device<T: Sized>(
     )?;
     let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
     ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-    xhci.notify_ep(slot, 1);
+    xhci.notify_ep(slot, 1)?;
     TransferEventFuture::new_with_timeout(xhci.primary_event_ring(), trb_ptr_waiting, 10 * 1000)
         .await?
         .ok_or(Error::Failed("Timed out"))?
@@ -134,7 +134,7 @@ async fn write_to_device<T: Sized>(
         .push(SetupStageTrb::new_vendor_device_out(request, reg, index, buf.len() as u16).into())?;
     let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_out(buf).into())?;
     ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
-    xhci.notify_ep(slot, 1);
+    xhci.notify_ep(slot, 1)?;
     TransferEventFuture::new_with_timeout(xhci.primary_event_ring(), trb_ptr_waiting, 10 * 1000)
         .await?
         .ok_or(Error::Failed("Timed out"))?
@@ -454,11 +454,11 @@ pub async fn attach_usb_device(
         match EndpointType::from(&ep_desc) {
             EndpointType::InterruptIn => {
                 tring.fill_ring()?;
-                xhci.notify_ep(slot, dci);
+                xhci.notify_ep(slot, dci)?;
             }
             EndpointType::BulkIn => {
                 tring.fill_ring()?;
-                xhci.notify_ep(slot, dci);
+                xhci.notify_ep(slot, dci)?;
             }
             _ => {}
         }
@@ -485,7 +485,7 @@ pub async fn attach_usb_device(
                         let transfer_trb_ptr = trb.data() as usize;
                         tring.dequeue_trb(transfer_trb_ptr)?;
                         println!("{:#018X}", transfer_trb_ptr);
-                        xhci.notify_ep(slot, trb.dci());
+                        xhci.notify_ep(slot, trb.dci())?;
                         println!("{:?}", tring)
                     }
                 }

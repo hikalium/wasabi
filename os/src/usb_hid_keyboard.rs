@@ -117,7 +117,7 @@ pub async fn init_usb_hid_keyboard(
         match tring {
             Some(tring) => {
                 tring.fill_ring()?;
-                xhci.notify_ep(slot, dci);
+                xhci.notify_ep(slot, dci)?;
             }
             None => {}
         }
@@ -183,7 +183,7 @@ pub async fn attach_usb_device(
                 );
                 if let Some(ref mut tring) = ep_rings[trb.dci()] {
                     tring.dequeue_trb(transfer_trb_ptr)?;
-                    xhci.notify_ep(slot, trb.dci());
+                    xhci.notify_ep(slot, trb.dci())?;
                 }
                 let mut next_pressed_keys = BitSet::<32>::new();
                 // First two bytes are modifiers, so skip them

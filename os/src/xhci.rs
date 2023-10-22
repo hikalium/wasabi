@@ -26,6 +26,7 @@ use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::usb_hid_keyboard;
 //use crate::usb_hid_tablet;
+use crate::mutex::Mutex;
 use crate::util::IntoPinnedMutableSlice;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::paging::IoBox;
@@ -118,13 +119,40 @@ impl From<&EndpointDescriptor> for EndpointType {
     }
 }
 
+// [xhci] 4.7 Doorbells
+// index 0: for the host controller
+// index 1-255: for device contexts (index by a Slot ID)
+pub struct Doorbell {
+    ptr: Mutex<*mut u32>,
+}
+impl Doorbell {
+    fn new(ptr: *mut u32) -> Self {
+        Self {
+            ptr: Mutex::new(ptr, "Doorbell"),
+        }
+    }
+    // [xhci] 5.6 Doorbell Registers
+    // bit 0..8: DB Target
+    // bit 8..16: RsvdZ
+    // bit 16..32: DB Task ID
+    // index 0: for the host controller
+    // index 1-255: for device contexts (index by a Slot ID)
+    fn notify(&self, target: u8, task: u16) {
+        let value = (target as u32) | (task as u32) << 16;
+        // SAFETY: This is safe as long as the ptr is valid
+        unsafe {
+            write_volatile(*self.ptr.lock(), value);
+        }
+    }
+}
+
 pub struct Xhci {
     _bdf: BusDeviceFunction,
     cap_regs: Mmio<CapabilityRegisters>,
     op_regs: Mmio<OperationalRegisters>,
     rt_regs: Mmio<RuntimeRegisters>,
     portsc: PortSc,
-    doorbell_regs: Mmio<[u32; 256]>,
+    doorbell_regs: Vec<Rc<Doorbell>>,
     command_ring: CommandRing,
     primary_event_ring: EventRing,
     device_context_base_array: DeviceContextBaseAddressArray,
@@ -139,17 +167,26 @@ impl Xhci {
 
         let cap_regs = unsafe { Mmio::from_raw(bar0.addr() as *mut CapabilityRegisters) };
         cap_regs.as_ref().assert_capabilities()?;
+
         let mut op_regs = unsafe {
             Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().length()) as *mut OperationalRegisters)
         };
         unsafe { op_regs.get_unchecked_mut() }.reset_xhc();
+        op_regs.as_ref().assert_params()?;
+
         let rt_regs = unsafe {
             Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().rtsoff()) as *mut RuntimeRegisters)
         };
-        op_regs.as_ref().assert_params()?;
-        let doorbell_regs = unsafe {
-            Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().dboff()) as *mut [u32; 256])
-        };
+
+        let num_slots = cap_regs.as_ref().num_of_device_slots();
+        let mut doorbell_regs = Vec::new();
+        for i in 0..=num_slots {
+            let ptr = unsafe { bar0.addr().add(cap_regs.as_ref().dboff()).add(4 * i) as *mut u32 };
+            doorbell_regs.push(Rc::new(Doorbell::new(ptr)))
+        }
+        // number of doorbells will be 1 + num_slots since doorbell[0] is for the host controller.
+        assert!(doorbell_regs.len() == 1 + num_slots);
+
         let portsc = PortSc::new(&bar0, cap_regs.as_ref());
         let scratchpad_buffers =
             Self::alloc_scratch_pad_buffers(cap_regs.as_ref().num_scratch_pad_bufs())?;
@@ -172,7 +209,7 @@ impl Xhci {
 
         Ok(xhc)
     }
-    pub fn portsc(&mut self, port: usize) -> Result<Weak<PortScWrapper>> {
+    pub fn portsc(&self, port: usize) -> Result<Weak<PortScWrapper>> {
         self.portsc.get(port)
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
@@ -217,17 +254,16 @@ impl Xhci {
         Ok(scratchpad_buffers)
     }
     fn notify_xhc(&mut self) {
-        unsafe {
-            write_volatile(&mut self.doorbell_regs.get_unchecked_mut()[0], 0);
-        }
+        self.doorbell_regs[0].notify(0, 0);
     }
-    pub fn notify_ep(&mut self, slot: u8, dci: usize) {
-        unsafe {
-            write_volatile(
-                &mut self.doorbell_regs.get_unchecked_mut()[slot as usize],
-                dci as u32,
-            );
-        }
+    pub fn notify_ep(&mut self, slot: u8, dci: usize) -> Result<()> {
+        let db = self
+            .doorbell_regs
+            .get(slot as usize)
+            .ok_or(Error::Failed("invalid slot"))?;
+        let dci = u8::try_from(dci)?;
+        db.notify(dci, 0);
+        Ok(())
     }
     pub async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.push(cmd)?;
@@ -287,7 +323,7 @@ impl Xhci {
             .into(),
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
-        self.notify_ep(slot, 1);
+        self.notify_ep(slot, 1)?;
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
@@ -311,7 +347,7 @@ impl Xhci {
             .into(),
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
-        self.notify_ep(slot, 1);
+        self.notify_ep(slot, 1)?;
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
@@ -338,7 +374,7 @@ impl Xhci {
             .into(),
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
-        self.notify_ep(slot, 1);
+        self.notify_ep(slot, 1)?;
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
@@ -365,7 +401,7 @@ impl Xhci {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1);
+        self.notify_ep(slot, 1)?;
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
@@ -392,7 +428,7 @@ impl Xhci {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1);
+        self.notify_ep(slot, 1)?;
         TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
