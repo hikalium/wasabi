@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::hpet::Hpet;
+use crate::mutex::Mutex;
 use crate::println;
 use crate::xhci::ring::EventRing;
 use crate::xhci::trb::GenericTrbEntry;
@@ -9,7 +10,6 @@ use core::marker::PhantomPinned;
 use core::pin::Pin;
 use core::task::Context;
 use core::task::Poll;
-use crate::mutex::Mutex;
 
 pub enum EventFutureWaitType {
     TrbAddr(u64),

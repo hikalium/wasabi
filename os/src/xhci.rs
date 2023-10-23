@@ -254,10 +254,10 @@ impl Xhci {
         }
         Ok(scratchpad_buffers)
     }
-    fn notify_xhc(&mut self) {
+    fn notify_xhc(&self) {
         self.doorbell_regs[0].notify(0, 0);
     }
-    pub fn notify_ep(&mut self, slot: u8, dci: usize) -> Result<()> {
+    pub fn notify_ep(&self, slot: u8, dci: usize) -> Result<()> {
         let db = self
             .doorbell_regs
             .get(slot as usize)
@@ -266,7 +266,7 @@ impl Xhci {
         db.notify(dci, 0);
         Ok(())
     }
-    pub async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
+    pub async fn send_command(&self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.lock().push(cmd)?;
         self.notify_xhc();
         CommandCompletionEventFuture::new(&self.primary_event_ring, cmd_ptr)
@@ -308,7 +308,7 @@ impl Xhci {
         Ok(*desc)
     }
     pub async fn request_set_config(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
         config_value: u8,
@@ -325,13 +325,13 @@ impl Xhci {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_set_interface(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
         interface_number: u8,
@@ -349,13 +349,13 @@ impl Xhci {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_set_protocol(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
         interface_number: u8,
@@ -376,13 +376,13 @@ impl Xhci {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_report_bytes(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
         buf: Pin<&mut [u8]>,
@@ -403,13 +403,13 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     async fn request_descriptor<T: Sized>(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
         desc_type: DescriptorType,
@@ -430,7 +430,7 @@ impl Xhci {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&mut self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()

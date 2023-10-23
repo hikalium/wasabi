@@ -103,7 +103,7 @@ pub fn construct_configure_endpoint_cmd(
 }
 
 pub async fn init_usb_hid_keyboard(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     port: usize,
     slot: u8,
     input_context: &mut Pin<&mut InputContext>,
