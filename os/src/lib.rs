@@ -23,6 +23,7 @@
 #![feature(array_chunks)]
 #![feature(iter_array_chunks)]
 #![feature(iter_advance_by)]
+#![feature(linked_list_cursors)]
 
 pub mod acpi;
 pub mod allocator;

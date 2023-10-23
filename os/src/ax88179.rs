@@ -100,7 +100,7 @@ const MAC_REG_PAUSE_WATERLVL_LO: u16 = 0x0055;
 const MAC_REG_NODE_ID: u16 = 0x0010;
 
 async fn read_from_device<T: Sized>(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     request: u8,
@@ -122,7 +122,7 @@ async fn read_from_device<T: Sized>(
 }
 
 async fn write_to_device<T: Sized>(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     request: u8,
@@ -142,7 +142,7 @@ async fn write_to_device<T: Sized>(
 }
 
 async fn write_phy_reg(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     index: u16,
@@ -162,7 +162,7 @@ async fn write_phy_reg(
 }
 
 async fn read_phy_reg(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     index: u16,
@@ -183,7 +183,7 @@ async fn read_phy_reg(
 }
 
 async fn read_mac_reg_u8(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     index: u16,
@@ -204,7 +204,7 @@ async fn read_mac_reg_u8(
 }
 
 async fn read_mac_reg_u16(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     index: u16,
@@ -225,7 +225,7 @@ async fn read_mac_reg_u16(
 }
 
 async fn write_mac_reg_u16(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     index: u16,
@@ -245,7 +245,7 @@ async fn write_mac_reg_u16(
 }
 
 async fn write_mac_reg_u8(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     index: u16,
@@ -265,7 +265,7 @@ async fn write_mac_reg_u8(
 }
 
 async fn request_read_mac_addr(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
 ) -> Result<[u8; 6]> {
@@ -284,7 +284,7 @@ async fn request_read_mac_addr(
     .await?;
     Ok(*mac)
 }
-async fn reset_phy(xhci: &mut Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) -> Result<()> {
+async fn reset_phy(xhci: &Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) -> Result<()> {
     // https://github.com/lwhsu/if_axge-kmod/blob/be7510b1bc7e5974963fe17e67462d3689e80631/if_axge.c#L367
     // https://github.com/lwhsu/if_axge-kmod/blob/be7510b1bc7e5974963fe17e67462d3689e80631/if_axge.c#L793
     println!("AX88179: reseting phy...");
@@ -311,11 +311,7 @@ async fn reset_phy(xhci: &mut Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) ->
     TimeoutFuture::new_ms(100).await;
     Ok(())
 }
-async fn mii_restart_autoneg(
-    xhci: &mut Xhci,
-    slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
-) -> Result<()> {
+async fn mii_restart_autoneg(xhci: &Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) -> Result<()> {
     let bmcr = read_phy_reg(xhci, slot, ctrl_ep_ring, MII_BMCR).await?;
     if bmcr & BMCR_ANENABLE != 0 {
         println!("Auto negotiation is supported. enabling...");
@@ -324,7 +320,7 @@ async fn mii_restart_autoneg(
         Err(Error::Failed("No auto negotiation support"))
     }
 }
-async fn init(xhci: &mut Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) -> Result<()> {
+async fn init(xhci: &Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) -> Result<()> {
     xhci.request_set_config(slot, ctrl_ep_ring, 1).await?;
     reset_phy(xhci, slot, ctrl_ep_ring).await?;
 
@@ -431,10 +427,10 @@ async fn init(xhci: &mut Xhci, slot: u8, ctrl_ep_ring: &mut CommandRing) -> Resu
     Ok(())
 }
 pub async fn attach_usb_device(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     port: usize,
     slot: u8,
-    input_context: &mut Pin<&mut InputContext>,
+    mut input_context: Pin<Box<InputContext>>,
     ctrl_ep_ring: &mut CommandRing,
     descriptors: &Vec<UsbDescriptor>,
 ) -> Result<()> {
@@ -445,7 +441,7 @@ pub async fn attach_usb_device(
         }
     }
     let mut ep_rings = xhci
-        .setup_endpoints(port, slot, input_context, &ep_desc_list)
+        .setup_endpoints(port, slot, &mut input_context.as_mut(), &ep_desc_list)
         .await?;
     init(xhci, slot, ctrl_ep_ring).await?;
     for ep_desc in ep_desc_list {

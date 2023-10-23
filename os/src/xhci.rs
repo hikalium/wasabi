@@ -12,8 +12,10 @@ use crate::allocator::ALLOCATOR;
 use crate::ax88179;
 use crate::error::Error;
 use crate::error::Result;
+use crate::executor::dummy_waker;
 use crate::executor::yield_execution;
 use crate::memory::Mmio;
+use crate::mutex::Mutex;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::print;
@@ -26,12 +28,12 @@ use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::usb_hid_keyboard;
 //use crate::usb_hid_tablet;
-use crate::mutex::Mutex;
 use crate::util::IntoPinnedMutableSlice;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::paging::IoBox;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
+use alloc::collections::LinkedList;
 use alloc::fmt::Debug;
 use alloc::format;
 use alloc::rc::Rc;
@@ -41,10 +43,12 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::cmp::max;
 use core::convert::AsRef;
+use core::future::Future;
 use core::mem::size_of;
 use core::pin::Pin;
 use core::ptr::write_volatile;
 use core::slice;
+use core::task::Context;
 
 use context::DeviceContextBaseAddressArray;
 use context::EndpointContext;
@@ -147,6 +151,8 @@ impl Doorbell {
     }
 }
 
+type DeviceFuture = Pin<Box<dyn Future<Output = Result<()>>>>;
+
 pub struct Xhci {
     _bdf: BusDeviceFunction,
     cap_regs: Mmio<CapabilityRegisters>,
@@ -156,7 +162,8 @@ pub struct Xhci {
     doorbell_regs: Vec<Rc<Doorbell>>,
     command_ring: Mutex<CommandRing>,
     primary_event_ring: Mutex<EventRing>,
-    device_context_base_array: DeviceContextBaseAddressArray,
+    device_context_base_array: Mutex<DeviceContextBaseAddressArray>,
+    device_futures: Mutex<LinkedList<DeviceFuture>>,
 }
 impl Xhci {
     fn new(bdf: BusDeviceFunction) -> Result<Self> {
@@ -185,13 +192,15 @@ impl Xhci {
             let ptr = unsafe { bar0.addr().add(cap_regs.as_ref().dboff()).add(4 * i) as *mut u32 };
             doorbell_regs.push(Rc::new(Doorbell::new(ptr)))
         }
-        // number of doorbells will be 1 + num_slots since doorbell[0] is for the host controller.
+        // number of doorbells will be 1 + num_slots since doorbell[] is for the host controller.
         assert!(doorbell_regs.len() == 1 + num_slots);
 
         let portsc = PortSc::new(&bar0, cap_regs.as_ref());
         let scratchpad_buffers =
             Self::alloc_scratch_pad_buffers(cap_regs.as_ref().num_scratch_pad_bufs())?;
         let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
+        let device_context_base_array =
+            Mutex::new(device_context_base_array, "Xhci.device_context_base_array");
         let mut xhc = Xhci {
             _bdf: bdf,
             cap_regs,
@@ -202,6 +211,7 @@ impl Xhci {
             command_ring: Mutex::new(CommandRing::default(), "Xhci.command_ring"),
             primary_event_ring: Mutex::new(EventRing::new()?, "Xhci.primary_event_ring"),
             device_context_base_array,
+            device_futures: Mutex::new(LinkedList::new(), "Xhci.device_futures"),
         };
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;
@@ -218,14 +228,14 @@ impl Xhci {
         unsafe { self.rt_regs.get_unchecked_mut() }.init_irs(0, &mut eq.lock())?;
         Ok(())
     }
-    pub fn primary_event_ring(&mut self) -> &Mutex<EventRing> {
-        &mut self.primary_event_ring
+    pub fn primary_event_ring(&self) -> &Mutex<EventRing> {
+        &self.primary_event_ring
     }
     fn init_slots_and_contexts(&mut self) -> Result<()> {
         let num_slots = self.cap_regs.as_ref().num_of_device_slots();
         unsafe { self.op_regs.get_unchecked_mut() }.set_num_device_slots(num_slots)?;
         unsafe { self.op_regs.get_unchecked_mut() }
-            .set_dcbaa_ptr(&mut self.device_context_base_array)?;
+            .set_dcbaa_ptr(&mut self.device_context_base_array.lock())?;
         Ok(())
     }
     fn init_command_ring(&mut self) -> Result<()> {
@@ -274,7 +284,7 @@ impl Xhci {
             .ok_or(Error::Failed("Timed out"))
     }
     async fn request_initial_device_descriptor(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
     ) -> Result<DeviceDescriptor> {
@@ -291,7 +301,7 @@ impl Xhci {
         Ok(*desc)
     }
     async fn request_device_descriptor(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
     ) -> Result<DeviceDescriptor> {
@@ -436,7 +446,7 @@ impl Xhci {
             .completed()
     }
     async fn request_config_descriptor_and_rest(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
     ) -> Result<Vec<UsbDescriptor>> {
@@ -467,7 +477,7 @@ impl Xhci {
         Ok(descriptors)
     }
     async fn request_string_descriptor(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
         lang_id: u16,
@@ -490,7 +500,7 @@ impl Xhci {
             .replace('\0', ""))
     }
     async fn request_string_descriptor_zero(
-        &mut self,
+        &self,
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
     ) -> Result<Vec<u16>> {
@@ -517,7 +527,7 @@ impl Xhci {
         Ok(())
     }
     pub async fn setup_endpoints(
-        &mut self,
+        &self,
         port: usize,
         slot: u8,
         input_context: &mut Pin<&mut InputContext>,
@@ -600,12 +610,13 @@ impl Xhci {
         Ok(ep_rings)
     }
     async fn device_ready(
-        &mut self,
+        &self,
+        rc: Rc<Self>,
         port: usize,
         slot: u8,
-        mut input_context: Pin<&mut InputContext>,
-        mut ctrl_ep_ring: Pin<&mut CommandRing>,
-    ) -> Result<()> {
+        mut input_context: Pin<Box<InputContext>>,
+        mut ctrl_ep_ring: Pin<Box<CommandRing>>,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         let portsc = self
             .portsc
             .get(port)?
@@ -622,8 +633,8 @@ impl Xhci {
             let mut input_ctrl_ctx = InputControlContext::default();
             input_ctrl_ctx.add_context(0)?;
             input_ctrl_ctx.add_context(1)?;
-            input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
-            input_context.set_ep_ctx(
+            input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
+            input_context.as_mut().set_ep_ctx(
                 1,
                 EndpointContext::new_control_endpoint(
                     max_packet_size as u16,
@@ -693,7 +704,7 @@ impl Xhci {
                 self,
                 port,
                 slot,
-                &mut input_context,
+                input_context,
                 &mut ctrl_ep_ring,
                 &descriptors,
             )
@@ -704,64 +715,62 @@ impl Xhci {
             println!("rtl8153/8151 is not supported yet...");
         } else if device_descriptor.device_class == 0 {
             // Device class is derived from Interface Descriptor
-            'desc_loop: for d in &descriptors {
+            for d in &descriptors {
                 if let UsbDescriptor::Interface(e) = d {
                     match e.triple() {
                         /*
                         (3, 0, 0) => {
-                            let ddc = UsbDeviceDriverContext::new(
-
-                                port, slot, descriptors);
-                            usb_hid_tablet::attach_usb_device(
-                                self,
-                                &ddc,
-                                &mut input_context,
+                            let ddc = UsbDeviceDriverContext::new(port, slot, descriptors);
+                            let f = usb_hid_tablet::attach_usb_device(
+                                rc,
+                                ddc,
+                                input_context,
                                 ctrl_ep_ring,
-                            )
-                            .await?;
-                            println!("usb hid tabled attached!!!!!!!!!!");
-                            break 'desc_loop;
+                            );
+                            return Ok(Box::pin(f));
                         }
                         */
                         (3, 1, 1) => {
-                            usb_hid_keyboard::attach_usb_device(
-                                self,
+                            let f = usb_hid_keyboard::attach_usb_device(
+                                rc,
                                 port,
                                 slot,
-                                &mut input_context,
-                                &mut ctrl_ep_ring,
-                                &descriptors,
-                            )
-                            .await?;
-                            break 'desc_loop;
+                                input_context,
+                                ctrl_ep_ring,
+                                descriptors,
+                            );
+                            return Ok(Box::pin(f));
                         }
                         triple => println!("Skipping unknown interface triple: {triple:?}"),
                     }
                 }
             }
-        } else {
-            println!(
-                "Device class {} is not supported yet",
-                device_descriptor.device_class
-            );
         }
-        Ok(())
+        Err(Error::FailedString(format!(
+            "Device class {} is not supported yet",
+            device_descriptor.device_class
+        )))
     }
-    async fn address_device(&mut self, port: usize, slot: u8) -> Result<()> {
+    async fn address_device(
+        &self,
+        rc: Rc<Self>,
+        port: usize,
+        slot: u8,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         // Setup an input context and send AddressDevice command.
         // 4.3.3 Device Slot Initialization
         let output_context = Box::pin(OutputContext::default());
         self.device_context_base_array
+            .lock()
             .set_output_context(slot, output_context);
         let mut input_ctrl_ctx = InputControlContext::default();
         input_ctrl_ctx.add_context(0)?;
         input_ctrl_ctx.add_context(1)?;
         let mut input_context = Box::pin(InputContext::default());
-        let mut input_context = input_context.as_mut();
-        input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
+        input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
         // 3. Initialize the Input Slot Context data structure (6.2.2)
-        input_context.set_root_hub_port_number(port)?;
-        input_context.set_last_valid_dci(1)?;
+        input_context.as_mut().set_root_hub_port_number(port)?;
+        input_context.as_mut().set_last_valid_dci(1)?;
         // 4. Initialize the Transfer Ring for the Default Control Endpoint
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
         let portsc = self
@@ -769,23 +778,26 @@ impl Xhci {
             .get(port)?
             .upgrade()
             .ok_or("PORTSC was invalid")?;
-        input_context.set_port_speed(portsc.port_speed())?;
+        input_context.as_mut().set_port_speed(portsc.port_speed())?;
         let mut ctrl_ep_ring = Box::pin(CommandRing::default());
-        let ctrl_ep_ring = ctrl_ep_ring.as_mut();
-        input_context.set_ep_ctx(
+        input_context.as_mut().set_ep_ctx(
             1,
             EndpointContext::new_control_endpoint(
                 portsc.max_packet_size()?,
-                ctrl_ep_ring.ring_phys_addr(),
+                ctrl_ep_ring.as_mut().ring_phys_addr(),
             )?,
         )?;
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
-        self.device_ready(port, slot, input_context, ctrl_ep_ring)
+        self.device_ready(rc, port, slot, input_context, ctrl_ep_ring)
             .await
     }
-    async fn enable_slot(&mut self, port: usize) -> Result<()> {
+    async fn enable_slot(
+        &self,
+        rc: Rc<Self>,
+        port: usize,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         let portsc = self
             .portsc
             .get(port)?
@@ -801,9 +813,9 @@ impl Xhci {
             .send_command(GenericTrbEntry::cmd_enable_slot())
             .await?
             .slot_id();
-        self.address_device(port, slot).await
+        self.address_device(rc, port, slot).await
     }
-    async fn reset_port(&mut self, port: usize) -> Result<()> {
+    async fn reset_port(&self, port: usize) -> Result<()> {
         let portsc = self
             .portsc
             .get(port)?
@@ -812,7 +824,11 @@ impl Xhci {
         portsc.reset();
         Ok(())
     }
-    async fn enable_port(&mut self, port: usize) -> Result<()> {
+    async fn enable_port(
+        &self,
+        rc: Rc<Self>,
+        port: usize,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         // Reset port to enable the port (via Reset state)
         self.reset_port(port).await?;
         loop {
@@ -826,9 +842,9 @@ impl Xhci {
             }
             yield_execution().await;
         }
-        self.enable_slot(port).await
+        self.enable_slot(rc, port).await
     }
-    async fn poll(&mut self) -> Result<()> {
+    async fn poll(&self, rc: Rc<Self>) -> Result<()> {
         // 4.3 USB Device Initialization
         // USB3: Disconnected -> Polling -> Enabled
         // USB2: Disconnected -> Disabled
@@ -846,30 +862,38 @@ impl Xhci {
             if portsc.ccs() {
                 print!("Port {port}: Device attached: {portsc:?}: ");
                 if portsc.state() == PortState::Disabled {
-                    // USB2
                     println!("USB2");
-                    if let Err(e) = self.enable_port(port).await {
-                        println!(
-                            "Failed to initialize an USB2 device on port {}: {:?}",
-                            port, e
-                        );
+                    match self.enable_port(rc, port).await {
+                        Ok(f) => {
+                            println!("device future attached",);
+                            self.device_futures.lock().push_back(f);
+                        }
+                        Err(e) => {
+                            println!(
+                                "Failed to initialize an USB2 device on port {}: {:?}",
+                                port, e
+                            );
+                        }
                     }
                 } else if portsc.state() == PortState::Enabled {
-                    // USB3
                     println!("USB3 (Skipping)");
-                    /*
-                    if let Err(e) = self.enable_slot(port).await {
-                        println!(
-                            "Failed to initialize an USB3 device on port {}: {:?}",
-                            port, e
-                        );
-                    }
-                    */
                 } else {
                     println!("Unexpected state");
                 }
             } else {
                 println!("Port {}: Device detached: {:?}", port, portsc);
+            }
+        }
+        let waker = dummy_waker();
+        let mut ctx = Context::from_waker(&waker);
+        let mut device_futures = self.device_futures.lock();
+        let mut c = device_futures.cursor_front_mut();
+        while let Some(f) = c.current() {
+            let r = Future::poll(f.as_mut(), &mut ctx);
+            if r.is_ready() {
+                c.remove_current();
+            } else {
+                c.move_next();
             }
         }
         Ok(())

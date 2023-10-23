@@ -20,13 +20,15 @@ use crate::xhci::ring::TransferRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::EndpointType;
 use crate::xhci::Xhci;
+use alloc::boxed::Box;
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::cmp::max;
 use core::pin::Pin;
 
 pub async fn init_usb_hid_tablet(
-    xhci: &mut Xhci,
+    xhci: &Xhci,
     port: usize,
     slot: u8,
     input_context: &mut Pin<&mut InputContext>,
@@ -127,19 +129,19 @@ pub async fn init_usb_hid_tablet(
 }
 
 pub async fn attach_usb_device(
-    xhci: &mut Xhci,
-    ddc: &UsbDeviceDriverContext,
-    input_context: &mut Pin<&mut InputContext>,
-    mut ctrl_ep_ring: Pin<&mut CommandRing>,
+    xhci: Rc<Xhci>,
+    ddc: UsbDeviceDriverContext,
+    mut input_context: Pin<Box<InputContext>>,
+    mut ctrl_ep_ring: Pin<Box<CommandRing>>,
 ) -> Result<()> {
     let port = ddc.port();
     let slot = ddc.slot();
     let descriptors = ddc.descriptors();
     let mut ep_rings = init_usb_hid_tablet(
-        xhci,
+        &xhci,
         port,
         slot,
-        input_context,
+        &mut input_context.as_mut(),
         &mut ctrl_ep_ring,
         descriptors,
     )

@@ -20,6 +20,7 @@ use crate::xhci::ring::TransferRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::EndpointType;
 use crate::xhci::Xhci;
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
@@ -178,15 +179,22 @@ fn usage_id_to_char(usage_id: u8) -> Result<KeyEvent> {
 }
 
 pub async fn attach_usb_device(
-    xhci: &mut Xhci,
+    xhci: Rc<Xhci>,
     port: usize,
     slot: u8,
-    input_context: &mut Pin<&mut InputContext>,
-    ctrl_ep_ring: &mut CommandRing,
-    descriptors: &Vec<UsbDescriptor>,
+    mut input_context: Pin<Box<InputContext>>,
+    mut ctrl_ep_ring: Pin<Box<CommandRing>>,
+    descriptors: Vec<UsbDescriptor>,
 ) -> Result<()> {
-    let mut ep_rings =
-        init_usb_hid_keyboard(xhci, port, slot, input_context, ctrl_ep_ring, descriptors).await?;
+    let mut ep_rings = init_usb_hid_keyboard(
+        &xhci,
+        port,
+        slot,
+        &mut input_context.as_mut(),
+        &mut ctrl_ep_ring.as_mut(),
+        &descriptors,
+    )
+    .await?;
 
     let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut prev_pressed_keys = BitSet::<32>::new();

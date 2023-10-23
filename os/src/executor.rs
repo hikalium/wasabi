@@ -60,7 +60,7 @@ fn dummy_raw_waker() -> RawWaker {
     RawWaker::new(null::<()>(), vtable)
 }
 
-fn dummy_waker() -> Waker {
+pub fn dummy_waker() -> Waker {
     unsafe { Waker::from_raw(dummy_raw_waker()) }
 }
 pub static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default(), "ROOT_EXECUTOR");

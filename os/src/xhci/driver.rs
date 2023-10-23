@@ -10,6 +10,7 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::xhci::Xhci;
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 
 #[derive(Default)]
 pub struct XhciDriver {}
@@ -45,8 +46,9 @@ impl XhciDriverInstance {
         (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
             let mut xhc = Xhci::new(bdf)?;
             xhc.ensure_ring_is_working().await?;
+            let xhc = Rc::new(xhc);
             loop {
-                if let Err(e) = xhc.poll().await {
+                if let Err(e) = xhc.as_ref().poll(xhc.clone()).await {
                     break Err(e);
                 } else {
                     yield_execution().await;
