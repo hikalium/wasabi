@@ -78,7 +78,6 @@ pub extern "sysv64" fn syscall_handler(regs: &mut [u64; 16]) {
         args
     };
     let op = args[0];
-    println!("syscall op = {op}");
     let ret = match op {
         0 => sys_exit(&args),
         1 => sys_print(&args),
