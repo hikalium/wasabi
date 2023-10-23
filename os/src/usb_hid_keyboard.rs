@@ -14,24 +14,25 @@ use crate::xhci::context::EndpointContext;
 use crate::xhci::context::InputContext;
 use crate::xhci::context::InputControlContext;
 use crate::xhci::future::TransferEventFuture;
+use crate::xhci::registers::PortScWrapper;
 use crate::xhci::ring::CommandRing;
 use crate::xhci::ring::TransferRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::EndpointType;
 use crate::xhci::Xhci;
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::cmp::max;
 use core::pin::Pin;
 
-pub async fn init_usb_hid_keyboard(
-    xhci: &mut Xhci,
-    port: usize,
-    slot: u8,
-    input_context: &mut Pin<&mut InputContext>,
-    ctrl_ep_ring: &mut CommandRing,
+pub fn pick_config(
     descriptors: &Vec<UsbDescriptor>,
-) -> Result<[Option<TransferRing>; 32]> {
+) -> Result<(
+    ConfigDescriptor,
+    InterfaceDescriptor,
+    Vec<EndpointDescriptor>,
+)> {
     let mut last_config: Option<ConfigDescriptor> = None;
     let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
     let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
@@ -58,15 +59,22 @@ pub async fn init_usb_hid_keyboard(
     let config_desc = last_config.ok_or(Error::Failed("No USB KBD Boot config found"))?;
     let interface_desc =
         boot_keyboard_interface.ok_or(Error::Failed("No USB KBD Boot interface found"))?;
+    Ok((config_desc, interface_desc, ep_desc_list))
+}
 
-    let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
+pub fn construct_configure_endpoint_cmd(
+    ep_desc_list: &Vec<EndpointDescriptor>,
+    input_context: &mut Pin<&mut InputContext>,
+    portsc: Rc<PortScWrapper>,
+    slot: u8,
+) -> Result<(GenericTrbEntry, [Option<TransferRing>; 32])> {
     let mut input_ctrl_ctx = InputControlContext::default();
     input_ctrl_ctx.add_context(0)?;
     const EP_RING_NONE: Option<TransferRing> = None;
     let mut ep_rings = [EP_RING_NONE; 32];
     let mut last_dci = 1;
     for ep_desc in ep_desc_list {
-        match EndpointType::from(&ep_desc) {
+        match EndpointType::from(ep_desc) {
             EndpointType::InterruptIn => {
                 let tring = TransferRing::new(8)?;
                 input_ctrl_ctx.add_context(ep_desc.dci())?;
@@ -91,7 +99,22 @@ pub async fn init_usb_hid_keyboard(
     input_context.set_last_valid_dci(last_dci)?;
     input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
     let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
-    xhci.send_command(cmd).await?.completed()?;
+    Ok((cmd, ep_rings))
+}
+
+pub async fn init_usb_hid_keyboard(
+    xhci: &mut Xhci,
+    port: usize,
+    slot: u8,
+    input_context: &mut Pin<&mut InputContext>,
+    ctrl_ep_ring: &mut CommandRing,
+    descriptors: &Vec<UsbDescriptor>,
+) -> Result<[Option<TransferRing>; 32]> {
+    let (config_desc, interface_desc, ep_desc_list) = pick_config(descriptors)?;
+    let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
+    let (config_ep_cmd, mut ep_rings) =
+        construct_configure_endpoint_cmd(&ep_desc_list, input_context, portsc, slot)?;
+    xhci.send_command(config_ep_cmd).await?.completed()?;
     xhci.request_set_config(slot, ctrl_ep_ring, config_desc.config_value())
         .await?;
     xhci.request_set_interface(
