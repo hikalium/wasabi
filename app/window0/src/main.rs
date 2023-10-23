@@ -25,6 +25,12 @@ fn main() -> u64 {
 
     draw_string(0xffffff, 100, 450, "Hello World").unwrap();
     draw_string(0xffffff, 100, 470, "#$*@^&!").unwrap();
+
+    draw_string_1p5x(0xffffff, 100, 500, "Hello World").unwrap();
+
+    draw_string_2x(0xffffff, 100, 540, "Hello World").unwrap();
+
+    draw_string_3x(0xffffff, 100, 600, "Hello World").unwrap();
     0
 }
 
