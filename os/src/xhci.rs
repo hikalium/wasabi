@@ -122,6 +122,7 @@ impl From<&EndpointDescriptor> for EndpointType {
 // [xhci] 4.7 Doorbells
 // index 0: for the host controller
 // index 1-255: for device contexts (index by a Slot ID)
+// DO NOT implement Copy trait - this should be the only instance to have the ptr.
 pub struct Doorbell {
     ptr: Mutex<*mut u32>,
 }
@@ -153,8 +154,8 @@ pub struct Xhci {
     rt_regs: Mmio<RuntimeRegisters>,
     portsc: PortSc,
     doorbell_regs: Vec<Rc<Doorbell>>,
-    command_ring: CommandRing,
-    primary_event_ring: EventRing,
+    command_ring: Mutex<CommandRing>,
+    primary_event_ring: Mutex<EventRing>,
     device_context_base_array: DeviceContextBaseAddressArray,
 }
 impl Xhci {
@@ -198,8 +199,8 @@ impl Xhci {
             rt_regs,
             portsc,
             doorbell_regs,
-            command_ring: CommandRing::default(),
-            primary_event_ring: EventRing::new()?,
+            command_ring: Mutex::new(CommandRing::default(), "Xhci.command_ring"),
+            primary_event_ring: Mutex::new(EventRing::new()?, "Xhci.primary_event_ring"),
             device_context_base_array,
         };
         xhc.init_primary_event_ring()?;
@@ -214,10 +215,10 @@ impl Xhci {
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
         let eq = &mut self.primary_event_ring;
-        unsafe { self.rt_regs.get_unchecked_mut() }.init_irs(0, eq)?;
+        unsafe { self.rt_regs.get_unchecked_mut() }.init_irs(0, &mut eq.lock())?;
         Ok(())
     }
-    pub fn primary_event_ring(&mut self) -> &mut EventRing {
+    pub fn primary_event_ring(&mut self) -> &Mutex<EventRing> {
         &mut self.primary_event_ring
     }
     fn init_slots_and_contexts(&mut self) -> Result<()> {
@@ -228,7 +229,7 @@ impl Xhci {
         Ok(())
     }
     fn init_command_ring(&mut self) -> Result<()> {
-        unsafe { self.op_regs.get_unchecked_mut() }.set_cmd_ring_ctrl(&self.command_ring);
+        unsafe { self.op_regs.get_unchecked_mut() }.set_cmd_ring_ctrl(&self.command_ring.lock());
         Ok(())
     }
     fn alloc_scratch_pad_buffers(num_scratch_pad_bufs: usize) -> Result<Pin<Box<[*mut u8]>>> {
@@ -266,9 +267,9 @@ impl Xhci {
         Ok(())
     }
     pub async fn send_command(&mut self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
-        let cmd_ptr = self.command_ring.push(cmd)?;
+        let cmd_ptr = self.command_ring.lock().push(cmd)?;
         self.notify_xhc();
-        CommandCompletionEventFuture::new(&mut self.primary_event_ring, cmd_ptr)
+        CommandCompletionEventFuture::new(&self.primary_event_ring, cmd_ptr)
             .await?
             .ok_or(Error::Failed("Timed out"))
     }
