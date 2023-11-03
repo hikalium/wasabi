@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
+use crate::mutex::Mutex;
 use crate::x86_64::paging::disable_cache;
 use crate::x86_64::paging::IoBox;
 use crate::xhci::trb::GenericTrbEntry;
@@ -150,14 +151,14 @@ impl CommandRing {
 // Consumer: xHC
 // Producer is responsible to flip the cycle bits
 // (Consumer will not change the cycle bits)
-pub struct TransferRing {
+pub struct TransferRingInner {
     ring: IoBox<TrbRing>,
     cycle_state_ours: bool,
     // enqeue_index: usize, // will be maintained by .ring
     dequeue_index: usize,
     buffers: [*mut u8; TrbRing::NUM_TRB - 1],
 }
-impl TransferRing {
+impl TransferRingInner {
     const BUF_SIZE: usize = 4096;
     const BUF_ALIGN: usize = 4096;
     pub fn new(transfer_size: usize) -> Result<Self> {
@@ -233,7 +234,7 @@ impl TransferRing {
         self.ring.as_ref() as *const TrbRing as u64
     }
 }
-impl Debug for TransferRing {
+impl Debug for TransferRingInner {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -244,6 +245,33 @@ impl Debug for TransferRing {
             self.ring.as_ref(),
         )?;
         Ok(())
+    }
+}
+pub struct TransferRing {
+    inner: Mutex<TransferRingInner>,
+}
+impl TransferRing {
+    pub fn new(transfer_size: usize) -> Result<Self> {
+        let inner = TransferRingInner::new(transfer_size)?;
+        let inner = Mutex::new(inner, "TransferRing");
+        Ok(Self { inner })
+    }
+    pub fn fill_ring(&self) -> Result<()> {
+        self.inner.lock().fill_ring()
+    }
+    pub fn dequeue_trb(&self, trb_ptr: usize) -> Result<()> {
+        self.inner.lock().dequeue_trb(trb_ptr)
+    }
+    pub fn current(&self) -> GenericTrbEntry {
+        self.inner.lock().current()
+    }
+    pub fn ring_phys_addr(&self) -> u64 {
+        self.inner.lock().ring_phys_addr()
+    }
+}
+impl Debug for TransferRing {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.inner.lock().fmt(f)
     }
 }
 

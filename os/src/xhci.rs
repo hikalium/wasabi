@@ -56,7 +56,7 @@ use context::InputContext;
 use context::InputControlContext;
 use context::OutputContext;
 use context::RawDeviceContextBaseAddressArray;
-//use device::UsbDeviceDriverContext;
+use device::UsbDeviceDriverContext;
 use future::CommandCompletionEventFuture;
 use future::TransferEventFuture;
 use registers::CapabilityRegisters;
@@ -609,36 +609,43 @@ impl Xhci {
         self.send_command(cmd).await?.completed()?;
         Ok(ep_rings)
     }
-    async fn update_max_packet_size(&self, 
+    async fn update_max_packet_size(
+        &self,
         port: usize,
         slot: u8,
         input_context: &mut Pin<Box<InputContext>>,
         ctrl_ep_ring: &mut Pin<Box<CommandRing>>,
-        ) -> Result<()> {
-        if self.portsc.get(port)?.upgrade().ok_or("PORTSC was invalid")?.port_speed() != UsbMode::FullSpeed {
-            return Ok(())
+    ) -> Result<()> {
+        if self
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC was invalid")?
+            .port_speed()
+            != UsbMode::FullSpeed
+        {
+            return Ok(());
         }
-            // TODO: refactor this part out
-            // For full speed device, we should read the first 8 bytes of the device descriptor to
-            // get proper MaxPacketSize parameter.
-            let device_descriptor = self
-                .request_initial_device_descriptor(slot, ctrl_ep_ring)
-                .await?;
-            let max_packet_size = device_descriptor.max_packet_size;
-            let mut input_ctrl_ctx = InputControlContext::default();
-            input_ctrl_ctx.add_context(0)?;
-            input_ctrl_ctx.add_context(1)?;
-            input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
-            input_context.as_mut().set_ep_ctx(
-                1,
-                EndpointContext::new_control_endpoint(
-                    max_packet_size as u16,
-                    ctrl_ep_ring.ring_phys_addr(),
-                )?,
-            )?;
-            let cmd = GenericTrbEntry::cmd_evaluate_context(input_context.as_ref(), slot);
-            self.send_command(cmd).await?.completed()
-
+        // TODO: refactor this part out
+        // For full speed device, we should read the first 8 bytes of the device descriptor to
+        // get proper MaxPacketSize parameter.
+        let device_descriptor = self
+            .request_initial_device_descriptor(slot, ctrl_ep_ring)
+            .await?;
+        let max_packet_size = device_descriptor.max_packet_size;
+        let mut input_ctrl_ctx = InputControlContext::default();
+        input_ctrl_ctx.add_context(0)?;
+        input_ctrl_ctx.add_context(1)?;
+        input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
+        input_context.as_mut().set_ep_ctx(
+            1,
+            EndpointContext::new_control_endpoint(
+                max_packet_size as u16,
+                ctrl_ep_ring.ring_phys_addr(),
+            )?,
+        )?;
+        let cmd = GenericTrbEntry::cmd_evaluate_context(input_context.as_ref(), slot);
+        self.send_command(cmd).await?.completed()
     }
     async fn device_ready(
         &self,
@@ -648,7 +655,8 @@ impl Xhci {
         mut input_context: Pin<Box<InputContext>>,
         mut ctrl_ep_ring: Pin<Box<CommandRing>>,
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
-        self.update_max_packet_size(port, slot, &mut input_context, &mut ctrl_ep_ring).await?;
+        self.update_max_packet_size(port, slot, &mut input_context, &mut ctrl_ep_ring)
+            .await?;
         let device_descriptor = self
             .request_device_descriptor(slot, &mut ctrl_ep_ring)
             .await?;
@@ -705,15 +713,16 @@ impl Xhci {
         let device_product_id = device_descriptor.product_id;
         println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
         if device_vendor_id == 2965 && device_product_id == 6032 {
-            ax88179::attach_usb_device(
-                self,
+            let ddc = UsbDeviceDriverContext::new(
                 port,
                 slot,
+                rc,
                 input_context,
-                &mut ctrl_ep_ring,
-                &descriptors,
+                ctrl_ep_ring,
+                descriptors,
             )
             .await?;
+            ax88179::attach_usb_device(ddc).await?;
         } else if device_vendor_id == 0x0bda
             && (device_product_id == 0x8153 || device_product_id == 0x8151)
         {
