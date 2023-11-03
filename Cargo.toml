@@ -1,12 +1,13 @@
 [workspace]
 members = [
-    "font",
-    "dbgutil",
-    "os",
     "app/hello0",
     "app/hello1",
-    "app/uname",
     "app/loop",
+    "app/uname",
     "app/window0",
+    "dbgutil",
+    "e2etest",
+    "font",
     "noli",
+    "os",
 ]

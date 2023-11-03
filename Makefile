@@ -80,6 +80,7 @@ test:
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test
+	make run_e2e_test
 
 .PHONY : fmt
 fmt :
@@ -128,6 +129,10 @@ run :
 		cd os && cargo \
 		  --config "target.'cfg(target_os = \"uefi\")'.runner = '$(RUNNER_NORMAL)'" \
 		run --release
+
+.PHONY : run_e2e_test
+run_e2e_test :
+	cd e2etest && cargo run -- --project-root ${PROJECT_ROOT}
 
 .PHONY : run_os_test
 run_os_test :
