@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::error::Error;
 use crate::error::Result;
 use crate::usb::EndpointDescriptor;
+use crate::usb::InterfaceDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::xhci::context::InputContext;
 use crate::xhci::future::TransferEventFuture;
@@ -14,6 +15,15 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::pin::Pin;
+
+// [hid_1_11]:
+// 7.2.5 Get_Protocol Request
+// 7.2.6 Set_Protocol Request
+#[repr(u8)]
+pub enum UsbHidProtocol {
+    BootProtocol = 0,
+    ReportProtocol = 1,
+}
 
 pub struct UsbDeviceDriverContext {
     port: usize,
@@ -79,11 +89,39 @@ impl UsbDeviceDriverContext {
             .request_set_config(self.slot, &mut self.ctrl_ep_ring, config_value)
             .await
     }
+    pub async fn set_interface(&mut self, interface_desc: &InterfaceDescriptor) -> Result<()> {
+        self.xhci
+            .request_set_interface(
+                self.slot,
+                &mut self.ctrl_ep_ring,
+                interface_desc.interface_number(),
+                interface_desc.alt_setting(),
+            )
+            .await
+    }
+    /// USB HID specific request
+    pub async fn set_protocol(
+        &mut self,
+        interface_desc: &InterfaceDescriptor,
+        protocol: UsbHidProtocol,
+    ) -> Result<()> {
+        self.xhci
+            .request_set_protocol(
+                self.slot,
+                &mut self.ctrl_ep_ring,
+                interface_desc.interface_number(),
+                protocol as u8,
+            )
+            .await
+    }
     pub fn push_trb_to_ctrl_ep(&mut self, trb: GenericTrbEntry) -> Result<u64> {
         self.ctrl_ep_ring.push(trb)
     }
     pub fn notify_ctrl_ep(&mut self) -> Result<()> {
         self.xhci.notify_ep(self.slot, 1)
+    }
+    pub fn notify_ep(&mut self, ep: &EndpointDescriptor) -> Result<()> {
+        self.xhci.notify_ep(self.slot, ep.dci())
     }
     pub async fn wait_transfer_event(&mut self, trb_ptr_to_wait: u64) -> Result<()> {
         TransferEventFuture::new_with_timeout(

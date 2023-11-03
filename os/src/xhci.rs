@@ -712,16 +712,10 @@ impl Xhci {
         let device_vendor_id = device_descriptor.vendor_id;
         let device_product_id = device_descriptor.product_id;
         println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
+        let ddc =
+            UsbDeviceDriverContext::new(port, slot, rc, input_context, ctrl_ep_ring, descriptors)
+                .await?;
         if device_vendor_id == 2965 && device_product_id == 6032 {
-            let ddc = UsbDeviceDriverContext::new(
-                port,
-                slot,
-                rc,
-                input_context,
-                ctrl_ep_ring,
-                descriptors,
-            )
-            .await?;
             ax88179::attach_usb_device(ddc).await?;
         } else if device_vendor_id == 0x0bda
             && (device_product_id == 0x8153 || device_product_id == 0x8151)
@@ -729,7 +723,7 @@ impl Xhci {
             println!("rtl8153/8151 is not supported yet...");
         } else if device_descriptor.device_class == 0 {
             // Device class is derived from Interface Descriptor
-            for d in &descriptors {
+            for d in ddc.descriptors() {
                 if let UsbDescriptor::Interface(e) = d {
                     match e.triple() {
                         /*
@@ -745,14 +739,7 @@ impl Xhci {
                         }
                         */
                         (3, 1, 1) => {
-                            let f = usb_hid_keyboard::attach_usb_device(
-                                rc,
-                                port,
-                                slot,
-                                input_context,
-                                ctrl_ep_ring,
-                                descriptors,
-                            );
+                            let f = usb_hid_keyboard::attach_usb_device(ddc);
                             return Ok(Box::pin(f));
                         }
                         triple => println!("Skipping unknown interface triple: {triple:?}"),

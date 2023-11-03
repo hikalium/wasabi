@@ -10,22 +10,11 @@ use crate::usb::ConfigDescriptor;
 use crate::usb::EndpointDescriptor;
 use crate::usb::InterfaceDescriptor;
 use crate::usb::UsbDescriptor;
-use crate::xhci::context::EndpointContext;
-use crate::xhci::context::InputContext;
-use crate::xhci::context::InputControlContext;
+use crate::xhci::device::UsbDeviceDriverContext;
+use crate::xhci::device::UsbHidProtocol;
 use crate::xhci::future::TransferEventFuture;
-use crate::xhci::registers::PortScWrapper;
-use crate::xhci::ring::CommandRing;
-use crate::xhci::ring::TransferRing;
-use crate::xhci::trb::GenericTrbEntry;
-use crate::xhci::EndpointType;
-use crate::xhci::Xhci;
-use alloc::boxed::Box;
 use alloc::format;
-use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::cmp::max;
-use core::pin::Pin;
 
 pub fn pick_config(
     descriptors: &Vec<UsbDescriptor>,
@@ -63,90 +52,30 @@ pub fn pick_config(
     Ok((config_desc, interface_desc, ep_desc_list))
 }
 
-pub fn construct_configure_endpoint_cmd(
-    ep_desc_list: &Vec<EndpointDescriptor>,
-    input_context: &mut Pin<&mut InputContext>,
-    portsc: Rc<PortScWrapper>,
-    slot: u8,
-) -> Result<(GenericTrbEntry, [Option<TransferRing>; 32])> {
-    let mut input_ctrl_ctx = InputControlContext::default();
-    input_ctrl_ctx.add_context(0)?;
-    const EP_RING_NONE: Option<TransferRing> = None;
-    let mut ep_rings = [EP_RING_NONE; 32];
-    let mut last_dci = 1;
-    for ep_desc in ep_desc_list {
-        match EndpointType::from(ep_desc) {
-            EndpointType::InterruptIn => {
-                let tring = TransferRing::new(8)?;
-                input_ctrl_ctx.add_context(ep_desc.dci())?;
-                input_context.set_ep_ctx(
-                    ep_desc.dci(),
-                    EndpointContext::new_interrupt_in_endpoint(
-                        portsc.max_packet_size()?,
-                        tring.ring_phys_addr(),
-                        portsc.port_speed(),
-                        ep_desc.interval,
-                        8,
-                    )?,
-                )?;
-                last_dci = max(last_dci, ep_desc.dci());
-                ep_rings[ep_desc.dci()] = Some(tring);
-            }
-            _ => {
-                println!("Ignoring {:?}", ep_desc);
-            }
-        }
-    }
-    input_context.set_last_valid_dci(last_dci)?;
-    input_context.set_input_ctrl_ctx(input_ctrl_ctx)?;
-    let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
-    Ok((cmd, ep_rings))
-}
-
-pub async fn init_usb_hid_keyboard(
-    xhci: &Xhci,
-    port: usize,
-    slot: u8,
-    input_context: &mut Pin<&mut InputContext>,
-    ctrl_ep_ring: &mut CommandRing,
-    descriptors: &Vec<UsbDescriptor>,
-) -> Result<[Option<TransferRing>; 32]> {
+pub async fn init_usb_hid_keyboard(ddc: &mut UsbDeviceDriverContext) -> Result<()> {
+    let descriptors = ddc.descriptors();
     let (config_desc, interface_desc, ep_desc_list) = pick_config(descriptors)?;
-    let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
-    let (config_ep_cmd, mut ep_rings) =
-        construct_configure_endpoint_cmd(&ep_desc_list, input_context, portsc, slot)?;
-    xhci.send_command(config_ep_cmd).await?.completed()?;
-    xhci.request_set_config(slot, ctrl_ep_ring, config_desc.config_value())
+    for ep_desc in &ep_desc_list {
+        println!("usb_hid_kbd: EP: {ep_desc:?}")
+    }
+    ddc.set_config(config_desc.config_value()).await?;
+    ddc.set_interface(&interface_desc).await?;
+    ddc.set_protocol(&interface_desc, UsbHidProtocol::BootProtocol)
         .await?;
-    xhci.request_set_interface(
-        slot,
-        ctrl_ep_ring,
-        interface_desc.interface_number(),
-        interface_desc.alt_setting(),
-    )
-    .await?;
-    xhci.request_set_protocol(
-        slot,
-        ctrl_ep_ring,
-        interface_desc.interface_number(),
-        0, /* Boot Protocol */
-    )
-    .await?;
     // 4.6.6 Configure Endpoint
     // When configuring or deconfiguring a device, only after completing a successful
     // Configure Endpoint Command and a successful USB SET_CONFIGURATION
     // request may software schedule data transfers through a newly enabled endpoint
     // or Stream Transfer Ring of the Device Slot.
-    for (dci, tring) in ep_rings.iter_mut().enumerate() {
-        match tring {
-            Some(tring) => {
-                tring.fill_ring()?;
-                xhci.notify_ep(slot, dci)?;
-            }
-            None => {}
-        }
+    for ep_desc in &ep_desc_list {
+        let ep_ring = ddc
+            .ep_ring(ep_desc.dci())?
+            .as_ref()
+            .ok_or(Error::Failed("Endpoint not created"))?;
+        ep_ring.fill_ring()?;
+        ddc.notify_ep(ep_desc)?;
     }
-    Ok(ep_rings)
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -178,24 +107,12 @@ fn usage_id_to_char(usage_id: u8) -> Result<KeyEvent> {
     }
 }
 
-pub async fn attach_usb_device(
-    xhci: Rc<Xhci>,
-    port: usize,
-    slot: u8,
-    mut input_context: Pin<Box<InputContext>>,
-    mut ctrl_ep_ring: Pin<Box<CommandRing>>,
-    descriptors: Vec<UsbDescriptor>,
-) -> Result<()> {
-    let mut ep_rings = init_usb_hid_keyboard(
-        &xhci,
-        port,
-        slot,
-        &mut input_context.as_mut(),
-        &mut ctrl_ep_ring.as_mut(),
-        &descriptors,
-    )
-    .await?;
+pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
+    init_usb_hid_keyboard(&mut ddc).await?;
 
+    let port = ddc.port();
+    let slot = ddc.slot();
+    let xhci = ddc.xhci();
     let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut prev_pressed_keys = BitSet::<32>::new();
     loop {
@@ -212,7 +129,7 @@ pub async fn attach_usb_device(
                     }
                     .as_ref(),
                 );
-                if let Some(ref mut tring) = ep_rings[trb.dci()] {
+                if let Some(ref mut tring) = ddc.ep_ring(trb.dci())?.as_ref() {
                     tring.dequeue_trb(transfer_trb_ptr)?;
                     xhci.notify_ep(slot, trb.dci())?;
                 }
