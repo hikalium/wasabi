@@ -109,7 +109,8 @@ fn build_wasabi() -> Result<()> {
 }
 
 fn test_qemu_is_killable_via_monitor() -> Result<()> {
-    let mut child = spawn_shell_cmd_at_nocapture("qemu-system-x86_64 -monitor stdio", ".")?;
+    let mut child =
+        spawn_shell_cmd_at_nocapture("qemu-system-x86_64 -monitor stdio -display none", ".")?;
     eprintln!("QEMU spawned");
     sleep(Duration::from_millis(1000));
     let mut stdin = child.stdin.take().context("stdin was None")?;
@@ -137,10 +138,9 @@ fn main() -> Result<()> {
     dump_dev_env()?;
     build_wasabi()?;
     block_on(async {
-        if let Err(e) = run_tests().await {
-            eprintln!("{e}");
-        }
-    });
+        run_tests().await?;
+        Result::<()>::Ok(())
+    })?;
 
     Ok(())
 }
