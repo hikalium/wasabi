@@ -71,6 +71,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         }
     };
     let console_task = async {
+        println!("INFO: console_task has started");
         let mut s = String::new();
         loop {
             if let Some(c) = InputManager::take().pop_input() {

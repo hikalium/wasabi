@@ -108,6 +108,7 @@ fn usage_id_to_char(usage_id: u8) -> Result<KeyEvent> {
 }
 
 pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
+    println!("INFO: usb_hid_keyboard attached");
     init_usb_hid_keyboard(&mut ddc).await?;
 
     let port = ddc.port();
