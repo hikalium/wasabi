@@ -1,5 +1,7 @@
 #![feature(exit_status_error)]
 
+pub mod qemu;
+
 use anyhow::Context;
 use anyhow::Result;
 use async_process::Stdio;
