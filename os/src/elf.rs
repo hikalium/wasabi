@@ -485,7 +485,7 @@ impl<'a> Elf<'a> {
 
         let dst = &mut dst[sh.vaddr_range().into_range_in(app_vaddr_range)?];
         let src = &src[segment_file_range];
-        dst.copy_from_slice(src);
+        dst[..src.len()].copy_from_slice(src);
 
         Ok(())
     }
