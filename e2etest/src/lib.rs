@@ -7,18 +7,19 @@ use anyhow::Result;
 use async_process::Stdio;
 use serde::Deserialize;
 use serde::Serialize;
+use std::path::PathBuf;
 use std::process::Command;
 
 /// Subset of `cargo metadata --format-version 1`
 #[derive(Serialize, Deserialize, Debug)]
-struct CargoMetadataV1 {
+pub struct CargoMetadataV1 {
     /// Full-path of the target directory
     target_directory: String,
     /// Full-path of the workspace directory
     workspace_root: String,
 }
 
-fn run_shell_cmd(cmd: &str) -> Result<(String, String)> {
+pub fn run_shell_cmd(cmd: &str) -> Result<(String, String)> {
     run_shell_cmd_at(cmd, ".")
 }
 
@@ -68,7 +69,25 @@ fn get_first_line(s: &str) -> String {
     s.first().unwrap().to_string()
 }
 
-pub fn dump_dev_env() -> Result<()> {
+#[derive(Debug)]
+pub struct DevEnv {
+    cargo_target_dir: String,
+}
+impl DevEnv {
+    pub fn new(cargo_metadata: &CargoMetadataV1) -> Self {
+        let cargo_target_dir = cargo_metadata.target_directory.to_string();
+        Self { cargo_target_dir }
+    }
+    pub fn wasabi_efi_path(&self) -> PathBuf {
+        let mut path = PathBuf::from(&self.cargo_target_dir);
+        path.push("x86_64-unknown-uefi");
+        path.push("release");
+        path.push("os.efi");
+        path
+    }
+}
+
+pub fn detect_dev_env() -> Result<DevEnv> {
     let (qemu_path, _) = run_shell_cmd("which qemu-system-x86_64")?;
     println!("QEMU path : {qemu_path}");
     let qemu_version = get_first_line(&run_shell_cmd(&format!("{qemu_path} --version"))?.0);
@@ -85,7 +104,7 @@ pub fn dump_dev_env() -> Result<()> {
     let cargo_metadata = &run_shell_cmd("cargo metadata --format-version 1")?.0;
     let cargo_metadata: CargoMetadataV1 = serde_json::from_str(cargo_metadata.as_str())?;
     println!("Cargo metadata  : {cargo_metadata:?}");
-    Ok(())
+    Ok(DevEnv::new(&cargo_metadata))
 }
 
 pub fn build_wasabi() -> Result<()> {

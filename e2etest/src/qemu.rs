@@ -27,7 +27,19 @@ impl Qemu {
             ),
             ".",
         )?;
-        eprintln!("QEMU spawned: id = {}", proc.id());
+        eprintln!("QEMU (without OS) spawned: id = {}", proc.id());
+        Ok(Self { proc })
+    }
+    pub fn launch_with_wasabi_os() -> Result<Self> {
+        let proc = spawn_shell_cmd_at_nocapture(
+            &format!(
+                "qemu-system-x86_64 -monitor unix:{},server,nowait -display none {}",
+                Self::MONITOR_SOCK,
+                Self::COMMON_ARGS
+            ),
+            ".",
+        )?;
+        eprintln!("QEMU (with WasabiOS) spawned: id = {}", proc.id());
         Ok(Self { proc })
     }
     fn wait_to_be_killed(&mut self) -> Result<()> {
