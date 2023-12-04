@@ -1,3 +1,4 @@
+use crate::run_shell_cmd_at_nocapture;
 use crate::spawn_shell_cmd_at_nocapture;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -10,6 +11,26 @@ use std::thread::sleep;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
+
+pub struct RootFs {
+    path: String,
+}
+impl RootFs {
+    pub fn new() -> Result<Self> {
+        let path = tempfile::tempdir()?.path().to_string_lossy().to_string();
+
+        Ok(Self { path })
+    }
+    pub fn copy_boot_loader_from(&self, path_to_efi: &str) -> Result<()> {
+        let rootfs = &self.path;
+        run_shell_cmd_at_nocapture(
+            &format!(
+                "mkdir -p {rootfs}/EFI/BOOT && cp {path_to_efi} {rootfs}/EFI/BOOT/BOOTX64.EFI"
+            ),
+            ".",
+        )
+    }
+}
 
 pub struct Qemu {
     proc: process::Child,
@@ -30,17 +51,28 @@ impl Qemu {
         eprintln!("QEMU (without OS) spawned: id = {}", proc.id());
         Ok(Self { proc })
     }
-    pub fn launch_with_wasabi_os() -> Result<Self> {
+    pub fn launch_with_wasabi_os(path_to_efi: &str, path_to_ovmf: &str) -> Result<(Self, RootFs)> {
+        let root_fs = RootFs::new()?;
+        root_fs.copy_boot_loader_from(path_to_efi)?;
         let proc = spawn_shell_cmd_at_nocapture(
             &format!(
-                "qemu-system-x86_64 -monitor unix:{},server,nowait -display none {}",
+                "qemu-system-x86_64 \
+                -machine q35 \
+                -cpu qemu64 \
+                -smp 4 \
+                --no-reboot \
+                -monitor unix:{},server,nowait {} \
+                -drive format=raw,file=fat:rw:{} \
+                -bios {}",
                 Self::MONITOR_SOCK,
-                Self::COMMON_ARGS
+                Self::COMMON_ARGS,
+                &root_fs.path,
+                path_to_ovmf,
             ),
             ".",
         )?;
         eprintln!("QEMU (with WasabiOS) spawned: id = {}", proc.id());
-        Ok(Self { proc })
+        Ok((Self { proc }, root_fs))
     }
     fn wait_to_be_killed(&mut self) -> Result<()> {
         const TIMEOUT: Duration = Duration::from_secs(100);
