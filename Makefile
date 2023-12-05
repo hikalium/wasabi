@@ -132,7 +132,7 @@ run :
 
 .PHONY : run_e2e_test
 run_e2e_test :
-	cd e2etest && cargo run -- --project-root ${PROJECT_ROOT}
+	cd e2etest && cargo test
 
 .PHONY : run_os_test
 run_os_test :

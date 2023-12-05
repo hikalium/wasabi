@@ -1,4 +1,5 @@
 #![feature(exit_status_error)]
+#![feature(async_closure)]
 
 pub mod qemu;
 
@@ -59,7 +60,7 @@ pub fn run_shell_cmd_at_nocapture(cmd: &str, cwd: &str) -> Result<()> {
 pub fn spawn_shell_cmd_at_nocapture(cmd: &str, cwd: &str) -> Result<std::process::Child> {
     eprintln!("Running: {cmd}");
     Command::new("bash")
-        .stdin(Stdio::piped())
+        .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .current_dir(cwd)

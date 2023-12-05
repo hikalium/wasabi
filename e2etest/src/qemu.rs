@@ -4,11 +4,12 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use retry::delay::Fixed;
+use retry::retry;
+use retry::OperationResult;
 use std::io;
 use std::process;
 use std::process::ExitStatus;
-use std::thread::sleep;
-use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 
@@ -33,25 +34,48 @@ impl RootFs {
 }
 
 pub struct Qemu {
-    proc: process::Child,
+    proc: Option<process::Child>,
+    monitor_sock_path: String,
 }
 
 impl Qemu {
-    const MONITOR_SOCK: &str = "qemu_monitor.sock";
-    const COMMON_ARGS: &str = "-d int,cpu_reset -D log/qemu_debug.txt";
-    pub fn launch_without_os() -> Result<Self> {
+    const COMMON_ARGS: &str = "";
+    pub fn new() -> Result<Self> {
+        let monitor_sock_path = tempfile::NamedTempFile::new()?;
+        let monitor_sock_path = monitor_sock_path
+            .into_temp_path()
+            .as_os_str()
+            .to_string_lossy()
+            .to_string();
+        Ok(Self {
+            proc: None,
+            monitor_sock_path,
+        })
+    }
+    pub fn launch_without_os(&mut self) -> Result<()> {
+        if self.proc.is_some() {
+            bail!("Already launched: {:?}", self.proc);
+        }
         let proc = spawn_shell_cmd_at_nocapture(
             &format!(
                 "qemu-system-x86_64 -monitor unix:{},server,nowait -display none {}",
-                Self::MONITOR_SOCK,
+                &self.monitor_sock_path,
                 Self::COMMON_ARGS
             ),
             ".",
         )?;
         eprintln!("QEMU (without OS) spawned: id = {}", proc.id());
-        Ok(Self { proc })
+        self.proc = Some(proc);
+        Ok(())
     }
-    pub fn launch_with_wasabi_os(path_to_efi: &str, path_to_ovmf: &str) -> Result<(Self, RootFs)> {
+    pub fn launch_with_wasabi_os(
+        &mut self,
+        path_to_efi: &str,
+        path_to_ovmf: &str,
+    ) -> Result<RootFs> {
+        if self.proc.is_some() {
+            bail!("Already launched: {:?}", self.proc);
+        }
         let root_fs = RootFs::new()?;
         root_fs.copy_boot_loader_from(path_to_efi)?;
         let proc = spawn_shell_cmd_at_nocapture(
@@ -64,7 +88,7 @@ impl Qemu {
                 -monitor unix:{},server,nowait {} \
                 -drive format=raw,file=fat:rw:{} \
                 -bios {}",
-                Self::MONITOR_SOCK,
+                self.monitor_sock_path,
                 Self::COMMON_ARGS,
                 &root_fs.path,
                 path_to_ovmf,
@@ -72,24 +96,22 @@ impl Qemu {
             ".",
         )?;
         eprintln!("QEMU (with WasabiOS) spawned: id = {}", proc.id());
-        Ok((Self { proc }, root_fs))
+        self.proc = Some(proc);
+        Ok(root_fs)
     }
     fn wait_to_be_killed(&mut self) -> Result<()> {
-        const TIMEOUT: Duration = Duration::from_secs(100);
-        let mut duration = Duration::ZERO;
-        let interval = Duration::from_millis(500);
-        let status: ExitStatus = loop {
-            let status = self.proc.try_wait()?;
-            if let Some(status) = status {
-                break Result::<ExitStatus>::Ok(status);
+        let status: ExitStatus = retry(Fixed::from_millis(500).take(6), || {
+            if let Some(proc) = self.proc.as_mut() {
+                if let Ok(Some(status)) = proc.try_wait() {
+                    OperationResult::Ok(status)
+                } else {
+                    OperationResult::Retry("waiting")
+                }
+            } else {
+                OperationResult::Err("proc was null")
             }
-            sleep(interval);
-            duration += interval;
-            if duration > TIMEOUT {
-                bail!("Waiting too long to kill ({TIMEOUT:?})");
-            }
-            eprintln!("Waiting QEMU to be killed...")
-        }?;
+        })
+        .unwrap();
         status
             .exit_ok()
             .context("QEMU should exit succesfully with quit command, but got error")?;
@@ -97,7 +119,10 @@ impl Qemu {
         Ok(())
     }
     async fn send_monitor_cmd(&mut self, cmd: &str) -> Result<()> {
-        let mut stream = UnixStream::connect(Self::MONITOR_SOCK).await?;
+        eprintln!("send_monitor_cmd: Sending {cmd:?}...");
+        let mut stream = UnixStream::connect(&self.monitor_sock_path)
+            .await
+            .context("Failed to open a UNIX domain socket for QEMU monitor")?;
         let mut bytes_done = 0;
 
         loop {
@@ -136,7 +161,7 @@ impl Qemu {
             match stream.try_read(&mut buf) {
                 Ok(0) => break,
                 Ok(_) => {
-                    print!("{}", &String::from_utf8_lossy(&buf));
+                    eprint!("recv: {}", &String::from_utf8_lossy(&buf));
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     continue;
@@ -156,12 +181,18 @@ impl Qemu {
 
 impl Drop for Qemu {
     fn drop(&mut self) {
-        if self.proc.try_wait().is_err() {
-            // looks like the process is still running so kill it
-            self.proc
-                .kill()
-                .context(anyhow!("Failed to kill QEMU (id = {})", self.proc.id()))
-                .unwrap();
+        if let Some(mut proc) = self.proc.take() {
+            if proc.try_wait().is_err() {
+                // looks like the process is still running so kill it
+                proc.kill()
+                    .context(anyhow!("Failed to kill QEMU (id = {})", proc.id()))
+                    .unwrap();
+            }
+            eprintln!(
+                "QEMU (pid = {}) is killed since it is dropped. status: {:?}",
+                proc.id(),
+                proc.try_wait()
+            );
         }
     }
 }
