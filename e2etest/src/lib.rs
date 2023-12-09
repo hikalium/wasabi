@@ -142,3 +142,13 @@ pub fn build_wasabi() -> Result<()> {
     run_shell_cmd_at_nocapture("cargo build --release", "./os/")?;
     Ok(())
 }
+
+/// A setup function to be called at the beginning of every test cases.
+pub fn setup() -> Result<DevEnv> {
+    std::env::remove_var("RUSTUP_TOOLCHAIN");
+    let dev_env = detect_dev_env()?;
+    let root_dir = dev_env.wasabi_workspace_root_dir();
+    println!("Entering dir : {root_dir}");
+    std::env::set_current_dir(root_dir)?;
+    Ok(dev_env)
+}
