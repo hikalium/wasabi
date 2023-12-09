@@ -386,12 +386,10 @@ pub fn fill_circle(color: u32, center_x: i64, center_y: i64, radius: i64) -> Res
     Ok(())
 }
 
-pub fn fill_rect(color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<(), ()> {
-    let mut x0 = x;
-    let mut y0 = y;
-    for i in 0..width {
-        for j in 0..height {
-            draw_point(color, x0 + i, y0 + j)?;
+pub fn fill_rect(color: u32, px: i64, py: i64, width: i64, height: i64) -> Result<(), ()> {
+    for dx in 0..width {
+        for dy in 0..height {
+            draw_point(color, px + dx, py + dy)?;
         }
     }
     Ok(())
