@@ -13,6 +13,7 @@ static TITLE_BAR_HEIGHT: i64 = 24;
 static BUTTON_SIZE: i64 = 16;
 
 /// Represent a window for one application.
+#[derive(Clone, Debug)]
 pub struct Window {
     name: String,
     background_color: u32,
