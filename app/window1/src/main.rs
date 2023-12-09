@@ -15,6 +15,9 @@ fn main() -> u64 {
         window::Window::new("second window!!".to_string(), 0xff00ff, 30, 70, 200, 100).unwrap();
 
     window2.fill_rect(0xff0000, 0, 0, 50, 50).unwrap();
+    window2
+        .draw_string(0x000000, 5, 10, "test", window::StringSize::Large)
+        .unwrap();
 
     0
 }

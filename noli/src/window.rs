@@ -14,6 +14,16 @@ static BLACK: u32 = 0x000000;
 static TITLE_BAR_HEIGHT: i64 = 24;
 static BUTTON_SIZE: i64 = 16;
 
+#[derive(Clone, Debug)]
+pub enum StringSize {
+    // used for draw_string
+    Medium,
+    // used for draw_string_2x
+    Large,
+    // used for draw_string_3x
+    XLarge,
+}
+
 /// Represent a window for one application.
 #[derive(Clone, Debug)]
 pub struct Window {
@@ -160,12 +170,29 @@ impl Window {
         Ok(())
     }
 
-    pub fn draw_string(&self, color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
+    pub fn draw_string(
+        &self,
+        color: u32,
+        x: i64,
+        y: i64,
+        s: &str,
+        size: StringSize,
+    ) -> Result<(), ()> {
         if x < 0 || x > self.width || y < 0 || y > self.height {
             return Err(());
         }
 
-        draw_string(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+        match size {
+            StringSize::Medium => {
+                draw_string(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+            }
+            StringSize::Large => {
+                draw_string_2x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+            }
+            StringSize::XLarge => {
+                draw_string_3x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+            }
+        }
         Ok(())
     }
 }
