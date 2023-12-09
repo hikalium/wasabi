@@ -2,6 +2,8 @@ extern crate alloc;
 
 use crate::*;
 use alloc::string::String;
+use core::cmp::max;
+use core::cmp::min;
 
 static WHITE: u32 = 0xffffff;
 static DARKBLUE: u32 = 0x00008b;
@@ -117,8 +119,53 @@ impl Window {
     // TODO: implement once a user can move a window via mouse input.
     pub fn r#move(&self) {}
 
+    pub fn fill_rect(
+        &self,
+        color: u32,
+        px: i64,
+        py: i64,
+        width: i64,
+        height: i64,
+    ) -> Result<(), ()> {
+        if px < 0 || px + width > self.width || py < 0 || py + height > self.height {
+            return Err(());
+        }
+
+        fill_rect(
+            color,
+            self.x + px,
+            self.y + py + TITLE_BAR_HEIGHT,
+            width,
+            height,
+        )?;
+        Ok(())
+    }
+
+    pub fn draw_line(&self, color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<(), ()> {
+        if min(x0, x1) < 0
+            || min(y0, y1) < 0
+            || max(x0, x1) > self.width
+            || max(y0, y1) > self.height
+        {
+            return Err(());
+        }
+
+        draw_line(
+            color,
+            self.x + x1,
+            self.y + y1 + TITLE_BAR_HEIGHT,
+            self.x + x0,
+            self.y + y0 + TITLE_BAR_HEIGHT,
+        )?;
+        Ok(())
+    }
+
     pub fn draw_string(&self, color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
-        draw_string(color, self.x + x, self.y + y, s)?;
+        if x < 0 || x > self.width || y < 0 || y > self.height {
+            return Err(());
+        }
+
+        draw_string(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
         Ok(())
     }
 }

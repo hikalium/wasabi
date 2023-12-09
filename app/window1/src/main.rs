@@ -14,6 +14,8 @@ fn main() -> u64 {
     let window2 =
         window::Window::new("second window!!".to_string(), 0xff00ff, 30, 70, 200, 100).unwrap();
 
+    window2.fill_rect(0xff0000, 0, 0, 50, 50).unwrap();
+
     0
 }
 
