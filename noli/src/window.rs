@@ -126,8 +126,9 @@ impl Window {
         Ok(())
     }
 
-    // TODO: implement once a user can move a window via mouse input.
-    pub fn r#move(&self) {}
+    // TODO: implement these APIs
+    pub fn move_position(&self) {}
+    pub fn flush(&self) {}
 
     pub fn fill_rect(
         &self,
