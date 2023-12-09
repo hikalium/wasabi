@@ -919,6 +919,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "window1"
+version = "0.1.0"
+dependencies = [
+ "noli",
+]
+
+[[package]]
 name = "windows-sys"
 version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
