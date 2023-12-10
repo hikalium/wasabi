@@ -25,8 +25,8 @@ mod test {
 
     #[tokio::test]
     async fn qemu_is_killable_via_monitor() -> Result<()> {
-        let _dev_env = setup()?;
-        let mut qemu = Qemu::new()?;
+        let dev_env = setup()?;
+        let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         qemu.launch_without_os()?;
         sleep(Duration::from_millis(500));
         qemu.kill().await?;
@@ -36,8 +36,8 @@ mod test {
     #[tokio::test]
     async fn wasabi_os_is_bootable() -> Result<()> {
         let dev_env = setup()?;
-        let mut qemu = Qemu::new()?;
-        let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path(), dev_env.ovmf_path())?;
+        let mut qemu = Qemu::new(dev_env.ovmf_path())?;
+        let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
         sleep(Duration::from_millis(3000));
         qemu.kill().await?;
         Ok(())

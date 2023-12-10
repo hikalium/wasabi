@@ -36,11 +36,11 @@ impl RootFs {
 pub struct Qemu {
     proc: Option<process::Child>,
     monitor_sock_path: String,
+    path_to_ovmf: String,
 }
 
 impl Qemu {
-    const COMMON_ARGS: &str = "";
-    pub fn new() -> Result<Self> {
+    pub fn new(path_to_ovmf: &str) -> Result<Self> {
         let monitor_sock_path = tempfile::NamedTempFile::new()?;
         let monitor_sock_path = monitor_sock_path
             .into_temp_path()
@@ -50,49 +50,40 @@ impl Qemu {
         Ok(Self {
             proc: None,
             monitor_sock_path,
+            path_to_ovmf: path_to_ovmf.to_string(),
         })
+    }
+    fn gen_base_args(&self) -> String {
+        format!(
+            "qemu-system-x86_64 \
+                -machine q35 \
+                -cpu qemu64 \
+                -smp 4 \
+                --no-reboot \
+                -monitor unix:{},server,nowait \
+                -bios {}",
+            self.monitor_sock_path, self.path_to_ovmf,
+        )
     }
     pub fn launch_without_os(&mut self) -> Result<()> {
         if self.proc.is_some() {
             bail!("Already launched: {:?}", self.proc);
         }
-        let proc = spawn_shell_cmd_at_nocapture(
-            &format!(
-                "qemu-system-x86_64 -monitor unix:{},server,nowait -display none {}",
-                &self.monitor_sock_path,
-                Self::COMMON_ARGS
-            ),
-            ".",
-        )?;
+        let base_args = self.gen_base_args();
+        let proc = spawn_shell_cmd_at_nocapture(&base_args, ".")?;
         eprintln!("QEMU (without OS) spawned: id = {}", proc.id());
         self.proc = Some(proc);
         Ok(())
     }
-    pub fn launch_with_wasabi_os(
-        &mut self,
-        path_to_efi: &str,
-        path_to_ovmf: &str,
-    ) -> Result<RootFs> {
+    pub fn launch_with_wasabi_os(&mut self, path_to_efi: &str) -> Result<RootFs> {
         if self.proc.is_some() {
             bail!("Already launched: {:?}", self.proc);
         }
         let root_fs = RootFs::new()?;
         root_fs.copy_boot_loader_from(path_to_efi)?;
+        let base_args = self.gen_base_args();
         let proc = spawn_shell_cmd_at_nocapture(
-            &format!(
-                "qemu-system-x86_64 \
-                -machine q35 \
-                -cpu qemu64 \
-                -smp 4 \
-                --no-reboot \
-                -monitor unix:{},server,nowait {} \
-                -drive format=raw,file=fat:rw:{} \
-                -bios {}",
-                self.monitor_sock_path,
-                Self::COMMON_ARGS,
-                &root_fs.path,
-                path_to_ovmf,
-            ),
+            &format!("{base_args} -drive format=raw,file=fat:rw:{}", root_fs.path),
             ".",
         )?;
         eprintln!("QEMU (with WasabiOS) spawned: id = {}", proc.id());
