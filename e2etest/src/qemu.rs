@@ -10,6 +10,7 @@ use retry::OperationResult;
 use std::io;
 use std::process;
 use std::process::ExitStatus;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 
@@ -35,41 +36,58 @@ impl RootFs {
 
 pub struct Qemu {
     proc: Option<process::Child>,
-    monitor_sock_path: String,
+    work_dir: tempfile::TempDir,
     path_to_ovmf: String,
 }
 
 impl Qemu {
+    const MONITOR_SOCKET_NAME: &str = "monitor.sock";
     pub fn new(path_to_ovmf: &str) -> Result<Self> {
-        let monitor_sock_path = tempfile::NamedTempFile::new()?;
-        let monitor_sock_path = monitor_sock_path
-            .into_temp_path()
-            .as_os_str()
-            .to_string_lossy()
-            .to_string();
         Ok(Self {
             proc: None,
-            monitor_sock_path,
             path_to_ovmf: path_to_ovmf.to_string(),
+            work_dir: tempfile::TempDir::new()?,
         })
     }
-    fn gen_base_args(&self) -> String {
-        format!(
+    fn work_dir_path(&self) -> Result<&str> {
+        self.work_dir
+            .path()
+            .to_str()
+            .context("work_dir path for Qemu is not a valid UTF-8 string")
+    }
+    fn monitor_sock_path(&self) -> Result<String> {
+        let work_dir = self.work_dir_path()?;
+        let monitor_socket_name = Self::MONITOR_SOCKET_NAME;
+        Ok(format!("{work_dir}/{monitor_socket_name}"))
+    }
+    fn gen_base_args(&self) -> Result<String> {
+        let work_dir = self.work_dir_path()?;
+        let path_to_ovmf = self.path_to_ovmf.as_str();
+        let monitor_sock_path = self.monitor_sock_path()?;
+        Ok(format!(
             "qemu-system-x86_64 \
                 -machine q35 \
                 -cpu qemu64 \
                 -smp 4 \
+                -device qemu-xhci \
                 --no-reboot \
-                -monitor unix:{},server,nowait \
-                -bios {}",
-            self.monitor_sock_path, self.path_to_ovmf,
-        )
+                -monitor unix:{monitor_sock_path},server,nowait \
+                -device isa-debug-exit,iobase=0xf4,iosize=0x01 \
+                -netdev user,id=net1 \
+                -device rtl8139,netdev=net1 \
+                -object filter-dump,id=f2,netdev=net1,file={work_dir}/net1.pcap \
+                -m 1024M \
+                -drive format=raw,file=fat:rw:mnt \
+                -chardev file,id=char_com1,mux=on,path={work_dir}/com1.txt \
+                -chardev stdio,id=char_com2,mux=on,logfile={work_dir}/com2.txt \
+                -bios {path_to_ovmf}",
+        ))
     }
     pub fn launch_without_os(&mut self) -> Result<()> {
         if self.proc.is_some() {
             bail!("Already launched: {:?}", self.proc);
         }
-        let base_args = self.gen_base_args();
+        let base_args = self.gen_base_args()?;
         let proc = spawn_shell_cmd_at_nocapture(&base_args, ".")?;
         eprintln!("QEMU (without OS) spawned: id = {}", proc.id());
         self.proc = Some(proc);
@@ -81,7 +99,7 @@ impl Qemu {
         }
         let root_fs = RootFs::new()?;
         root_fs.copy_boot_loader_from(path_to_efi)?;
-        let base_args = self.gen_base_args();
+        let base_args = self.gen_base_args()?;
         let proc = spawn_shell_cmd_at_nocapture(
             &format!("{base_args} -drive format=raw,file=fat:rw:{}", root_fs.path),
             ".",
@@ -111,9 +129,22 @@ impl Qemu {
     }
     async fn send_monitor_cmd(&mut self, cmd: &str) -> Result<()> {
         eprintln!("send_monitor_cmd: Sending {cmd:?}...");
-        let mut stream = UnixStream::connect(&self.monitor_sock_path)
-            .await
-            .context("Failed to open a UNIX domain socket for QEMU monitor")?;
+        let mut retry_count = 0;
+        let mut stream = loop {
+            let sock = UnixStream::connect(&self.monitor_sock_path()?)
+                .await
+                .context("Failed to open a UNIX domain socket for QEMU monitor");
+            if let Ok(sock) = sock {
+                break sock;
+            } else if retry_count < 10 {
+                eprintln!("{sock:?}");
+                std::thread::sleep(Duration::from_millis(500));
+                retry_count += 1;
+                continue;
+            } else {
+                bail!("{sock:?}")
+            }
+        };
         let mut bytes_done = 0;
 
         loop {
