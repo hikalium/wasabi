@@ -156,6 +156,7 @@ app :
 	make -C app/uname
 	make -C app/loop
 	make -C app/window0
+	make -C app/window1
 
 .PHONY : run_deps
 run_deps : app

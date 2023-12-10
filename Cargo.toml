@@ -5,6 +5,7 @@ members = [
     "app/loop",
     "app/uname",
     "app/window0",
+    "app/window1",
     "dbgutil",
     "e2etest",
     "font",
