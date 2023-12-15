@@ -7,6 +7,7 @@ use anyhow::Result;
 use retry::delay::Fixed;
 use retry::retry;
 use retry::OperationResult;
+use std::fs;
 use std::io;
 use std::process;
 use std::process::ExitStatus;
@@ -79,9 +80,16 @@ impl Qemu {
                 -m 1024M \
                 -drive format=raw,file=fat:rw:mnt \
                 -chardev file,id=char_com1,mux=on,path={work_dir}/com1.txt \
-                -chardev stdio,id=char_com2,mux=on,logfile={work_dir}/com2.txt \
+                -chardev file,id=char_com2,mux=on,path={work_dir}/com2.txt \
+                -serial chardev:char_com1 \
+                -serial chardev:char_com2 \
+                -display none \
                 -bios {path_to_ovmf}",
         ))
+    }
+    pub fn read_com2_output(&mut self) -> Result<String> {
+        let work_dir = self.work_dir_path()?;
+        fs::read_to_string(format!("{work_dir}/com2.txt")).context("Failed to read com2 output")
     }
     pub fn launch_without_os(&mut self) -> Result<()> {
         if self.proc.is_some() {
