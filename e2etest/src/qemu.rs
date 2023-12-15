@@ -78,7 +78,6 @@ impl Qemu {
                 -device rtl8139,netdev=net1 \
                 -object filter-dump,id=f2,netdev=net1,file={work_dir}/net1.pcap \
                 -m 1024M \
-                -drive format=raw,file=fat:rw:mnt \
                 -chardev file,id=char_com1,mux=on,path={work_dir}/com1.txt \
                 -chardev file,id=char_com2,mux=on,path={work_dir}/com2.txt \
                 -serial chardev:char_com1 \
