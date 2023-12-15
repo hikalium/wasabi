@@ -187,10 +187,10 @@ pub fn init_graphical_terminal() {
     let vram = BootInfo::take().vram();
     let mut textarea = TextArea::new(
         vram,
-        vram.width() / 4,
-        16,
-        vram.width() / 4 * 3,
+        0,
         vram.height() / 4 * 3,
+        vram.width(),
+        vram.height() / 4,
     );
     textarea.set_mode(text_area::TextAreaMode::Ring);
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
