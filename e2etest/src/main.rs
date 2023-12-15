@@ -43,8 +43,7 @@ mod test {
         sleep(Duration::from_millis(3000));
         qemu.kill().await?;
         let output = qemu.read_com2_output()?;
-        eprintln!("{output}");
-        bail!("tmp");
+        assert!(output.contains("Welcome to WasabiOS!"));
         Ok(())
     }
 }
