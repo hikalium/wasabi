@@ -57,7 +57,7 @@ impl DevEnv {
         let cargo_metadata: CargoMetadataV1 = serde_json::from_str(cargo_metadata.as_str())?;
         println!("Cargo metadata  : {cargo_metadata:?}");
         let wasabi_workspace_root_dir = cargo_metadata.workspace_root.to_string();
-        let cargo_target_dir = cargo_metadata.target_directory.to_string();
+        let cargo_target_dir = cargo_metadata.target_directory;
 
         let mut efi_path = PathBuf::from(&cargo_target_dir);
         efi_path.push("x86_64-unknown-uefi");
