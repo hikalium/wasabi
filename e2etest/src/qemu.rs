@@ -36,6 +36,105 @@ impl RootFs {
     }
 }
 
+pub struct QemuMonitor {
+    stream: UnixStream,
+}
+impl QemuMonitor {
+    pub async fn new(monitor_sock_path: &str) -> Result<Self> {
+        let mut retry_count = 0;
+        let stream = loop {
+            let sock = UnixStream::connect(monitor_sock_path)
+                .await
+                .context("Failed to open a UNIX domain socket for QEMU monitor");
+            if let Ok(sock) = sock {
+                break sock;
+            } else if retry_count < 10 {
+                eprintln!("{sock:?}");
+                std::thread::sleep(Duration::from_millis(500));
+                retry_count += 1;
+                continue;
+            } else {
+                bail!("{sock:?}")
+            }
+        };
+        // wait for the first prompt on connection
+        let mut monitor = Self { stream };
+        monitor.wait_until_prompt().await?;
+        Ok(monitor)
+    }
+    pub async fn read_as_much(&mut self) -> Result<String> {
+        let mut output = String::new();
+        loop {
+            // Wait for the socket to be readable
+            self.stream.readable().await?;
+            // Creating the buffer **after** the `await` prevents it from
+            // being stored in the async task.
+            let mut buf = [0; 4096];
+            // Try to read data, this may still fail with `WouldBlock`
+            match self.stream.try_read(&mut buf) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let s = String::from_utf8_lossy(&buf);
+                    eprint!("{s}");
+                    output.push_str(&s)
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    // The readiness event was a false positive.
+                    break;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+        Ok(output)
+    }
+    pub async fn wait_until_prompt(&mut self) -> Result<String> {
+        let mut output = String::new();
+        loop {
+            self.stream.readable().await?;
+            let s = self.read_as_much().await?;
+            output.push_str(&s);
+            if output.contains("(qemu)") {
+                break;
+            }
+        }
+        Ok(output)
+    }
+    pub async fn send(&mut self, cmd: &str) -> Result<()> {
+        eprintln!("QemuMonitor::send : Sending {cmd:?}...");
+        let mut cmd = cmd.to_string();
+        cmd.push('\n');
+        let cmd = cmd.as_str();
+        let mut bytes_done = 0;
+        loop {
+            // Wait for the socket to be writable
+            self.stream.writable().await?;
+
+            // Try to write data, this may still fail with `WouldBlock`
+            // if the readiness event is a false positive.
+            match self.stream.try_write(cmd[bytes_done..].as_bytes()) {
+                Ok(n) => {
+                    bytes_done += n;
+                    if bytes_done == cmd.len() {
+                        break;
+                    }
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+        self.stream.flush().await?;
+        self.wait_until_prompt().await?;
+        eprintln!("Sent QEMU monitor command: {cmd:?}");
+        Ok(())
+    }
+}
+
 pub struct Qemu {
     proc: Option<process::Child>,
     work_dir: tempfile::TempDir,
@@ -84,6 +183,8 @@ impl Qemu {
                 -serial chardev:char_com1 \
                 -serial chardev:char_com2 \
                 -display none \
+                -device usb-tablet \
+                -device usb-kbd \
                 -bios {path_to_ovmf}",
         ))
     }
@@ -92,19 +193,25 @@ impl Qemu {
         fs::read_to_string(format!("{work_dir}/com2.txt")).context("Failed to read com2 output")
     }
     pub fn wait_until_serial_output_contains(&mut self, s: &str) -> Result<()> {
+        const INTERVAL_MS: u64 = 500;
+        const TIMEOUT_MS: u64 = 5 * 1000;
         eprint!("Waiting serial output `{s}`...");
-        loop {
+        let mut duration = 0;
+        let mut last_output = "Not initialized".to_string();
+        while duration < TIMEOUT_MS {
             let output = self.read_serial_output();
-            if let Ok(output) = output {
-                if output.contains("Welcome to WasabiOS!") {
-                    break;
+            if let Ok(output) = &output {
+                if output.contains(s) {
+                    eprintln!("OK");
+                    return Ok(());
                 }
+                last_output = output.clone();
             }
-            sleep(Duration::from_millis(500));
+            sleep(Duration::from_millis(INTERVAL_MS));
             eprint!(".");
+            duration += INTERVAL_MS;
         }
-        eprintln!("OK");
-        Ok(())
+        bail!("Expected a string `{s}` in the serial output within {TIMEOUT_MS} ms but not found. Output:\n{last_output}");
     }
     pub fn launch_without_os(&mut self) -> Result<()> {
         if self.proc.is_some() {
@@ -150,76 +257,15 @@ impl Qemu {
         eprintln!("QEMU exited succesfully");
         Ok(())
     }
-    async fn send_monitor_cmd(&mut self, cmd: &str) -> Result<()> {
-        eprintln!("send_monitor_cmd: Sending {cmd:?}...");
-        let mut retry_count = 0;
-        let mut stream = loop {
-            let sock = UnixStream::connect(&self.monitor_sock_path()?)
-                .await
-                .context("Failed to open a UNIX domain socket for QEMU monitor");
-            if let Ok(sock) = sock {
-                break sock;
-            } else if retry_count < 10 {
-                eprintln!("{sock:?}");
-                std::thread::sleep(Duration::from_millis(500));
-                retry_count += 1;
-                continue;
-            } else {
-                bail!("{sock:?}")
-            }
-        };
-        let mut bytes_done = 0;
-
-        loop {
-            // Wait for the socket to be writable
-            stream.writable().await?;
-
-            // Try to write data, this may still fail with `WouldBlock`
-            // if the readiness event is a false positive.
-            match stream.try_write(cmd[bytes_done..].as_bytes()) {
-                Ok(n) => {
-                    bytes_done += n;
-                    if bytes_done == cmd.len() {
-                        break;
-                    }
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
-        stream.flush().await?;
-        eprintln!("Sent QEMU monitor command: {cmd:?}");
-        loop {
-            // Wait for the socket to be readable
-            stream.readable().await?;
-
-            // Creating the buffer **after** the `await` prevents it from
-            // being stored in the async task.
-            let mut buf = [0; 4096];
-
-            // Try to read data, this may still fail with `WouldBlock`
-            // if the readiness event is a false positive.
-            match stream.try_read(&mut buf) {
-                Ok(0) => break,
-                Ok(_) => {
-                    eprint!("{}", &String::from_utf8_lossy(&buf));
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
-        Ok(())
+    // No new lines in cmd is allowed (it will be added automatically)
+    pub async fn send_monitor_cmd(&mut self, cmd: &str) -> Result<()> {
+        let mut monitor = QemuMonitor::new(&self.monitor_sock_path()?).await?;
+        monitor.send(cmd).await
     }
     pub async fn kill(&mut self) -> Result<()> {
-        self.send_monitor_cmd("quit\n").await?;
+        if let Err(e) = self.send_monitor_cmd("quit\n").await {
+            eprintln!("Qemu::kill : send_monitor_cmd returned an error but it is expected since the connection is lost: {e:?}")
+        }
         self.wait_to_be_killed()
     }
 }
@@ -227,17 +273,21 @@ impl Qemu {
 impl Drop for Qemu {
     fn drop(&mut self) {
         if let Some(mut proc) = self.proc.take() {
-            if proc.try_wait().is_err() {
+            let pid = proc.id();
+            if let Ok(Some(exit_status)) = proc.try_wait() {
+                eprintln!("QEMU (pid = {pid}) is already exited at Drop. status: {exit_status:?}",);
+            } else {
                 // looks like the process is still running so kill it
+                eprintln!("Sending kill signal to QEMU (pid = {})", proc.id(),);
                 proc.kill()
                     .context(anyhow!("Failed to kill QEMU (id = {})", proc.id()))
                     .unwrap();
+                eprintln!(
+                    "QEMU (pid = {}) is killed since it is dropped. status: {:?}",
+                    proc.id(),
+                    proc.try_wait()
+                );
             }
-            eprintln!(
-                "QEMU (pid = {}) is killed since it is dropped. status: {:?}",
-                proc.id(),
-                proc.try_wait()
-            );
         }
     }
 }
