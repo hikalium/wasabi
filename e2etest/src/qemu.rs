@@ -190,7 +190,7 @@ impl Qemu {
             match stream.try_read(&mut buf) {
                 Ok(0) => break,
                 Ok(_) => {
-                    eprint!("recv: {}", &String::from_utf8_lossy(&buf));
+                    eprint!("{}", &String::from_utf8_lossy(&buf));
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     continue;

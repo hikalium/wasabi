@@ -37,13 +37,21 @@ mod test {
     async fn wasabi_os_is_bootable() -> Result<()> {
         let dev_env = DevEnv::new()?;
         e2etest::devenv::build_wasabi()?;
-        eprintln!("build done");
         let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
-        sleep(Duration::from_millis(3000));
+        eprint!("Waiting...");
+        loop {
+            let output = qemu.read_com2_output();
+            if let Ok(output) = output {
+                if output.contains("Welcome to WasabiOS!") {
+                    break;
+                }
+            }
+            sleep(Duration::from_millis(500));
+            eprint!(".");
+        }
+        eprintln!("OK");
         qemu.kill().await?;
-        let output = qemu.read_com2_output()?;
-        assert!(output.contains("Welcome to WasabiOS!"));
         Ok(())
     }
 }
