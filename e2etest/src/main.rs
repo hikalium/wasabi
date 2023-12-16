@@ -39,18 +39,7 @@ mod test {
         e2etest::devenv::build_wasabi()?;
         let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
-        eprint!("Waiting...");
-        loop {
-            let output = qemu.read_com2_output();
-            if let Ok(output) = output {
-                if output.contains("Welcome to WasabiOS!") {
-                    break;
-                }
-            }
-            sleep(Duration::from_millis(500));
-            eprint!(".");
-        }
-        eprintln!("OK");
+        qemu.wait_until_serial_output_contains("Welcome to WasabiOS!")?;
         qemu.kill().await?;
         Ok(())
     }

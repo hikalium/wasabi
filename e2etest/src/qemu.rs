@@ -11,6 +11,7 @@ use std::fs;
 use std::io;
 use std::process;
 use std::process::ExitStatus;
+use std::thread::sleep;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
@@ -86,9 +87,24 @@ impl Qemu {
                 -bios {path_to_ovmf}",
         ))
     }
-    pub fn read_com2_output(&mut self) -> Result<String> {
+    pub fn read_serial_output(&mut self) -> Result<String> {
         let work_dir = self.work_dir_path()?;
         fs::read_to_string(format!("{work_dir}/com2.txt")).context("Failed to read com2 output")
+    }
+    pub fn wait_until_serial_output_contains(&mut self, s: &str) -> Result<()> {
+        eprint!("Waiting serial output `{s}`...");
+        loop {
+            let output = self.read_serial_output();
+            if let Ok(output) = output {
+                if output.contains("Welcome to WasabiOS!") {
+                    break;
+                }
+            }
+            sleep(Duration::from_millis(500));
+            eprint!(".");
+        }
+        eprintln!("OK");
+        Ok(())
     }
     pub fn launch_without_os(&mut self) -> Result<()> {
         if self.proc.is_some() {
