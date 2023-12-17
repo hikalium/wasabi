@@ -71,6 +71,17 @@ tshark -r log/dump_net1.pcap
 (qemu) device_add usb-host,hostbus=2,hostport=3.2.1
 ```
 
+## Run pre-commit checks
+```
+make commit
+```
+
+## Run CI job locally
+```
+gh extension install https://github.com/nektos/gh-act
+gh act
+```
+
 ## References
 - https://rust-lang.github.io/unsafe-code-guidelines/introduction.html
 

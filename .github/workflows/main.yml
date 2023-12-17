@@ -1,21 +1,27 @@
-name: Test Wasabi OS and Browser
+name: Test Wasabi OS
 on: [push]
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-20.04
     container: hikalium/wasabi-builder:latest
     steps:
-      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
-      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
-      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
-      - name: Check out repository code
+      - name: Dump metadata
+        run: |
+          echo "The job was triggered by a ${{ github.event_name }} event"
+          echo "This job is running on a ${{ runner.os }} server hosted by GitHub"
+          echo "The name of the branch is ${{ github.ref }} and the repository is ${{ github.repository }}"
+      - name: Check out the source code
         uses: actions/checkout@v3
-      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
-      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
       - name: List files in the repository
         run: |
           ls .
       - name: Build
         run: |
           make
-      - run: echo "🍏 This job's status is ${{ job.status }}."
+      - name: Test
+        if: ${{ false }} # still WIP so disable this temporarily
+        run: |
+          make test
+      - name: Report
+        run: |
+          echo "Done. status: ${{ job.status }}"

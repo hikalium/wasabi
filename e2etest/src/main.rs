@@ -36,7 +36,6 @@ mod test {
     #[tokio::test]
     async fn wasabi_os_is_bootable() -> Result<()> {
         let dev_env = DevEnv::new()?;
-        e2etest::devenv::build_wasabi()?;
         let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
         qemu.wait_until_serial_output_contains("Welcome to WasabiOS!")?;
@@ -48,7 +47,6 @@ mod test {
     async fn keyboard_is_working() -> Result<()> {
         const TEST_STRING: &str = "qwerty";
         let dev_env = DevEnv::new()?;
-        e2etest::devenv::build_wasabi()?;
         let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
         qemu.wait_until_serial_output_contains("INFO: usb_hid_keyboard is ready")?;
@@ -57,13 +55,12 @@ mod test {
         assert!(!output.contains(TEST_STRING));
         qemu.send_monitor_cmd("sendkey ret").await?;
         qemu.wait_until_serial_output_contains("Welcome to WasabiOS!")?;
-        qemu.send_monitor_cmd("sendkey q").await?;
-        qemu.send_monitor_cmd("sendkey w").await?;
-        qemu.send_monitor_cmd("sendkey e").await?;
-        qemu.send_monitor_cmd("sendkey r").await?;
-        qemu.send_monitor_cmd("sendkey t").await?;
-        qemu.send_monitor_cmd("sendkey y").await?;
+        // OS is now booted. Let's type chars into the machine.
+        for c in TEST_STRING.chars() {
+            qemu.send_monitor_cmd(&format!("sendkey {c}")).await?;
+        }
         qemu.send_monitor_cmd("sendkey ret").await?;
+        // Now, verify if the TEST_STRING is in the serial output.
         qemu.wait_until_serial_output_contains(TEST_STRING)?;
         qemu.kill().await?;
         Ok(())

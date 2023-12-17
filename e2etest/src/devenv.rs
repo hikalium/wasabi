@@ -67,6 +67,9 @@ impl DevEnv {
 
         println!("Entering dir : {wasabi_workspace_root_dir}");
         std::env::set_current_dir(&wasabi_workspace_root_dir)?;
+
+        Self::build_wasabi()?;
+
         Ok(Self {
             wasabi_workspace_root_dir: wasabi_workspace_root_dir.clone(),
             wasabi_efi_path,
@@ -82,9 +85,7 @@ impl DevEnv {
     pub fn ovmf_path(&self) -> &str {
         &self.ovmf_path
     }
-}
-
-pub fn build_wasabi() -> Result<()> {
-    run_shell_cmd_at_nocapture("cargo build --release", "./os/")?;
-    Ok(())
+    fn build_wasabi() -> Result<()> {
+        run_shell_cmd_at_nocapture("cargo build --release", "./os/")
+    }
 }
