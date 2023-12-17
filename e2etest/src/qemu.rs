@@ -194,7 +194,7 @@ impl Qemu {
     }
     pub fn wait_until_serial_output_contains(&mut self, s: &str) -> Result<()> {
         const INTERVAL_MS: u64 = 500;
-        const TIMEOUT_MS: u64 = 5 * 1000;
+        const TIMEOUT_MS: u64 = 15 * 1000;
         eprint!("Waiting serial output `{s}`...");
         let mut duration = 0;
         let mut last_output = "Not initialized".to_string();

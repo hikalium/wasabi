@@ -37,10 +37,17 @@ RUN apt-get update \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
 	sh -s -- -y --default-toolchain=nightly-x86_64-unknown-linux-gnu
 ENV PATH $PATH:/root/.cargo/bin
-ARG RUST_TOOLCHAIN=nightly-2022-01-01-x86_64-unknown-linux-gnu
+ARG RUST_TOOLCHAIN=nightly-2023-03-01-x86_64-unknown-linux-gnu
 RUN rustup toolchain install ${RUST_TOOLCHAIN}
-RUN rustup component add rust-src --toolchain nightly-2022-01-01-x86_64-unknown-linux-gnu
+RUN rustup component add rust-src --toolchain ${RUST_TOOLCHAIN}
 RUN echo 'export PS1="(wasabi-builder)$ "' >> /root/.bashrc
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+	file \
+	&& apt-get -q -y autoremove \
+	&& apt-get -q -y clean \
+	&& rm -rf /var/lib/apt/lists/*
 
 
 CMD ["/bin/bash"]

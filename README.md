@@ -77,9 +77,19 @@ make commit
 ```
 
 ## Run CI job locally
+After installing [GitHub CLI](https://github.com/cli/cli?tab=readme-ov-file#installation) and [Docker](https://docs.docker.com/engine/install/), run:
 ```
+# Check if Docker works without root
+docker run hello-world
+
+# Install act extention
 gh extension install https://github.com/nektos/gh-act
+
+# Run
 gh act
+
+# Run without docker pull (useful when uprev the container)
+gh act --pull=false
 ```
 
 ## References
