@@ -1,4 +1,5 @@
 PROJECT_ROOT:=$(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
 OVMF=${PROJECT_ROOT}/third_party/ovmf/RELEASEX64_OVMF.fd
 QEMU=qemu-system-x86_64
 PORT_MONITOR?=2345
@@ -7,6 +8,9 @@ VNC_PASSWORD?=wasabi
 INIT?=hello1
 RUNNER_NORMAL=$(shell readlink -f scripts/launch_qemu.sh)
 RUNNER_TEST=$(shell readlink -f scripts/test_runner.sh)
+NOVNC_VERSION=1.4.0
+HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
+CLIPPY_OPTIONS=-D warnings
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
@@ -27,11 +31,9 @@ QEMU_ARGS=\
 		--no-reboot \
 		-d int,cpu_reset \
 		-D log/qemu_debug.txt \
+		-device usb-tablet \
+		-device usb-kbd \
 		${MORE_QEMU_FLAGS}
-
-ifndef USE_PS2_KBD
-QEMU_ARGS+=-device usb-kbd
-endif
 
 ifndef DISPLAY
 QEMU_ARGS+=-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on
@@ -45,24 +47,13 @@ endif
 # -netdev user,id=net0 -device usb-net,netdev=net0 \
 # -object filter-dump,id=f1,netdev=net0,file=log/dump_net0.dat \
 
-HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
-CLIPPY_OPTIONS=-D warnings
-
+.PHONY : default
 default: bin
-
-.PHONY: \
-	app \
-	commit \
-	spellcheck \
-	run \
-	run_deps \
-	watch_serial \
-	# Keep this line blank
 
 .PHONY : bin
 bin: generated/font.rs
 	rustup component add rust-src
-	cd os && cargo build
+	cd os && cargo build --all-targets --all-features
 
 .PHONY : clippy
 clippy:
@@ -71,7 +62,7 @@ clippy:
 	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd dbgutil && cargo clippy
 	# cd font && cargo clippy --all-features --all-targets -- -D warnings
-	# cd os && cargo clippy --all-features --all-targets -- -D warnings
+	cd os && cargo clippy --all-features --all-targets -- -D warnings
 
 .PHONY : dump_config
 dump_config:
@@ -82,6 +73,7 @@ test:
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test
+	make run_e2e_test
 
 .PHONY : fmt
 fmt :
@@ -102,12 +94,6 @@ commit :
 	git add .
 	git diff HEAD --color=always | less -R
 	git commit
-
-generated/font.rs: font/font.txt Makefile
-	mkdir -p generated
-	cargo run --bin font font/font.txt > $@.tmp
-	# Rename the file once the command above is succeeded to avoid issues.
-	mv $@.tmp $@
 
 .PHONY : filecheck
 filecheck:
@@ -131,6 +117,10 @@ run :
 		  --config "target.'cfg(target_os = \"uefi\")'.runner = '$(RUNNER_NORMAL)'" \
 		run --release
 
+.PHONY : run_e2e_test
+run_e2e_test :
+	cd e2etest && cargo test
+
 .PHONY : run_os_test
 run_os_test :
 	export INIT="${INIT}" && \
@@ -152,6 +142,8 @@ app :
 	make -C app/hello1
 	make -C app/uname
 	make -C app/loop
+	make -C app/window0
+	make -C app/window1
 
 .PHONY : run_deps
 run_deps : app
@@ -168,9 +160,6 @@ watch_serial:
 .PHONY : watch_qemu_monitor
 watch_qemu_monitor:
 	while ! telnet localhost ${PORT_MONITOR} ; do sleep 1 ; done ;
-
-generated/bin/os.efi:
-	cd os && cargo install --path . --root ../generated/
 
 .PHONY : install
 install : run_deps generated/bin/os.efi
@@ -232,12 +221,20 @@ crash:
 		--qemu-debug-log $$(readlink -f log/qemu_debug.txt) \
 		--serial-log $$(readlink -f log/com2.txt)
 
-generated/noVNC-% :
-	wget -O generated/novnc.tar.gz https://github.com/novnc/noVNC/archive/refs/tags/v$*.tar.gz
-	cd generated && tar -xvf novnc.tar.gz
-
-NOVNC_VERSION=1.4.0
 .PHONY : vnc
 vnc: generated/noVNC-$(NOVNC_VERSION)
 	( echo 'change vnc password $(VNC_PASSWORD)' | while ! nc localhost $(PORT_MONITOR) ; do sleep 1 ; done ) &
 	generated/noVNC-$(NOVNC_VERSION)/utils/novnc_proxy --vnc localhost:$$((5900+${PORT_OFFSET_VNC}))
+
+generated/font.rs: font/font.txt Makefile
+	mkdir -p generated
+	cargo run --bin font font/font.txt > $@.tmp
+	# Rename the file once the command above is succeeded to avoid issues.
+	mv $@.tmp $@
+
+generated/bin/os.efi:
+	cd os && cargo install --path . --root ../generated/
+
+generated/noVNC-% :
+	wget -O generated/novnc.tar.gz https://github.com/novnc/noVNC/archive/refs/tags/v$*.tar.gz
+	cd generated && tar -xvf novnc.tar.gz

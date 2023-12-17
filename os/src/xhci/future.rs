@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::hpet::Hpet;
+use crate::mutex::Mutex;
 use crate::println;
 use crate::xhci::ring::EventRing;
 use crate::xhci::trb::GenericTrbEntry;
@@ -16,16 +17,16 @@ pub enum EventFutureWaitType {
 }
 
 pub struct EventFuture<'a, const E: TrbType> {
-    event_ring: &'a mut EventRing,
+    event_ring: &'a Mutex<EventRing>,
     wait_on: EventFutureWaitType,
     time_out: u64,
     _pinned: PhantomPinned,
 }
 impl<'a, const E: TrbType> EventFuture<'a, E> {
-    pub fn new(event_ring: &'a mut EventRing, trb_addr: u64) -> Self {
+    pub fn new(event_ring: &'a Mutex<EventRing>, trb_addr: u64) -> Self {
         Self::new_with_timeout(event_ring, trb_addr, 100)
     }
-    pub fn new_with_timeout(event_ring: &'a mut EventRing, trb_addr: u64, wait_ms: u64) -> Self {
+    pub fn new_with_timeout(event_ring: &'a Mutex<EventRing>, trb_addr: u64, wait_ms: u64) -> Self {
         let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * wait_ms;
         Self {
             event_ring,
@@ -34,7 +35,7 @@ impl<'a, const E: TrbType> EventFuture<'a, E> {
             _pinned: PhantomPinned,
         }
     }
-    pub fn new_on_slot(event_ring: &'a mut EventRing, slot: u8) -> Self {
+    pub fn new_on_slot(event_ring: &'a Mutex<EventRing>, slot: u8) -> Self {
         let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 10;
         Self {
             event_ring,
@@ -49,7 +50,8 @@ impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<Option<GenericTrbEntry>>> {
         let time_out = self.time_out;
         let mut_self = unsafe { self.get_unchecked_mut() };
-        match mut_self.event_ring.pop() {
+        let event = mut_self.event_ring.lock().pop();
+        match event {
             Err(e) => Poll::Ready(Err(e)),
             Ok(None) => {
                 if time_out < Hpet::take().main_counter() {

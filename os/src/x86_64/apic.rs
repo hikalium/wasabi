@@ -114,7 +114,6 @@ impl IoApic {
     }
     fn set_redirection(from_irq: usize, to_vector: u8, to_apic: u32) -> Result<()> {
         let entry: u64 = ((to_apic as u64) << 56) | (to_vector as u64);
-        println!("set_redirection: {:010X}", entry);
         Self::write_redirection_entry(from_irq, entry)
     }
     pub fn init(bsp_lapic: &LocalApic) -> Result<()> {

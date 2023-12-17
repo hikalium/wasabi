@@ -5,12 +5,13 @@ use crate::boot_info::BootInfo;
 use crate::boot_info::File;
 use crate::efi;
 use crate::error;
-use crate::graphics::BitmapImageBuffer;
+use crate::graphics::Bitmap;
 use crate::hpet;
 use crate::memory_map_holder;
 use crate::pci::Pci;
 use crate::println;
-use crate::serial;
+use crate::serial::SerialPort;
+use crate::serial::SerialPortIndex;
 use crate::text_area;
 use crate::text_area::TextArea;
 use crate::util;
@@ -28,6 +29,7 @@ use crate::x86_64::paging::PML4;
 use crate::x86_64::CpuidRequest;
 use alloc::boxed::Box;
 use core::cmp::max;
+use core::fmt::Write;
 use core::pin::Pin;
 use core::slice;
 use efi::EfiMemoryType::CONVENTIONAL_MEMORY;
@@ -130,7 +132,16 @@ pub fn init_with_boot_services(
     image_handle: efi::EfiHandle,
     efi_system_table: Pin<&'static efi::EfiSystemTable>,
 ) {
-    serial::com_initialize(serial::IO_ADDR_COM2);
+    {
+        let mut serial = SerialPort::new(SerialPortIndex::Com1);
+        serial.init();
+        writeln!(serial, "WasabiOS COM1 Initialized").expect("Failed to print out to COM1");
+    }
+    {
+        let mut serial = SerialPort::new(SerialPortIndex::Com2);
+        serial.init();
+        writeln!(serial, "WasabiOS COM2 Initialized").expect("Failed to print out to COM2");
+    }
     let kernel_stack = efi::alloc_pages(
         efi_system_table,
         size_in_pages_from_bytes(KERNEL_STACK_SIZE),
@@ -174,7 +185,13 @@ pub fn init_global_allocator() {
 
 pub fn init_graphical_terminal() {
     let vram = BootInfo::take().vram();
-    let mut textarea = TextArea::new(vram, 8, 16, vram.width() - 16, vram.height() - 16);
+    let mut textarea = TextArea::new(
+        vram,
+        0,
+        vram.height() / 4 * 3,
+        vram.width(),
+        vram.height() / 4,
+    );
     textarea.set_mode(text_area::TextAreaMode::Ring);
     crate::print::GLOBAL_PRINTER.set_text_area(textarea);
 }

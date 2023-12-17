@@ -1,9 +1,58 @@
 // x86_64 specific implementations
 
-// System V AMD64 (sysv64) ABI:
-//   args: RDI, RSI, RDX, RCX, R8, R9
-//   callee-saved: RBX, RBP, R12, R13, R14, R15
-//   caller-saved: otherwise
+/*
+
+msabi: Microsoft ABI (a.k.a. __fastcall, ms_abi)
+(source: https://learn.microsoft.com/en-us/cpp/build/x64-software-conventions?view=msvc-170#x64-register-usage)
+    retv: rax
+    func:
+    argN: rcx, rdx, r8, r9
+    temp: r10, r11
+    keep: rbx, rsp, rbp, rsi, rdi, r12, r13, r14, r15
+
+sysv: System V ABI
+(source: [sysv_abi_0_99] Figure 3.4: Register Usage)
+    retv: rax
+    func:
+    argN: rdi, rsi, rdx, rcx, r8, r9
+    temp: r10, r11
+    keep: rbx, rsp, rbp, r12, r13, r14, r15
+
+linux: Linux syscall ABI
+(source: [sysv_abi_0_99] A.2 AMD64 Linux Kernel Conventions)
+    retv: rax
+    func: rax
+    argN: rdi, rsi, rdx, r10, r8, r9        // using r10 instead of rcx in the userland
+    temp: rcx, r11                          // destroyed by the syscall instruction
+    keep: rbx, rsp, rbp, r12, r13, r14, r15
+
+wasabi: WasabiOS syscall ABI
+    retv: rax
+    func: rdx
+    argN: rsi, rdi, r8, r9, r10
+    temp: rcx, r11                          // destroyed by the syscall instruction
+    keep: rbx, rsp, rbp, r12, r13, r14, r15
+
+Comparison:
+            msabi       sysv        linux       wasabi
+            ----        ----        ----        ----
+    rax     retv        retv        retv/func   retv
+    rcx     arg1        arg4        temp        temp
+    rdx     arg2        arg3        arg3        func
+    rbx     keep        keep        keep        keep
+    rsp     keep        keep        keep        keep
+    rbp     keep        keep        keep        keep
+    rsi     keep        arg2        arg2        arg1
+    rdi     keep        arg1        arg1        arg2
+    r8      arg3        arg5        arg5        arg3
+    r9      arg4        arg6        arg6        arg4
+    r10     temp        temp        arg4        arg5
+    r11     temp        temp        temp        arg6
+    r12     keep        keep        keep        keep
+    r13     keep        keep        keep        keep
+    r14     keep        keep        keep        keep
+    r15     keep        keep        keep        keep
+*/
 
 pub mod apic;
 pub mod gdt;
@@ -397,17 +446,17 @@ global_asm!(
     //
     "push rbx",
     "push rbp",
-    "push r12",
-    "push r13",
-    "push r14",
     "push r15",
+    "push r14",
+    "push r13",
+    "push r12",
     //
+    "push r10",
     "push r9",
     "push r8",
-    "push r10",
-    "push rdx",
-    "push rsi",
     "push rdi",
+    "push rsi",
+    "push rdx",
     "push rax",
     //
     "mov rbp, rsp",
@@ -417,17 +466,17 @@ global_asm!(
     "mov rsp, rbp // Revert to user stack",
     //
     "pop rax",
-    "pop rdi",
-    "pop rsi",
     "pop rdx",
-    "pop r10",
+    "pop rsi",
+    "pop rdi",
     "pop r8",
     "pop r9",
+    "pop r10",
     //
-    "pop r15",
-    "pop r14",
-    "pop r13",
     "pop r12",
+    "pop r13",
+    "pop r14",
+    "pop r15",
     "pop rbp",
     "pop rbx",
     //

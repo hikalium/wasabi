@@ -1,7 +1,7 @@
 use crate::efi::locate_graphic_protocol;
 use crate::efi::EfiSystemTable;
 use crate::error::Result;
-use crate::graphics::BitmapImageBuffer;
+use crate::graphics::Bitmap;
 use core::pin::Pin;
 
 #[derive(Clone, Copy)]
@@ -12,7 +12,7 @@ pub struct VRAMBufferInfo {
     pixels_per_line: usize,
 }
 
-impl BitmapImageBuffer for VRAMBufferInfo {
+impl Bitmap for VRAMBufferInfo {
     fn bytes_per_pixel(&self) -> i64 {
         4
     }

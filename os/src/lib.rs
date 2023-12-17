@@ -23,12 +23,14 @@
 #![feature(array_chunks)]
 #![feature(iter_array_chunks)]
 #![feature(iter_advance_by)]
+#![feature(linked_list_cursors)]
 
 pub mod acpi;
 pub mod allocator;
 pub mod ax88179;
 pub mod bitset;
 pub mod boot_info;
+pub mod command;
 pub mod debug_exit;
 pub mod efi;
 pub mod elf;
@@ -45,6 +47,7 @@ pub mod net;
 pub mod panic;
 pub mod pci;
 pub mod print;
+pub mod ps2;
 pub mod rtl8139;
 pub mod serial;
 pub mod syscall;
@@ -52,6 +55,7 @@ pub mod test_runner;
 pub mod text_area;
 pub mod usb;
 pub mod usb_hid_keyboard;
+pub mod usb_hid_tablet;
 pub mod util;
 pub mod volatile;
 pub mod vram;

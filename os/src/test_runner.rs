@@ -3,6 +3,7 @@ use crate::serial;
 use core::any::type_name;
 use core::fmt::Write;
 use serial::SerialPort;
+use serial::SerialPortIndex;
 
 pub trait Testable {
     fn run(&self);
@@ -13,7 +14,8 @@ where
     T: Fn(),
 {
     fn run(&self) {
-        serial::com_initialize(serial::IO_ADDR_COM2);
+        let mut writer = SerialPort::new(SerialPortIndex::Com2);
+        writer.init();
         let mut writer = SerialPort::default();
         write!(writer, "{}...\t", type_name::<T>()).unwrap();
         self();
@@ -22,8 +24,8 @@ where
 }
 
 pub fn test_runner(tests: &[&dyn Testable]) -> ! {
-    serial::com_initialize(serial::IO_ADDR_COM2);
-    let mut writer = SerialPort::default();
+    let mut writer = SerialPort::new(SerialPortIndex::Com2);
+    writer.init();
     writeln!(writer, "Running {} tests...", tests.len()).unwrap();
     for test in tests {
         test.run();

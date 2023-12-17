@@ -9,8 +9,6 @@
 extern crate alloc;
 
 use alloc::string::String;
-use alloc::vec::Vec;
-use core::arch::asm;
 use core::pin::Pin;
 use core::str::FromStr;
 use os::boot_info::BootInfo;
@@ -19,23 +17,16 @@ use os::efi::EfiFileName;
 use os::elf::Elf;
 use os::error::Error;
 use os::error::Result;
+use os::executor::spawn_global;
 use os::executor::yield_execution;
 use os::executor::Executor;
-use os::executor::Task;
 use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
-use os::graphics::BitmapImageBuffer;
+use os::graphics::Bitmap;
 use os::init;
-use os::input::InputManager;
-use os::net::icmp::IcmpPacket;
-use os::net::ip::IpV4Addr;
-use os::net::network_manager_thread;
-use os::net::Network;
-use os::print;
+use os::input::enqueue_input_tasks;
 use os::println;
-use os::serial::SerialPort;
-use os::util::Sliceable;
 use os::x86_64;
 use os::x86_64::init_syscall;
 use os::x86_64::paging::write_cr3;
@@ -79,51 +70,12 @@ fn paint_wasabi_logo() {
     }
 }
 
-fn run_command(cmdline: &str) -> Result<()> {
-    let network = Network::take();
-    let args = cmdline.trim();
-    let args: Vec<&str> = args.split(' ').collect();
-    println!("\n{args:?}");
-    if let Some(&cmd) = args.first() {
-        match cmd {
-            "panic" => unsafe {
-                asm!("int3");
-            },
-            "ip" => {
-                println!("netmask: {:?}", network.netmask());
-                println!("router: {:?}", network.router());
-                println!("dns: {:?}", network.dns());
-            }
-            "ping" => {
-                if let Some(ip) = args.get(1) {
-                    let ip = IpV4Addr::from_str(ip);
-                    if let Ok(ip) = ip {
-                        network.send_ip_packet(IcmpPacket::new_request(ip).copy_into_slice());
-                    } else {
-                        println!("{ip:?}")
-                    }
-                } else {
-                    println!("usage: ip <target_ipv4_addr>")
-                }
-            }
-            "arp" => {
-                println!("{:?}", network.arp_table_cloned())
-            }
-            app_name => {
-                let result = run_app(app_name);
-                println!("{result:?}");
-            }
-        }
-    }
-    Ok(())
-}
-
 fn run_tasks() -> Result<()> {
     let task0 = async {
         let mut vram = BootInfo::take().vram();
         let h = 10;
         let colors = [0xFF0000, 0x00FF00, 0x0000FF];
-        let y = vram.height() / 3;
+        let y = vram.height() / 16 * 14;
         let xbegin = vram.width() / 2;
         let mut x = xbegin;
         let mut c = 0;
@@ -142,7 +94,7 @@ fn run_tasks() -> Result<()> {
         let mut vram = BootInfo::take().vram();
         let h = 10;
         let colors = [0xFF0000, 0x00FF00, 0x0000FF];
-        let y = vram.height() / 3 * 2;
+        let y = vram.height() / 16 * 15;
         let xbegin = vram.width() / 2;
         let mut x = xbegin;
         let mut c = 0;
@@ -157,93 +109,19 @@ fn run_tasks() -> Result<()> {
             yield_execution().await;
         }
     };
-    let ps2_keyboard_task = async {
-        loop {
-            const PORT_PS2_KBD_CMD_AND_STATUS: u16 = 0x64;
-            const PORT_PS2_KBD_DATA: u16 = 0x60;
-            const BIT_PS2_KBD_CMD_AND_STATUS_DATA_READY: u8 = 0x01;
-            let kbd_status = x86_64::read_io_port_u8(PORT_PS2_KBD_CMD_AND_STATUS);
-            if kbd_status & BIT_PS2_KBD_CMD_AND_STATUS_DATA_READY != 0 {
-                let kbd_data = x86_64::read_io_port_u8(PORT_PS2_KBD_DATA);
-                println!("KBD: {kbd_data}");
-            }
-            TimeoutFuture::new_ms(10).await;
-            yield_execution().await;
-        }
-    };
-    let serial_task = async {
-        let sp = SerialPort::default();
-        loop {
-            if let Some(c) = sp.try_read() {
-                if let Some(c) = char::from_u32(c as u32) {
-                    InputManager::take().push_input(c);
-                }
-            }
-            TimeoutFuture::new_ms(20).await;
-            yield_execution().await;
-        }
-    };
-    let console_task = async {
-        let mut s = String::new();
-        loop {
-            if let Some(c) = InputManager::take().pop_input() {
-                if c == '\r' || c == '\n' {
-                    if let Err(e) = run_command(&s) {
-                        println!("{e:?}");
-                    };
-                    s.clear();
-                }
-                match c {
-                    'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '.' => {
-                        print!("{c}");
-                        s.push(c);
-                    }
-                    c if c as u8 == 0x7f => {
-                        print!("{0} {0}", 0x08 as char);
-                        s.pop();
-                    }
-                    _ => {
-                        // Do nothing
-                    }
-                }
-            }
-            TimeoutFuture::new_ms(20).await;
-            yield_execution().await;
-        }
-    };
-    // This is safe since GlobalAllocator is already initialized.
+    // Enqueue tasks
     {
-        let mut executor = ROOT_EXECUTOR.lock();
-        executor.spawn(Task::new(task0));
-        executor.spawn(Task::new(task1));
-        executor.spawn(Task::new(ps2_keyboard_task));
-        executor.spawn(Task::new(serial_task));
-        executor.spawn(Task::new(console_task));
-        executor.spawn(Task::new(async { network_manager_thread().await }));
+        {
+            let mut executor = ROOT_EXECUTOR.lock();
+            enqueue_input_tasks(&mut executor);
+        }
+        spawn_global(task0);
+        spawn_global(task1);
     }
     init::init_pci();
+    // Start executing tasks
     Executor::run(&ROOT_EXECUTOR);
     Ok(())
-}
-
-fn run_app(name: &str) -> Result<i64> {
-    let boot_info = BootInfo::take();
-    let root_files = boot_info.root_files();
-    let root_files: alloc::vec::Vec<&os::boot_info::File> =
-        root_files.iter().filter_map(|e| e.as_ref()).collect();
-    let name = EfiFileName::from_str(name)?;
-    let elf = root_files.iter().find(|&e| e.name() == &name);
-    if let Some(elf) = elf {
-        let elf = Elf::parse(elf)?;
-        let app = elf.load()?;
-        let result = app.exec()?;
-        #[cfg(test)]
-        debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
-        #[cfg(not(test))]
-        Ok(result)
-    } else {
-        Err(Error::Failed("Init app file not found"))
-    }
 }
 
 fn main() -> Result<()> {
