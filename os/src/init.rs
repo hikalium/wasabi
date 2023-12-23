@@ -97,8 +97,12 @@ impl EfiServices {
         }
         Ok(())
     }
-    fn get_vram_info(&self) -> VRAMBufferInfo {
-        vram::init_vram(self.efi_system_table).unwrap()
+    fn get_vram_info(&self) -> Result<VRAMBufferInfo> {
+        let mut vram = vram::init_vram(self.efi_system_table).unwrap();
+        let w = vram.width();
+        let h = vram.height();
+        crate::graphics::draw_rect(&mut vram, 0x101010, 0, 0, w, h)?;
+        Ok(vram)
     }
     fn exit_from_boot_services(efi_services: Self) -> memory_map_holder::MemoryMapHolder {
         let mut memory_map = memory_map_holder::MemoryMapHolder::new();
@@ -158,7 +162,7 @@ pub fn init_with_boot_services(
     efi_services
         .load_all_root_files(&mut root_files)
         .expect("Failed to load root files");
-    let vram = efi_services.get_vram_info();
+    let vram = efi_services.get_vram_info().expect("Failed to init vram");
     let acpi = efi_services
         .setup_acpi_tables()
         .expect("Failed to setup ACPI tables");
