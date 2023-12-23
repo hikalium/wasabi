@@ -27,7 +27,7 @@ use crate::usb::DeviceDescriptor;
 use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::usb_hid_keyboard;
-//use crate::usb_hid_tablet;
+use crate::usb_hid_tablet;
 use crate::util::IntoPinnedMutableSlice;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::paging::IoBox;
@@ -726,18 +726,10 @@ impl Xhci {
             for d in ddc.descriptors() {
                 if let UsbDescriptor::Interface(e) = d {
                     match e.triple() {
-                        /*
                         (3, 0, 0) => {
-                            let ddc = UsbDeviceDriverContext::new(port, slot, descriptors);
-                            let f = usb_hid_tablet::attach_usb_device(
-                                rc,
-                                ddc,
-                                input_context,
-                                ctrl_ep_ring,
-                            );
+                            let f = usb_hid_tablet::attach_usb_device(ddc);
                             return Ok(Box::pin(f));
                         }
-                        */
                         (3, 1, 1) => {
                             let f = usb_hid_keyboard::attach_usb_device(ddc);
                             return Ok(Box::pin(f));
