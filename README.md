@@ -95,6 +95,7 @@ gh act --pull=false
 ## References
 - https://rust-lang.github.io/unsafe-code-guidelines/introduction.html
 - https://www.cqpub.co.jp/interface/sample/200512/if0512_chap1.pdf
+- https://en.wikipedia.org/wiki/File:Tcp_state_diagram.png
 
 ## Authors
 
