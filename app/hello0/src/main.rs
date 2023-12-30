@@ -4,8 +4,8 @@
 use noli::*;
 
 fn main() -> u64 {
-    sys_print("**** Hello from an app!\n");
-    sys_exit(42);
+    syscall::print("**** Hello from an app!\n");
+    syscall::exit(42);
 }
 
 entry_point!(main);

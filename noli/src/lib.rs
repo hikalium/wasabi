@@ -5,6 +5,7 @@
 mod error;
 mod font;
 mod net;
+pub mod syscall;
 pub mod window;
 
 use crate::error::Error;
@@ -12,109 +13,15 @@ use crate::error::Result;
 use crate::font::BITMAP_FONT;
 use core::alloc::GlobalAlloc;
 use core::alloc::Layout;
-use core::arch::asm;
 use core::fmt;
 use core::panic::PanicInfo;
 use core::ptr::null_mut;
-
-// See os/src/x86_64.rs for the calling conventions
-pub fn syscall_0(func: u64) -> u64 {
-    let mut retv;
-    unsafe {
-        asm!(
-        "syscall",
-        out("rax") retv,
-        out("rcx") _, // destroyed by the syscall instruction
-        in("rdx") func,
-        out("r11") _, // destroyed by the syscall instruction
-        )
-    }
-    retv
-}
-pub fn syscall_1(func: u64, arg1: u64) -> u64 {
-    let mut retv;
-    unsafe {
-        asm!(
-        "syscall",
-        out("rax") retv,
-        out("rcx") _, // destroyed by the syscall instruction
-        in("rdx") func,
-        in("rsi") arg1,
-        out("r11") _, // destroyed by the syscall instruction
-        )
-    }
-    retv
-}
-pub fn syscall_2(func: u64, arg1: u64, arg2: u64) -> u64 {
-    let mut retv;
-    unsafe {
-        asm!(
-        "syscall",
-        out("rax") retv,
-        out("rcx") _, // destroyed by the syscall instruction
-        in("rdx") func,
-        in("rsi") arg1,
-        in("rdi") arg2,
-        out("r11") _, // destroyed by the syscall instruction
-        )
-    }
-    retv
-}
-pub fn syscall_3(func: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
-    let mut retv;
-    unsafe {
-        asm!(
-        "syscall",
-        out("rax") retv,
-        out("rcx") _, // destroyed by the syscall instruction
-        in("rdx") func,
-        in("rsi") arg1,
-        in("rdi") arg2,
-        in("r8") arg3,
-        out("r11") _, // destroyed by the syscall instruction
-        )
-    }
-    retv
-}
-pub fn syscall_4(func: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> u64 {
-    let mut retv;
-    unsafe {
-        asm!(
-        "syscall",
-        out("rax") retv,
-        out("rcx") _, // destroyed by the syscall instruction
-        in("rdx") func,
-        in("rsi") arg1,
-        in("rdi") arg2,
-        in("r8") arg3,
-        in("r9") arg4,
-        out("r11") _, // destroyed by the syscall instruction
-        )
-    }
-    retv
-}
-pub fn sys_exit(code: u64) -> ! {
-    syscall_1(0, code);
-    unreachable!()
-}
-pub fn sys_print(s: &str) -> u64 {
-    let len = s.len() as u64;
-    let s = s.as_ptr() as u64;
-    syscall_2(1, s, len)
-}
-pub fn sys_draw_point(x: i64, y: i64, c: u32) -> u64 {
-    syscall_3(2, x as u64, y as u64, c as u64)
-}
-
-pub fn sys_noop() -> u64 {
-    syscall_0(3)
-}
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("PANIC!!!");
     println!("{}", info);
-    sys_exit(1)
+    syscall::exit(1)
 }
 
 #[macro_export]
@@ -132,7 +39,7 @@ pub struct StdIoWriter {}
 impl StdIoWriter {}
 impl fmt::Write for StdIoWriter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        sys_print(s);
+        syscall::print(s);
         Ok(())
     }
 }
@@ -447,7 +354,7 @@ pub fn draw_line(color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<()> {
 }
 
 pub fn draw_point(c: u32, x: i64, y: i64) -> Result<()> {
-    let result = sys_draw_point(x, y, c);
+    let result = syscall::draw_point(x, y, c);
     if result == 0 {
         Ok(())
     } else {
@@ -464,7 +371,7 @@ macro_rules! entry_point {
             // validate the signature of the program entry point
             let f: fn() -> u64 = $path;
             let ret = f();
-            sys_exit(ret);
+            noli::syscall::exit(ret);
         }
     };
 }

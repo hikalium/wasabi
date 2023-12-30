@@ -12,11 +12,11 @@ fn f<F: FnOnce() -> u64>(g: F, c: u64) {
 }
 
 fn main() -> u64 {
-    sys_print("hello from sys_print!\n");
+    syscall::print("hello from sys_print!\n");
     f(|| 3, 2);
     f(|| 5, 7);
     println!("heyheyhey!");
-    sys_exit(unsafe { A });
+    syscall::exit(unsafe { A });
 }
 
 entry_point!(main);
