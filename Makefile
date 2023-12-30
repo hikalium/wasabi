@@ -51,7 +51,7 @@ endif
 default: bin
 
 .PHONY : bin
-bin: generated/font.rs
+bin:
 	rustup component add rust-src
 	cd os && cargo build --all-targets --all-features
 
@@ -77,7 +77,7 @@ test:
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test
-	cd noli && cargo test
+	cd noli && cargo test --target=x86_64-unknown-none
 	make run_e2e_test
 
 .PHONY : fmt
@@ -227,12 +227,6 @@ crash:
 vnc: generated/noVNC-$(NOVNC_VERSION)
 	( echo 'change vnc password $(VNC_PASSWORD)' | while ! nc localhost $(PORT_MONITOR) ; do sleep 1 ; done ) &
 	generated/noVNC-$(NOVNC_VERSION)/utils/novnc_proxy --vnc localhost:$$((5900+${PORT_OFFSET_VNC}))
-
-generated/font.rs: font/font.txt Makefile
-	mkdir -p generated
-	cargo run --bin font font/font.txt > $@.tmp
-	# Rename the file once the command above is succeeded to avoid issues.
-	mv $@.tmp $@
 
 generated/bin/os.efi:
 	cd os && cargo install --path . --root ../generated/

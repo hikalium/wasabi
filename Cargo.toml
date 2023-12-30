@@ -12,3 +12,9 @@ members = [
     "noli",
     "os",
 ]
+default-members = [
+    "dbgutil",
+    "e2etest",
+    "font",
+    "noli",
+]

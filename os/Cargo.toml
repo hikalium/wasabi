@@ -3,3 +3,6 @@ name = "os"
 version = "0.0.0"
 authors = ["hikalium <hikalium@hikalium.com>"]
 edition = "2021"
+
+[dependencies]
+font = { path = "../font", version = "0.1.0" }

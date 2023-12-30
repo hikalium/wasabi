@@ -1,13 +1,29 @@
-use std::env;
+#![feature(proc_macro_span)]
+extern crate proc_macro;
+use proc_macro::TokenStream;
 use std::fs::File;
 use std::io::Read;
 
-fn main() -> std::io::Result<()> {
+#[proc_macro]
+pub fn gen_embedded_font(_input: TokenStream) -> TokenStream {
+    let mut path = std::env::current_dir().expect("failed to get current dir");
+    path.push(file!());
+    path.pop();
+    path.pop();
+    path.push("font.txt");
+    let path = path
+        .as_path()
+        .to_str()
+        .expect("failed to generate path to font.txt");
+    gen_font_decl(path)
+}
+
+fn gen_font_decl(file_name: &str) -> TokenStream {
     let mut fonts: [[u8; 16]; 256] = [[0; 16]; 256];
-    let args: Vec<String> = env::args().collect();
-    let mut file = File::open(&args[1])?;
+    let mut file = File::open(file_name).expect("failed to open the font file");
     let mut input = String::new();
-    file.read_to_string(&mut input)?;
+    file.read_to_string(&mut input)
+        .expect("failed to read the file into string");
     let mut font_index = 0;
     let mut row_index = 16;
     let mut line = 0;
@@ -54,17 +70,17 @@ fn main() -> std::io::Result<()> {
         row_index += 1;
     }
 
-    println!("pub static BITMAP_FONT: [[u8; 16]; 256] = [");
+    let mut src = "pub static BITMAP_FONT: [[u8; 16]; 256] = [".to_string();
     for f in fonts {
-        print!("[");
+        src += "[";
         for (i, bits) in f.iter().enumerate() {
-            print!("{}", bits);
+            src += &format!("{}", bits);
             if i != 15 {
-                print!(", ");
+                src += ", ";
             }
         }
-        println!("],");
+        src += "],";
     }
-    println!("];");
-    Ok(())
+    src += "];";
+    src.as_str().parse().unwrap()
 }

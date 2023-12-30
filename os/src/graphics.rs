@@ -3,6 +3,8 @@ extern crate alloc;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
+font::gen_embedded_font!();
+
 pub trait Bitmap {
     fn bytes_per_pixel(&self) -> i64;
     fn pixels_per_line(&self) -> i64;
@@ -146,8 +148,6 @@ pub fn draw_rect<T: Bitmap>(
 
     Ok(())
 }
-
-include!("../../generated/font.rs");
 
 pub fn draw_char<T: Bitmap>(
     buf: &mut T,

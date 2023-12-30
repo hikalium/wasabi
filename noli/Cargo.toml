@@ -9,3 +9,4 @@ edition = "2021"
 test=false
 
 [dependencies]
+font = { path = "../font", version = "0.1.0" }

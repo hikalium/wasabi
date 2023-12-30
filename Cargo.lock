@@ -344,6 +344,9 @@ checksum = "25cbce373ec4653f1a01a31e8a5e5ec0c622dc27ff9c4e6606eefef5cbbed4a5"
 [[package]]
 name = "font"
 version = "0.1.0"
+dependencies = [
+ "syn",
+]
 
 [[package]]
 name = "futures"
@@ -555,6 +558,9 @@ dependencies = [
 [[package]]
 name = "noli"
 version = "0.1.0"
+dependencies = [
+ "font",
+]
 
 [[package]]
 name = "num_cpus"
@@ -578,6 +584,9 @@ dependencies = [
 [[package]]
 name = "os"
 version = "0.0.0"
+dependencies = [
+ "font",
+]
 
 [[package]]
 name = "parking"
@@ -814,9 +823,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.38"
+version = "2.0.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e96b79aaa137db8f61e26363a0c9b47d8b4ec75da28b7d1d614c2303e232408b"
+checksum = "ee659fb5f3d355364e1f3e5bc10fb82068efbf824a1e9d1c9504244a6469ad53"
 dependencies = [
  "proc-macro2",
  "quote",
