@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::error::Result;
 use crate::*;
 use alloc::string::String;
 use core::cmp::max;
@@ -28,41 +29,34 @@ pub enum StringSize {
 #[derive(Clone, Debug)]
 pub struct Window {
     name: String,
-    background_color: u32,
+    _background_color: u32,
     x: i64,
     y: i64,
     width: i64,
     height: i64,
-    active: bool,
+    _active: bool,
 }
 
 impl Window {
-    pub fn new(
-        name: String,
-        color: u32,
-        x: i64,
-        y: i64,
-        width: i64,
-        height: i64,
-    ) -> Result<Self, ()> {
+    pub fn new(name: String, color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<Self> {
         fill_rect(color, x, y, width, height)?;
 
         let window = Self {
             name,
-            background_color: color,
+            _background_color: color,
             x,
             y,
             width,
             height,
-            active: true,
+            _active: true,
         };
 
-        window.init_titlebar();
+        window.init_titlebar().expect("failed to init titlebar");
 
         Ok(window)
     }
 
-    fn init_titlebar(&self) -> Result<(), ()> {
+    fn init_titlebar(&self) -> Result<()> {
         fill_rect(DARKBLUE, self.x, self.y, self.width, TITLE_BAR_HEIGHT)?;
         draw_string(WHITE, self.x + 5, self.y + 3, &self.name)?;
 
@@ -130,16 +124,9 @@ impl Window {
     pub fn move_position(&self) {}
     pub fn flush(&self) {}
 
-    pub fn fill_rect(
-        &self,
-        color: u32,
-        px: i64,
-        py: i64,
-        width: i64,
-        height: i64,
-    ) -> Result<(), ()> {
+    pub fn fill_rect(&self, color: u32, px: i64, py: i64, width: i64, height: i64) -> Result<()> {
         if px < 0 || px + width > self.width || py < 0 || py + height > self.height {
-            return Err(());
+            return Err(Error::Failed("fill_rect: out of range"));
         }
 
         fill_rect(
@@ -152,13 +139,13 @@ impl Window {
         Ok(())
     }
 
-    pub fn draw_line(&self, color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<(), ()> {
+    pub fn draw_line(&self, color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<()> {
         if min(x0, x1) < 0
             || min(y0, y1) < 0
             || max(x0, x1) > self.width
             || max(y0, y1) > self.height
         {
-            return Err(());
+            return Err(Error::Failed("out of range"));
         }
 
         draw_line(
@@ -171,16 +158,9 @@ impl Window {
         Ok(())
     }
 
-    pub fn draw_string(
-        &self,
-        color: u32,
-        x: i64,
-        y: i64,
-        s: &str,
-        size: StringSize,
-    ) -> Result<(), ()> {
+    pub fn draw_string(&self, color: u32, x: i64, y: i64, s: &str, size: StringSize) -> Result<()> {
         if x < 0 || x > self.width || y < 0 || y > self.height {
-            return Err(());
+            return Err(error::Error::Failed("draw_string: out of range"));
         }
 
         match size {

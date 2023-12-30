@@ -7,6 +7,8 @@ mod font;
 mod net;
 pub mod window;
 
+use crate::error::Error;
+use crate::error::Result;
 use crate::font::BITMAP_FONT;
 use core::alloc::GlobalAlloc;
 use core::alloc::Layout;
@@ -142,7 +144,7 @@ pub fn _print(args: fmt::Arguments) {
 }
 
 /// Draws string in one line. New lines are ignored.
-pub fn draw_string_3x(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
+pub fn draw_string_3x(color: u32, x: i64, y: i64, s: &str) -> Result<()> {
     let mut pos = 0;
     for c in s.chars() {
         draw_char_3x(color, x + pos, y, c)?;
@@ -152,7 +154,7 @@ pub fn draw_string_3x(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
 }
 
 /// Draws string in one line. New lines are ignored.
-pub fn draw_string_2x(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
+pub fn draw_string_2x(color: u32, x: i64, y: i64, s: &str) -> Result<()> {
     let mut pos = 0;
     for c in s.chars() {
         draw_char_2x(color, x + pos, y, c)?;
@@ -161,7 +163,7 @@ pub fn draw_string_2x(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
     Ok(())
 }
 
-pub fn draw_string_1p5x(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
+pub fn draw_string_1p5x(color: u32, x: i64, y: i64, s: &str) -> Result<()> {
     let mut pos = 0;
     for c in s.chars() {
         draw_char_1p5x(color, x + pos, y, c)?;
@@ -171,7 +173,7 @@ pub fn draw_string_1p5x(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
 }
 
 /// Draws string in one line. New lines are ignored.
-pub fn draw_string(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
+pub fn draw_string(color: u32, x: i64, y: i64, s: &str) -> Result<()> {
     let mut pos = 0;
     for c in s.chars() {
         draw_char(color, x + pos, y, c)?;
@@ -201,7 +203,7 @@ pub fn draw_string(color: u32, x: i64, y: i64, s: &str) -> Result<(), ()> {
 // o11o
 // o11o
 // oooo
-pub fn draw_char_1p5x(color: u32, px: i64, py: i64, c: char) -> Result<(), ()> {
+pub fn draw_char_1p5x(color: u32, px: i64, py: i64, c: char) -> Result<()> {
     // size (1x): 8 * 16
     // size (1.5x): 12 * 24
     // size (2x): 16 * 32
@@ -285,7 +287,7 @@ pub fn draw_char_1p5x(color: u32, px: i64, py: i64, c: char) -> Result<(), ()> {
 // ooooooooo
 // ooooooooo
 // ooooooooo
-pub fn draw_char_3x(color: u32, px: i64, py: i64, c: char) -> Result<(), ()> {
+pub fn draw_char_3x(color: u32, px: i64, py: i64, c: char) -> Result<()> {
     let font_data = BITMAP_FONT[c as usize];
     for y in 0..font_data.len() * 3 {
         for x in 0..24 {
@@ -321,7 +323,7 @@ pub fn draw_char_3x(color: u32, px: i64, py: i64, c: char) -> Result<(), ()> {
 // oo11 [2,1] [3,1]
 // oooo
 // oooo
-pub fn draw_char_2x(color: u32, px: i64, py: i64, c: char) -> Result<(), ()> {
+pub fn draw_char_2x(color: u32, px: i64, py: i64, c: char) -> Result<()> {
     let font_data = BITMAP_FONT[c as usize];
     for y in 0..font_data.len() {
         for x in 0..8 {
@@ -367,7 +369,7 @@ pub fn draw_char_2x(color: u32, px: i64, py: i64, c: char) -> Result<(), ()> {
 
 /// Draws a character to the position of `x` and `y`. Upper case characters, lower case characters
 /// and symbols are supported.
-pub fn draw_char(color: u32, px: i64, py: i64, c: char) -> Result<(), ()> {
+pub fn draw_char(color: u32, px: i64, py: i64, c: char) -> Result<()> {
     let font_data = BITMAP_FONT[c as usize];
     for y in 0..font_data.len() {
         for x in 0..8 {
@@ -379,7 +381,7 @@ pub fn draw_char(color: u32, px: i64, py: i64, c: char) -> Result<(), ()> {
     Ok(())
 }
 
-pub fn fill_circle(color: u32, center_x: i64, center_y: i64, radius: i64) -> Result<(), ()> {
+pub fn fill_circle(color: u32, center_x: i64, center_y: i64, radius: i64) -> Result<()> {
     for i in 0..radius * 2 + 1 {
         for j in 0..radius * 2 + 1 {
             let x = i - radius;
@@ -393,7 +395,7 @@ pub fn fill_circle(color: u32, center_x: i64, center_y: i64, radius: i64) -> Res
     Ok(())
 }
 
-pub fn fill_rect(color: u32, px: i64, py: i64, width: i64, height: i64) -> Result<(), ()> {
+pub fn fill_rect(color: u32, px: i64, py: i64, width: i64, height: i64) -> Result<()> {
     for dx in 0..width {
         for dy in 0..height {
             draw_point(color, px + dx, py + dy)?;
@@ -402,7 +404,7 @@ pub fn fill_rect(color: u32, px: i64, py: i64, width: i64, height: i64) -> Resul
     Ok(())
 }
 
-pub fn draw_rect(color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<(), ()> {
+pub fn draw_rect(color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<()> {
     draw_line(color, x, y, x + width, y)?;
     draw_line(color, x, y, x, y + height)?;
     draw_line(color, x + width, y, x + width, y + height)?;
@@ -410,7 +412,7 @@ pub fn draw_rect(color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<
     Ok(())
 }
 
-pub fn draw_line(color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<(), ()> {
+pub fn draw_line(color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<()> {
     if x1 < x0 {
         return draw_line(color, x1, y1, x0, y0);
     }
@@ -444,12 +446,12 @@ pub fn draw_line(color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<(), (
     Ok(())
 }
 
-pub fn draw_point(c: u32, x: i64, y: i64) -> Result<(), ()> {
+pub fn draw_point(c: u32, x: i64, y: i64) -> Result<()> {
     let result = sys_draw_point(x, y, c);
     if result == 0 {
         Ok(())
     } else {
-        Err(())
+        Err(Error::Failed("draw_point: syscall failed"))
     }
 }
 
