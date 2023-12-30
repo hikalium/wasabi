@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::println;
 use crate::usb::EndpointDescriptor;
 use crate::usb::InterfaceDescriptor;
 use crate::usb::UsbDescriptor;
@@ -12,9 +13,37 @@ use crate::xhci::ring::TransferRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::Xhci;
 use alloc::boxed::Box;
+use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::pin::Pin;
+
+#[derive(Debug, Clone)]
+pub struct Event {
+    data: [u8; 8],
+}
+impl Event {
+    pub fn data(&self) -> [u8; 8] {
+        self.data
+    }
+}
+
+#[derive(Default)]
+pub struct EventQueue {
+    queue: VecDeque<Event>,
+}
+impl EventQueue {
+    pub fn push(&mut self, data: Event) {
+        if self.queue.len() > 16 {
+            let discarded = self.queue.pop_front();
+            println!("EventQueue: Warning: No more capacity. Discarded: {discarded:?}");
+        }
+        self.queue.push_back(data);
+    }
+    pub fn pop(&mut self) -> Option<Event> {
+        self.queue.pop_front()
+    }
+}
 
 // [hid_1_11]:
 // 7.2.5 Get_Protocol Request

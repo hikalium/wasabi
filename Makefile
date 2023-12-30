@@ -31,14 +31,14 @@ QEMU_ARGS=\
 		--no-reboot \
 		-d int,cpu_reset \
 		-D log/qemu_debug.txt \
-		-device usb-tablet \
 		-device usb-kbd \
 		${MORE_QEMU_FLAGS}
 
 ifndef DISPLAY
-QEMU_ARGS+=-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on
+QEMU_ARGS+= -vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on
 endif
 
+# QEMU_ARGS+= -device usb-tablet
 #		-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on \
 #		-gdb tcp::3333 -S \
 # -device usb-host,hostbus=1,hostport=1 \

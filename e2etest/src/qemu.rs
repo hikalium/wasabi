@@ -183,7 +183,6 @@ impl Qemu {
                 -serial chardev:char_com1 \
                 -serial chardev:char_com2 \
                 -display none \
-                -device usb-tablet \
                 -device usb-kbd \
                 -bios {path_to_ovmf}",
         ))
