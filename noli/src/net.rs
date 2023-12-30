@@ -57,16 +57,16 @@ impl FromStr for IpV4Addr {
 }
 
 /// Socket is an abstruction of "connection" between two components.
-enum SocketAddr {
+pub enum SocketAddr {
     IpV4 { addr: IpV4Addr, port: u16 },
 }
 impl SocketAddr {
-    fn from(addr: IpV4Addr, port: u16) -> Self {
+    pub fn from(addr: IpV4Addr, port: u16) -> Self {
         Self::IpV4 { addr, port }
     }
 }
 
-struct TcpStream {}
+pub struct TcpStream {}
 impl TcpStream {}
 
 #[cfg(test)]

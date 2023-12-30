@@ -4,7 +4,7 @@
 
 mod error;
 mod font;
-mod net;
+pub mod net;
 pub mod syscall;
 pub mod window;
 
@@ -118,12 +118,12 @@ pub fn draw_char_1p5x(color: u32, px: i64, py: i64, c: char) -> Result<()> {
     let font_data = BITMAP_FONT[c as usize];
     let mut font_3x = [[false; 24]; 48];
 
-    for y in 0..font_data.len() * 3 {
-        for x in 0..24 {
+    for (y, font_3x_row_bitmap) in font_3x.iter_mut().enumerate() {
+        for (x, font_3x_pixel) in font_3x_row_bitmap.iter_mut().enumerate() {
             let original_x = x / 3;
             let original_y = y / 3;
             if (font_data[original_y] >> original_x) & 0b1 == 0b1 {
-                font_3x[y][x] = true;
+                *font_3x_pixel = true;
             }
         }
     }
@@ -232,9 +232,9 @@ pub fn draw_char_3x(color: u32, px: i64, py: i64, c: char) -> Result<()> {
 // oooo
 pub fn draw_char_2x(color: u32, px: i64, py: i64, c: char) -> Result<()> {
     let font_data = BITMAP_FONT[c as usize];
-    for y in 0..font_data.len() {
+    for (y, row_bitmap) in font_data.iter().enumerate() {
         for x in 0..8 {
-            if (font_data[y] >> x) & 0b1 == 0b1 {
+            if (row_bitmap >> x) & 0b1 == 0b1 {
                 let y = y as i64;
                 draw_point(color, px + x * 2, py + y * 2)?;
                 draw_point(color, px + x * 2 + 1, py + y * 2)?;
@@ -278,9 +278,9 @@ pub fn draw_char_2x(color: u32, px: i64, py: i64, c: char) -> Result<()> {
 /// and symbols are supported.
 pub fn draw_char(color: u32, px: i64, py: i64, c: char) -> Result<()> {
     let font_data = BITMAP_FONT[c as usize];
-    for y in 0..font_data.len() {
+    for (y, row_bitmap) in font_data.iter().enumerate() {
         for x in 0..8 {
-            if (font_data[y] >> x) & 0b1 == 0b1 {
+            if (row_bitmap >> x) & 0b1 == 0b1 {
                 draw_point(color, px + x, py + y as i64)?;
             }
         }

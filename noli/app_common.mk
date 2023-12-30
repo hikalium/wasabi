@@ -16,6 +16,11 @@ build :
 	$(CARGO) build
 	$(CARGO) install --force --root $(ROOT) --path .
 
+.PHONY : clippy
+clippy :
+	rustup target add $(TARGET)
+	$(CARGO) clippy --all-features -- -D warnings
+
 .PHONY : objdump
 objdump :
 	cargo install cargo-binutils

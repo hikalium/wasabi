@@ -60,9 +60,13 @@ clippy:
 	rustup component add clippy
 	cd font && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
+	cd noli && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd dbgutil && cargo clippy
 	# cd font && cargo clippy --all-features --all-targets -- -D warnings
 	cd os && cargo clippy --all-features --all-targets -- -D warnings
+	# build all apps under app/ dir for dev
+	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
+		xargs -I {} -n 1 -- bash -c 'make -C {} clippy || exit 255'
 
 .PHONY : dump_config
 dump_config:
@@ -139,12 +143,9 @@ run_os_lib_test :
 .PHONY : app
 app :
 	-rm -r generated/bin
-	make -C app/hello0
-	make -C app/hello1
-	make -C app/uname
-	make -C app/loop
-	make -C app/window0
-	make -C app/window1
+	# build all apps under app/ dir for dev
+	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
+		xargs -I {} -n 1 -- bash -c 'make -C {} build || exit 255'
 
 .PHONY : run_deps
 run_deps : app
