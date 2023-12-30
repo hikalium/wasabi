@@ -73,6 +73,7 @@ test:
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test
+	cd noli && cargo test
 	make run_e2e_test
 
 .PHONY : fmt

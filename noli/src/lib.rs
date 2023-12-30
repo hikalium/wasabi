@@ -2,7 +2,9 @@
 #![feature(core_intrinsics)]
 #![feature(alloc_error_handler)]
 
+mod error;
 mod font;
+mod net;
 pub mod window;
 
 use crate::font::BITMAP_FONT;
