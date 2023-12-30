@@ -1,7 +1,9 @@
 #![no_std]
 #![no_main]
 
-use noli::*;
+use noli::entry_point;
+use noli::println;
+use noli::syscall;
 
 static mut A: u64 = 1;
 

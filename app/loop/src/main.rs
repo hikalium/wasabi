@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use noli::*;
+use noli::entry_point;
 
 fn main() -> u64 {
     loop {}

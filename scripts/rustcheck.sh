@@ -37,6 +37,23 @@ else
 fi
 
 set +e
+RESULT=`git grep -E '^use' | grep '\*'`
+RESULT_STATUS=$?
+set -e
+if test $RESULT_STATUS -eq 0; then
+	echo "----"
+	echo "${RESULT}"
+	echo "----"
+	echo "FAIL: Please remove glob (wildcard) 'use' listed above:"
+	exit 1
+elif test $RESULT_STATUS -eq 1; then
+	echo "PASS: No glob (wildcard) 'use' usage found"
+else
+	echo "FAIL: something went wrong"
+	exit 1
+fi
+
+set +e
 FILES=`git ls-files *.rs`
 LIST=`wc -l ${FILES} | sort -n | grep '.rs$' | awk '$1>1000' | grep '.rs$'`
 RESULT_STATUS=$?

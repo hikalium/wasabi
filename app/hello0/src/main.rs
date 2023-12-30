@@ -1,7 +1,8 @@
 #![no_std]
 #![no_main]
 
-use noli::*;
+use noli::entry_point;
+use noli::syscall;
 
 fn main() -> u64 {
     syscall::print("**** Hello from an app!\n");

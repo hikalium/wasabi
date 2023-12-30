@@ -4,7 +4,9 @@
 extern crate alloc;
 
 use alloc::string::ToString;
-use noli::*;
+use noli::entry_point;
+use noli::println;
+use noli::window;
 
 fn main() -> u64 {
     println!("window 1");

@@ -1,7 +1,18 @@
 #![no_std]
 #![no_main]
 
-use noli::*;
+use noli::draw_char;
+use noli::draw_line;
+use noli::draw_rect;
+use noli::draw_string;
+use noli::draw_string_1p5x;
+use noli::draw_string_2x;
+use noli::draw_string_3x;
+use noli::entry_point;
+use noli::fill_circle;
+use noli::fill_rect;
+use noli::println;
+use noli::syscall;
 
 fn main() -> u64 {
     println!("window0!!!!");

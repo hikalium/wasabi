@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::File;
-use std::io::prelude::*;
+use std::io::Read;
 
 fn main() -> std::io::Result<()> {
     let mut fonts: [[u8; 16]; 256] = [[0; 16]; 256];

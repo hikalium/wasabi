@@ -1,7 +1,12 @@
 extern crate alloc;
 
+use crate::draw_line;
+use crate::draw_string;
+use crate::draw_string_2x;
+use crate::draw_string_3x;
+use crate::error::Error;
 use crate::error::Result;
-use crate::*;
+use crate::fill_rect;
 use alloc::string::String;
 use core::cmp::max;
 use core::cmp::min;
@@ -160,7 +165,7 @@ impl Window {
 
     pub fn draw_string(&self, color: u32, x: i64, y: i64, s: &str, size: StringSize) -> Result<()> {
         if x < 0 || x > self.width || y < 0 || y > self.height {
-            return Err(error::Error::Failed("draw_string: out of range"));
+            return Err(Error::Failed("draw_string: out of range"));
         }
 
         match size {
