@@ -94,6 +94,7 @@ gh act --pull=false
 
 ## References
 - https://rust-lang.github.io/unsafe-code-guidelines/introduction.html
+- https://www.cqpub.co.jp/interface/sample/200512/if0512_chap1.pdf
 
 ## Authors
 
