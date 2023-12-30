@@ -1,12 +1,8 @@
 extern crate alloc;
 
-use crate::draw_line;
-use crate::draw_string;
-use crate::draw_string_2x;
-use crate::draw_string_3x;
 use crate::error::Error;
 use crate::error::Result;
-use crate::fill_rect;
+use crate::graphics;
 use alloc::string::String;
 use core::cmp::max;
 use core::cmp::min;
@@ -44,7 +40,7 @@ pub struct Window {
 
 impl Window {
     pub fn new(name: String, color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<Self> {
-        fill_rect(color, x, y, width, height)?;
+        graphics::fill_rect(color, x, y, width, height)?;
 
         let window = Self {
             name,
@@ -62,11 +58,11 @@ impl Window {
     }
 
     fn init_titlebar(&self) -> Result<()> {
-        fill_rect(DARKBLUE, self.x, self.y, self.width, TITLE_BAR_HEIGHT)?;
-        draw_string(WHITE, self.x + 5, self.y + 3, &self.name)?;
+        graphics::fill_rect(DARKBLUE, self.x, self.y, self.width, TITLE_BAR_HEIGHT)?;
+        graphics::draw_string(WHITE, self.x + 5, self.y + 3, &self.name)?;
 
         // close button
-        fill_rect(
+        graphics::fill_rect(
             GREY,
             self.x + self.width - (6 + BUTTON_SIZE),
             self.y + 4,
@@ -75,14 +71,14 @@ impl Window {
         )?;
 
         // white high light for button
-        draw_line(
+        graphics::draw_line(
             WHITE,
             self.x + self.width - (6 + BUTTON_SIZE),
             self.y + 4,
             self.x + self.width - 6,
             self.y + 4,
         )?;
-        draw_line(
+        graphics::draw_line(
             WHITE,
             self.x + self.width - (6 + BUTTON_SIZE),
             self.y + 4,
@@ -91,14 +87,14 @@ impl Window {
         )?;
 
         // shadow for button
-        draw_line(
+        graphics::draw_line(
             DARKGREY,
             self.x + self.width - (6 + BUTTON_SIZE),
             self.y + 4 + BUTTON_SIZE,
             self.x + self.width - 6,
             self.y + 4 + BUTTON_SIZE,
         )?;
-        draw_line(
+        graphics::draw_line(
             DARKGREY,
             self.x + self.width - 6,
             self.y + 4,
@@ -107,14 +103,14 @@ impl Window {
         )?;
 
         // x
-        draw_line(
+        graphics::draw_line(
             BLACK,
             self.x + self.width - (6 + BUTTON_SIZE) + 4,
             self.y + 8,
             self.x + self.width - (6 + BUTTON_SIZE) + 12,
             self.y + 16,
         )?;
-        draw_line(
+        graphics::draw_line(
             BLACK,
             self.x + self.width - (6 + BUTTON_SIZE) + 4,
             self.y + 16,
@@ -134,7 +130,7 @@ impl Window {
             return Err(Error::Failed("fill_rect: out of range"));
         }
 
-        fill_rect(
+        graphics::fill_rect(
             color,
             self.x + px,
             self.y + py + TITLE_BAR_HEIGHT,
@@ -153,7 +149,7 @@ impl Window {
             return Err(Error::Failed("out of range"));
         }
 
-        draw_line(
+        graphics::draw_line(
             color,
             self.x + x1,
             self.y + y1 + TITLE_BAR_HEIGHT,
@@ -170,13 +166,13 @@ impl Window {
 
         match size {
             StringSize::Medium => {
-                draw_string(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+                graphics::draw_string(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
             }
             StringSize::Large => {
-                draw_string_2x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+                graphics::draw_string_2x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
             }
             StringSize::XLarge => {
-                draw_string_3x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+                graphics::draw_string_3x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
             }
         }
         Ok(())
