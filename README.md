@@ -39,10 +39,16 @@ echo "This machine is ready to build WasabiOS!"
 bash # to reload environment variables
 ```
 
+### [beta] macOS
+
+```
+./scripts/setup_dev_macos.sh
+zsh # to reload environment variables
+```
+
 ## Build and run WasabiOS on QEMU
 
 ```
-make
 make run
 ```
 
