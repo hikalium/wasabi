@@ -1,6 +1,6 @@
 TARGET=x86_64-unknown-none
 NAME=$(shell cargo read-manifest | jq -r .name)
-ROOT=$(shell readlink -f ../../generated)
+ROOT=$(shell readlink -f ../../)/generated
 RUSTFLAGS=\
 		  -C link-args=-e \
 		  -C link-args=entry \
