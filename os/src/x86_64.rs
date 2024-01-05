@@ -421,6 +421,7 @@ pub fn rest_in_peace() -> ! {
 
 global_asm!(
     ".global syscall_handler",
+    ".global asm_syscall_handler",
     "asm_syscall_handler:",
     // On syscall entry,
     // RCX <= RIP to continue execution

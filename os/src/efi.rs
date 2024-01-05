@@ -115,6 +115,7 @@ pub type EfiHandle = u64;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[must_use]
+#[repr(u64)]
 pub enum EfiStatus {
     SUCCESS = 0,
 }
@@ -256,9 +257,7 @@ impl core::str::FromStr for EfiFileName {
         if src.clone().count() > dst.len() {
             Err(Error::Failed("too long for EfiFileName"))
         } else {
-            dst.iter_mut()
-                .zip(src.into_iter())
-                .for_each(|(d, s)| *d = s);
+            dst.iter_mut().zip(src).for_each(|(d, s)| *d = s);
             Ok(Self { name: dst })
         }
     }

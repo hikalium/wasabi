@@ -9,6 +9,7 @@ use crate::xhci::TrbRing;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::format;
+use core::marker::ConstParamTy;
 use core::mem::size_of;
 use core::mem::transmute;
 use core::pin::Pin;
@@ -16,7 +17,7 @@ use core::pin::Pin;
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 #[non_exhaustive]
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, ConstParamTy)]
 pub enum TrbType {
     Normal = 1,
     SetupStage = 2,

@@ -8,7 +8,6 @@ use core::convert::From;
 use core::convert::TryInto;
 use core::mem::size_of;
 use core::mem::MaybeUninit;
-use core::num::Saturating;
 use core::pin::Pin;
 use core::slice;
 
@@ -96,7 +95,7 @@ where
 {
     let mask = (1u64 << min(63, width)) - 1;
     let value = u64::from(value);
-    let value = (Saturating(value) >> shift).0 & mask;
+    let value = (value >> shift) & mask;
     TryInto::try_into(value).unwrap_or_else(|_| T::from(0u8))
 }
 

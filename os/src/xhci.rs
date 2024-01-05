@@ -40,6 +40,7 @@ use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::max;
 use core::convert::AsRef;
@@ -460,8 +461,7 @@ impl Xhci {
             config_descriptor.as_mut().as_mut_slice(),
         )
         .await?;
-        let mut buf = Vec::<u8>::new();
-        buf.resize(config_descriptor.total_length(), 0);
+        let buf = vec![0; config_descriptor.total_length()];
         let mut buf = Box::into_pin(buf.into_boxed_slice());
         self.request_descriptor(
             slot,
@@ -483,8 +483,7 @@ impl Xhci {
         lang_id: u16,
         index: u8,
     ) -> Result<String> {
-        let mut buf = Vec::<u8>::new();
-        buf.resize(128, 0);
+        let buf = vec![0; 128];
         let mut buf = Box::into_pin(buf.into_boxed_slice());
         self.request_descriptor(
             slot,
@@ -504,8 +503,7 @@ impl Xhci {
         slot: u8,
         ctrl_ep_ring: &mut CommandRing,
     ) -> Result<Vec<u16>> {
-        let mut buf = Vec::<u16>::new();
-        buf.resize(8, 0);
+        let buf = vec![0; 8];
         let mut buf = Box::into_pin(buf.into_boxed_slice());
         self.request_descriptor(
             slot,

@@ -97,13 +97,13 @@ impl ContiguousPhysicalMemoryPages {
         // SAFETY: This is safe since byte-level access to the region is always aligned and no
         // value restrictions there. Shared access via the reference is avoided by the borrow
         // checker, by requiring &mut self.
-        unsafe { slice::from_raw_parts_mut(self.phys_addr as *mut u8, self.layout.size()) }
+        unsafe { slice::from_raw_parts_mut(self.phys_addr, self.layout.size()) }
     }
     pub fn as_slice(&self) -> &[u8] {
         // SAFETY: This is safe since byte-level access to the region is always aligned and no
         // value restrictions there. Shared write access via the reference is avoided by the borrow
         // checker, by requiring &self.
-        unsafe { slice::from_raw_parts(self.phys_addr as *mut u8, self.layout.size()) }
+        unsafe { slice::from_raw_parts(self.phys_addr, self.layout.size()) }
     }
     pub fn set_page_attr(&mut self, attr: PageAttr) -> Result<()> {
         let range = self.range();
@@ -136,7 +136,7 @@ pub fn alloc_pages(num_pages: usize) -> Result<Pin<Box<[u8]>>> {
         Layout::from_size_align(size, PAGE_SIZE)
             .map_err(|_| Error::Failed("could not allocate pages"))?,
     );
-    let scratchpad_buffers = unsafe { slice::from_raw_parts(scratchpad_buffers as *mut u8, size) };
+    let scratchpad_buffers = unsafe { slice::from_raw_parts(scratchpad_buffers, size) };
     Ok(Pin::new(Box::<[u8]>::from(scratchpad_buffers)))
 }
 

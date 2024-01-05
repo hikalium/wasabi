@@ -1,5 +1,4 @@
 #![cfg_attr(not(test), no_std)]
-#![feature(core_intrinsics)]
 #![feature(alloc_error_handler)]
 
 mod allocator;

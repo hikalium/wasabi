@@ -58,10 +58,9 @@ impl EfiServices {
     }
     fn get_loaded_image_protocol(&self) -> Pin<&efi::EfiLoadedImageProtocol> {
         let boot_services = self.efi_system_table.boot_services();
-        let loaded_image_protocol = boot_services
+        boot_services
             .handle_loaded_image_protocol(self.image_handle)
-            .expect("Failed to get Loaded Image Protocol");
-        loaded_image_protocol
+            .expect("Failed to get Loaded Image Protocol")
     }
     pub fn load_all_root_files(&self, root_files: &mut [Option<File>; 32]) -> Result<()> {
         let loaded_image_protocol = self.get_loaded_image_protocol();
