@@ -1,4 +1,4 @@
-name: Test Wasabi OS
+name: Wasabi OS continuous integration
 on: [push]
 jobs:
   build-and-test:
@@ -15,13 +15,22 @@ jobs:
       - name: List files in the repository
         run: |
           ls .
-      - name: Build
+      - name: Dump config
+        run: |
+          make dump_config
+      - name: Build OS
         run: |
           make
-      - name: Test
-        if: ${{ false }} # still WIP so disable this temporarily
+      - name: Build apps
         run: |
-          make test
+          make
+      - name: Pre-upload Test
+        run: |
+          time make pre_upload_test
+      - name: Post-upload Test
+        #if: ${{ false }} # still WIP so disable this temporarily
+        run: |
+          time make post_upload_test
       - name: Report
         run: |
           echo "Done. status: ${{ job.status }}"

@@ -73,11 +73,25 @@ dump_config:
 	@echo "Host target: $(HOST_TARGET)"
 
 .PHONY : test
-test:
+test :
+	make pre_commit_test
+
+.PHONY : pre_commit_test
+pre_commit_test:
+	# Should be finished within 30 secs
+	make filecheck
+	./scripts/ensure_objs_are_not_under_git_control.sh
+	make rustcheck
+	make clippy
+	make spellcheck
+	make # build
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test
 	cd noli && cargo test --target=x86_64-unknown-none
+
+.PHONY : post_upload_test
+post_commit_test:
 	make run_e2e_test
 
 .PHONY : fmt
@@ -89,14 +103,7 @@ fmt :
 commit :
 	make fmt
 	git add .
-	make filecheck
-	make rustcheck
-	make clippy
-	make spellcheck
-	make # build
-	make test
-	./scripts/ensure_objs_are_not_under_git_control.sh
-	git add .
+	make pre_commit_test
 	git diff HEAD --color=always | less -R
 	git commit
 
