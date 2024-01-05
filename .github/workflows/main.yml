@@ -26,11 +26,11 @@ jobs:
           make
       - name: Pre-upload Test
         run: |
-          time make pre_upload_test
+          make pre_upload_test
       - name: Post-upload Test
         #if: ${{ false }} # still WIP so disable this temporarily
         run: |
-          time make post_upload_test
+          make post_upload_test
       - name: Report
         run: |
           echo "Done. status: ${{ job.status }}"
