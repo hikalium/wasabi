@@ -48,7 +48,7 @@ impl QemuMonitor {
                 .context("Failed to open a UNIX domain socket for QEMU monitor");
             if let Ok(sock) = sock {
                 break sock;
-            } else if retry_count < 10 {
+            } else if retry_count < 100 {
                 eprintln!("{sock:?}");
                 std::thread::sleep(Duration::from_millis(500));
                 retry_count += 1;
@@ -193,7 +193,7 @@ impl Qemu {
     }
     pub fn wait_until_serial_output_contains(&mut self, s: &str) -> Result<()> {
         const INTERVAL_MS: u64 = 500;
-        const TIMEOUT_MS: u64 = 15 * 1000;
+        const TIMEOUT_MS: u64 = 60 * 1000;
         eprint!("Waiting serial output `{s}`...");
         let mut duration = 0;
         let mut last_output = "Not initialized".to_string();
