@@ -28,7 +28,7 @@ jobs:
         run: |
           make pre_upload_test
       - name: Post-upload Test
-        #if: ${{ false }} # still WIP so disable this temporarily
+        if: ${{ false }} # still WIP so disable this temporarily
         run: |
           make post_upload_test
       - name: Report
