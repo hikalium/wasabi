@@ -48,10 +48,10 @@ endif
 # -object filter-dump,id=f1,netdev=net0,file=log/dump_net0.dat \
 
 .PHONY : default
-default: bin
+default: os
 
-.PHONY : bin
-bin:
+.PHONY : os
+os:
 	rustup component add rust-src
 	cd os && cargo build --all-targets --all-features
 
@@ -74,24 +74,23 @@ dump_config:
 
 .PHONY : test
 test :
-	make pre_commit_test
+	make pre_upload_test
 
-.PHONY : pre_commit_test
-pre_commit_test:
-	# Should be finished within 30 secs
+.PHONY : pre_upload_test
+pre_upload_test:
 	make filecheck
 	./scripts/ensure_objs_are_not_under_git_control.sh
 	make rustcheck
 	make clippy
 	make spellcheck
-	make # build
+	make os
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test
 	cd noli && cargo test --target=x86_64-unknown-none
 
 .PHONY : post_upload_test
-post_commit_test:
+post_upload_test:
 	make run_e2e_test
 
 .PHONY : fmt
