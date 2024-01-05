@@ -168,7 +168,9 @@ impl Xsdt {
         (self.header.length as usize - self.header_size()) / size_of::<*const u8>()
     }
     unsafe fn entry(&self, index: usize) -> *const u8 {
-        *((self as *const Self as *const u8).add(self.header_size()) as *const *const u8).add(index)
+        ((self as *const Self as *const u8).add(self.header_size()) as *const *const u8)
+            .add(index)
+            .read_unaligned()
     }
     fn iter(&self) -> XsdtIterator {
         XsdtIterator::new(self)
