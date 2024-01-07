@@ -4,9 +4,9 @@ use crate::boot_info::BootInfo;
 #[cfg(test)]
 use crate::debug_exit;
 use crate::efi::fs::EfiFileName;
-use crate::elf::Elf;
 use crate::error::Error;
 use crate::error::Result;
+use crate::loader::Elf;
 use crate::net::icmp::IcmpPacket;
 use crate::net::ip::IpV4Addr;
 use crate::net::Network;

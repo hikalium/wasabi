@@ -23,42 +23,43 @@
 #![feature(linked_list_cursors)]
 #![feature(offset_of)]
 
-pub mod acpi;
-pub mod allocator;
-pub mod ax88179;
-pub mod bitset;
+mod acpi;
+mod allocator;
+mod ax88179;
+mod bitset;
 pub mod boot_info;
-pub mod command;
+mod command;
 pub mod debug_exit;
 pub mod efi;
 pub mod elf;
 pub mod error;
 pub mod executor;
 pub mod graphics;
-pub mod hpet;
+mod hpet;
 pub mod init;
 pub mod input;
-pub mod memory;
-pub mod memory_map_holder;
-pub mod mutex;
-pub mod net;
-pub mod panic;
-pub mod pci;
+pub mod loader;
+mod memory;
+mod memory_map_holder;
+mod mutex;
+mod net;
+mod panic;
+mod pci;
 pub mod print;
-pub mod ps2;
-pub mod rtl8139;
-pub mod serial;
-pub mod syscall;
+mod ps2;
+mod rtl8139;
+mod serial;
+mod syscall;
 pub mod test_runner;
-pub mod text_area;
-pub mod usb;
-pub mod usb_hid_keyboard;
-pub mod usb_hid_tablet;
-pub mod util;
-pub mod volatile;
-pub mod vram;
+mod text_area;
+mod usb;
+mod usb_hid_keyboard;
+mod usb_hid_tablet;
+mod util;
+mod volatile;
+mod vram;
 pub mod x86_64;
-pub mod xhci;
+mod xhci;
 
 #[cfg(test)]
 #[no_mangle]
