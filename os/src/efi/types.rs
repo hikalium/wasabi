@@ -81,3 +81,29 @@ impl EfiStatus {
         }
     }
 }
+
+#[repr(C)]
+#[allow(dead_code)]
+#[derive(Default, Debug)]
+pub struct EfiTime {
+    year: u16,  // 1900 – 9999
+    month: u8,  // 1 – 12
+    day: u8,    // 1 – 31
+    hour: u8,   // 0 – 23
+    minute: u8, // 0 – 59
+    second: u8, // 0 – 59
+    pad1: u8,
+    nanosecond: u32, // 0 – 999,999,999
+    time_zone: u16,  // -1440 to 1440 or 2047
+    daylight: u8,
+    pad2: u8,
+}
+impl fmt::Display for EfiTime {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            self.year, self.month, self.day, self.hour, self.minute, self.second
+        )
+    }
+}

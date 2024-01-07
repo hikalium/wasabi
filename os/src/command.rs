@@ -3,7 +3,7 @@ extern crate alloc;
 use crate::boot_info::BootInfo;
 #[cfg(test)]
 use crate::debug_exit;
-use crate::efi::EfiFileName;
+use crate::efi::fs::EfiFileName;
 use crate::elf::Elf;
 use crate::error::Error;
 use crate::error::Result;

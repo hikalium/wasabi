@@ -1,5 +1,5 @@
 use crate::acpi::Acpi;
-use crate::efi::EfiFileName;
+use crate::efi::fs::EfiFileName;
 use crate::error::Error;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::vram::VRAMBufferInfo;
