@@ -76,14 +76,17 @@ dump_config:
 test :
 	make pre_upload_test
 
-.PHONY : pre_upload_test
-pre_upload_test:
+.PHONY : check
+check:
 	make filecheck
 	./scripts/ensure_objs_are_not_under_git_control.sh
 	make rustcheck
 	make clippy
 	make spellcheck
 	make os
+
+.PHONY : pre_upload_test
+pre_upload_test:
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test

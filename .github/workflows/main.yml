@@ -23,7 +23,10 @@ jobs:
           make
       - name: Build apps
         run: |
-          make
+          make app
+      - name: Run Check
+        run: |
+          make check
       - name: Pre-upload Test
         run: |
           make pre_upload_test
