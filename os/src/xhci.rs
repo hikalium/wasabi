@@ -12,7 +12,6 @@ use crate::allocator::ALLOCATOR;
 use crate::ax88179;
 use crate::error::Error;
 use crate::error::Result;
-use crate::executor::yield_execution;
 use crate::memory::Mmio;
 use crate::mutex::Mutex;
 use crate::pci::BusDeviceFunction;
@@ -59,11 +58,9 @@ use future::CommandCompletionEventFuture;
 use future::TransferEventFuture;
 use registers::CapabilityRegisters;
 use registers::OperationalRegisters;
-use registers::PortLinkState;
 use registers::PortSc;
 use registers::PortScIterator;
 use registers::PortScWrapper;
-use registers::PortState;
 use registers::RuntimeRegisters;
 use registers::UsbMode;
 use ring::CommandRing;
@@ -806,25 +803,5 @@ impl Xhci {
             .ok_or("PORTSC was invalid")?;
         portsc.reset();
         Ok(())
-    }
-    async fn enable_port(
-        &self,
-        rc: Rc<Self>,
-        port: usize,
-    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
-        // Reset port to enable the port (via Reset state)
-        self.reset_port(port).await?;
-        loop {
-            let portsc = self
-                .portsc
-                .get(port)?
-                .upgrade()
-                .ok_or("PORTSC was invalid")?;
-            if let (PortState::Enabled, PortLinkState::U0) = (portsc.state(), portsc.pls()) {
-                break;
-            }
-            yield_execution().await;
-        }
-        self.enable_slot(rc, port).await
     }
 }

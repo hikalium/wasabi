@@ -11,6 +11,7 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
+use crate::xhci::registers::PortLinkState;
 use crate::xhci::registers::PortScIteratorItem;
 use crate::xhci::registers::PortScWrapper;
 use crate::xhci::registers::PortState;
@@ -20,6 +21,7 @@ use crate::xhci::Xhci;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use core::future::Future;
+use core::pin::Pin;
 use core::task::Context;
 
 #[derive(Default)]
@@ -32,6 +34,25 @@ impl XhciDriverForPci {
                 .completed()?;
         }
         Ok(())
+    }
+    async fn enable_port(
+        xhc: Rc<Xhci>,
+        port: usize,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
+        // Reset port to enable the port (via Reset state)
+        xhc.reset_port(port).await?;
+        loop {
+            let portsc = xhc
+                .portsc
+                .get(port)?
+                .upgrade()
+                .ok_or("PORTSC was invalid")?;
+            if let (PortState::Enabled, PortLinkState::U0) = (portsc.state(), portsc.pls()) {
+                break;
+            }
+            yield_execution().await;
+        }
+        xhc.enable_slot(xhc.clone(), port).await
     }
     async fn poll(xhc: Rc<Xhci>) -> Result<()> {
         // 4.3 USB Device Initialization
@@ -52,7 +73,7 @@ impl XhciDriverForPci {
                 print!("Port {port}: Device attached: {portsc:?}: ");
                 if portsc.state() == PortState::Disabled {
                     println!("USB2");
-                    match xhc.enable_port(xhc.clone(), port).await {
+                    match Self::enable_port(xhc.clone(), port).await {
                         Ok(f) => {
                             println!("device future attached",);
                             xhc.device_futures.lock().push_back(f);
