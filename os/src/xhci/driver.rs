@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::error::Error;
 use crate::error::Result;
 use crate::executor::dummy_waker;
 use crate::executor::yield_execution;
@@ -19,6 +20,7 @@ use crate::xhci::ring::TrbRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::Xhci;
 use alloc::boxed::Box;
+use alloc::format;
 use alloc::rc::Rc;
 use core::future::Future;
 use core::pin::Pin;
@@ -34,6 +36,27 @@ impl XhciDriverForPci {
                 .completed()?;
         }
         Ok(())
+    }
+    async fn enable_slot(
+        xhc: Rc<Xhci>,
+        port: usize,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
+        let portsc = xhc
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC was invalid")?;
+        if !portsc.ccs() {
+            return Err(Error::FailedString(format!(
+                "port {} disconnected while initialization",
+                port
+            )));
+        }
+        let slot = xhc
+            .send_command(GenericTrbEntry::cmd_enable_slot())
+            .await?
+            .slot_id();
+        xhc.address_device(xhc.clone(), port, slot).await
     }
     async fn enable_port(
         xhc: Rc<Xhci>,
@@ -52,7 +75,7 @@ impl XhciDriverForPci {
             }
             yield_execution().await;
         }
-        xhc.enable_slot(xhc.clone(), port).await
+        Self::enable_slot(xhc.clone(), port).await
     }
     async fn poll(xhc: Rc<Xhci>) -> Result<()> {
         // 4.3 USB Device Initialization

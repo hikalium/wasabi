@@ -773,28 +773,6 @@ impl Xhci {
         self.device_ready(rc, port, slot, input_context, ctrl_ep_ring)
             .await
     }
-    async fn enable_slot(
-        &self,
-        rc: Rc<Self>,
-        port: usize,
-    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
-        let portsc = self
-            .portsc
-            .get(port)?
-            .upgrade()
-            .ok_or("PORTSC was invalid")?;
-        if !portsc.ccs() {
-            return Err(Error::FailedString(format!(
-                "port {} disconnected while initialization",
-                port
-            )));
-        }
-        let slot = self
-            .send_command(GenericTrbEntry::cmd_enable_slot())
-            .await?
-            .slot_id();
-        self.address_device(rc, port, slot).await
-    }
     async fn reset_port(&self, port: usize) -> Result<()> {
         let portsc = self
             .portsc
