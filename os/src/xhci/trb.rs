@@ -39,6 +39,7 @@ pub enum TrbType {
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 #[non_exhaustive]
+#[allow(unused)]
 #[derive(PartialEq, Eq)]
 pub enum CompletionCode {
     Success = 1,

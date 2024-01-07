@@ -24,9 +24,9 @@
 #![feature(offset_of)]
 
 mod acpi;
-mod allocator;
+pub mod allocator;
 mod ax88179;
-mod bitset;
+pub mod bitset;
 pub mod boot_info;
 mod command;
 pub mod debug_exit;
@@ -35,16 +35,16 @@ pub mod elf;
 pub mod error;
 pub mod executor;
 pub mod graphics;
-mod hpet;
+pub mod hpet;
 pub mod init;
 pub mod input;
 pub mod loader;
 mod memory;
 mod memory_map_holder;
 mod mutex;
-mod net;
+pub mod net;
 mod panic;
-mod pci;
+pub mod pci;
 pub mod print;
 mod ps2;
 mod rtl8139;
@@ -59,7 +59,7 @@ mod util;
 mod volatile;
 mod vram;
 pub mod x86_64;
-mod xhci;
+pub mod xhci;
 
 #[cfg(test)]
 #[no_mangle]
