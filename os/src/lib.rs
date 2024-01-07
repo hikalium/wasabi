@@ -63,7 +63,7 @@ pub mod xhci;
 #[no_mangle]
 // For unit tests except that are in main.rs
 fn efi_main(
-    image_handle: efi::EfiHandle,
+    image_handle: efi::types::EfiHandle,
     efi_system_table: core::pin::Pin<&'static efi::EfiSystemTable>,
 ) {
     crate::init::init_basic_runtime(image_handle, efi_system_table);

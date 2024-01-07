@@ -183,7 +183,7 @@ fn stack_switched() -> ! {
 
 #[no_mangle]
 fn efi_main(
-    image_handle: os::efi::EfiHandle,
+    image_handle: os::efi::types::EfiHandle,
     efi_system_table: Pin<&'static os::efi::EfiSystemTable>,
 ) {
     os::init::init_basic_runtime(image_handle, efi_system_table);

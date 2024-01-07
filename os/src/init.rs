@@ -32,6 +32,7 @@ use core::cmp::max;
 use core::fmt::Write;
 use core::pin::Pin;
 use core::slice;
+use efi::types::EfiHandle;
 use efi::EfiMemoryType::CONVENTIONAL_MEMORY;
 use efi::EfiMemoryType::LOADER_CODE;
 use efi::EfiMemoryType::LOADER_DATA;
@@ -42,15 +43,12 @@ use util::PAGE_SIZE;
 pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
 
 pub struct EfiServices {
-    image_handle: efi::EfiHandle,
+    image_handle: EfiHandle,
     efi_system_table: Pin<&'static efi::EfiSystemTable>,
 }
 
 impl EfiServices {
-    fn new(
-        image_handle: efi::EfiHandle,
-        efi_system_table: Pin<&'static efi::EfiSystemTable>,
-    ) -> Self {
+    fn new(image_handle: EfiHandle, efi_system_table: Pin<&'static efi::EfiSystemTable>) -> Self {
         Self {
             image_handle,
             efi_system_table,
@@ -132,7 +130,7 @@ impl EfiServices {
 }
 
 pub fn init_with_boot_services(
-    image_handle: efi::EfiHandle,
+    image_handle: EfiHandle,
     efi_system_table: Pin<&'static efi::EfiSystemTable>,
 ) {
     {
@@ -175,7 +173,7 @@ pub fn init_with_boot_services(
 
 // Common initialization for a normal boot and tests
 pub fn init_basic_runtime(
-    image_handle: efi::EfiHandle,
+    image_handle: EfiHandle,
     efi_system_table: Pin<&'static efi::EfiSystemTable>,
 ) {
     init_with_boot_services(image_handle, efi_system_table);

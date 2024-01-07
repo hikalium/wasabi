@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use crate::efi::EfiStatus;
+use crate::efi::types::EfiStatus;
 use crate::graphics::GraphicsError;
 use alloc::string::String;
 use core::num::TryFromIntError;
