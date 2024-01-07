@@ -13,6 +13,7 @@ use core::pin::Pin;
 use core::str::FromStr;
 use os::boot_info::BootInfo;
 use os::debug_exit;
+use os::efi::types::EfiHandle;
 use os::efi::EfiFileName;
 use os::elf::Elf;
 use os::error::Error;
@@ -182,10 +183,7 @@ fn stack_switched() -> ! {
 }
 
 #[no_mangle]
-fn efi_main(
-    image_handle: os::efi::types::EfiHandle,
-    efi_system_table: Pin<&'static os::efi::EfiSystemTable>,
-) {
+fn efi_main(image_handle: EfiHandle, efi_system_table: Pin<&'static os::efi::EfiSystemTable>) {
     os::init::init_basic_runtime(image_handle, efi_system_table);
     println!("rsp on boot: {:#018X}", read_rsp());
     let new_rsp = BootInfo::take().kernel_stack().as_ptr() as usize + os::init::KERNEL_STACK_SIZE;
