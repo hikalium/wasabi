@@ -1,12 +1,9 @@
 extern crate alloc;
 
-use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
 use crate::memory::Mmio;
 use crate::mutex::Mutex;
-use crate::pci::BusDeviceFunction;
-use crate::pci::Pci;
 use crate::println;
 use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorIterator;
@@ -15,24 +12,6 @@ use crate::usb::DeviceDescriptor;
 use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::util::IntoPinnedMutableSlice;
-use crate::util::PAGE_SIZE;
-use alloc::alloc::Layout;
-use alloc::boxed::Box;
-use alloc::collections::LinkedList;
-use alloc::fmt::Debug;
-use alloc::rc::Rc;
-use alloc::rc::Weak;
-use alloc::string::String;
-use alloc::string::ToString;
-use alloc::vec;
-use alloc::vec::Vec;
-use core::cmp::max;
-use core::convert::AsRef;
-use core::future::Future;
-use core::mem::size_of;
-use core::pin::Pin;
-use core::slice;
-
 use crate::xhci::context::DeviceContextBaseAddressArray;
 use crate::xhci::context::EndpointContext;
 use crate::xhci::context::InputContext;
@@ -54,6 +33,20 @@ use crate::xhci::trb::DataStageTrb;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::SetupStageTrb;
 use crate::xhci::trb::StatusStageTrb;
+use alloc::boxed::Box;
+use alloc::collections::LinkedList;
+use alloc::fmt::Debug;
+use alloc::rc::Rc;
+use alloc::rc::Weak;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::max;
+use core::convert::AsRef;
+use core::future::Future;
+use core::mem::size_of;
+use core::pin::Pin;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
@@ -86,7 +79,6 @@ type DeviceFuture = Pin<Box<dyn Future<Output = Result<()>>>>;
 
 /// Abstraction of xHCI's host controller interfaces
 pub struct Controller {
-    _bdf: BusDeviceFunction,
     cap_regs: Mmio<CapabilityRegisters>,
     op_regs: Mmio<OperationalRegisters>,
     rt_regs: Mmio<RuntimeRegisters>,
@@ -98,43 +90,15 @@ pub struct Controller {
     device_futures: Mutex<LinkedList<DeviceFuture>>,
 }
 impl Controller {
-    pub fn new(bdf: BusDeviceFunction) -> Result<Self> {
-        let pci = Pci::take();
-        pci.disable_interrupt(bdf)?;
-        pci.enable_bus_master(bdf)?;
-        let bar0 = pci.try_bar0_mem64(bdf)?;
-        bar0.disable_cache();
-
-        let cap_regs = unsafe { Mmio::from_raw(bar0.addr() as *mut CapabilityRegisters) };
-        cap_regs.as_ref().assert_capabilities()?;
-
-        let mut op_regs = unsafe {
-            Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().length()) as *mut OperationalRegisters)
-        };
-        unsafe { op_regs.get_unchecked_mut() }.reset_xhc();
-        op_regs.as_ref().assert_params()?;
-
-        let rt_regs = unsafe {
-            Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().rtsoff()) as *mut RuntimeRegisters)
-        };
-
-        let num_slots = cap_regs.as_ref().num_of_device_slots();
-        let mut doorbell_regs = Vec::new();
-        for i in 0..=num_slots {
-            let ptr = unsafe { bar0.addr().add(cap_regs.as_ref().dboff()).add(4 * i) as *mut u32 };
-            doorbell_regs.push(Rc::new(Doorbell::new(ptr)))
-        }
-        // number of doorbells will be 1 + num_slots since doorbell[] is for the host controller.
-        assert!(doorbell_regs.len() == 1 + num_slots);
-
-        let portsc = PortSc::new(&bar0, cap_regs.as_ref());
-        let scratchpad_buffers =
-            Self::alloc_scratch_pad_buffers(cap_regs.as_ref().num_scratch_pad_bufs())?;
-        let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
-        let device_context_base_array =
-            Mutex::new(device_context_base_array, "Xhci.device_context_base_array");
+    pub fn new(
+        cap_regs: Mmio<CapabilityRegisters>,
+        op_regs: Mmio<OperationalRegisters>,
+        rt_regs: Mmio<RuntimeRegisters>,
+        portsc: PortSc,
+        doorbell_regs: Vec<Rc<Doorbell>>,
+        device_context_base_array: Mutex<DeviceContextBaseAddressArray>,
+    ) -> Result<Self> {
         let mut xhc = Self {
-            _bdf: bdf,
             cap_regs,
             op_regs,
             rt_regs,
@@ -149,7 +113,6 @@ impl Controller {
         xhc.init_slots_and_contexts()?;
         xhc.init_command_ring();
         unsafe { xhc.op_regs.get_unchecked_mut() }.start_xhc();
-
         Ok(xhc)
     }
     pub fn device_futures(&self) -> &Mutex<LinkedList<DeviceFuture>> {
@@ -181,28 +144,6 @@ impl Controller {
     }
     fn init_command_ring(&mut self) {
         unsafe { self.op_regs.get_unchecked_mut() }.set_cmd_ring_ctrl(&self.command_ring.lock());
-    }
-    fn alloc_scratch_pad_buffers(num_scratch_pad_bufs: usize) -> Result<Pin<Box<[*mut u8]>>> {
-        // 4.20 Scratchpad Buffers
-        // This should be done before xHC starts.
-        // device_contexts.context[0] points Scratchpad Buffer Arrary.
-        // The array contains pointers to a memory region which is sized PAGESIZE and aligned on
-        // PAGESIZE. (PAGESIZE can be retrieved from op_regs.PAGESIZE)
-        let scratchpad_buffers = ALLOCATOR.alloc_with_options(
-            Layout::from_size_align(size_of::<usize>() * num_scratch_pad_bufs, PAGE_SIZE)
-                .map_err(|_| Error::Failed("could not allocated scratchpad buffers"))?,
-        );
-        let scratchpad_buffers = unsafe {
-            slice::from_raw_parts(scratchpad_buffers as *mut *mut u8, num_scratch_pad_bufs)
-        };
-        let mut scratchpad_buffers = Pin::new(Box::<[*mut u8]>::from(scratchpad_buffers));
-        for sb in scratchpad_buffers.iter_mut() {
-            *sb = ALLOCATOR.alloc_with_options(
-                Layout::from_size_align(PAGE_SIZE, PAGE_SIZE)
-                    .map_err(|_| Error::Failed("could not allocated scratchpad buffers"))?,
-            );
-        }
-        Ok(scratchpad_buffers)
     }
     fn notify_xhc(&self) {
         self.doorbell_regs[0].notify(0, 0);

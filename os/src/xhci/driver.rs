@@ -22,6 +22,7 @@ use crate::xhci::context::InputControlContext;
 use crate::xhci::context::OutputContext;
 use crate::xhci::controller::Controller;
 use crate::xhci::device::UsbDeviceDriverContext;
+use crate::xhci::init::create_host_controller;
 use crate::xhci::registers::PortLinkState;
 use crate::xhci::registers::PortScIteratorItem;
 use crate::xhci::registers::PortScWrapper;
@@ -303,7 +304,7 @@ impl XhciDriverForPci {
     }
     fn spawn(bdf: BusDeviceFunction) -> Result<Self> {
         (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
-            let xhc = Controller::new(bdf)?;
+            let xhc = create_host_controller(bdf)?;
             let xhc = Rc::new(xhc);
             Self::ensure_ring_is_working(xhc.clone()).await?;
             loop {
