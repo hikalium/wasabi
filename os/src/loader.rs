@@ -148,11 +148,11 @@ impl<'a> LoadedElf<'a> {
         Ok(retcode)
     }
     pub fn slice_of_vaddr_range(&self, range_on_vaddr: AddressRange) -> Result<&[u8]> {
-        let range = range_on_vaddr.into_range_in(&self.app_vaddr_range)?;
+        let range = range_on_vaddr.to_range_in(&self.app_vaddr_range)?;
         Ok(&self.region.as_slice()[range])
     }
     pub fn mut_slice_of_vaddr_range(&mut self, range_on_vaddr: AddressRange) -> Result<&mut [u8]> {
-        let range = range_on_vaddr.into_range_in(&self.app_vaddr_range)?;
+        let range = range_on_vaddr.to_range_in(&self.app_vaddr_range)?;
         Ok(&mut self.region.as_mut_slice()[range])
     }
     pub fn write_le_u64_at_vaddr(&mut self, vaddr: usize, value: u64) -> Result<()> {
@@ -305,7 +305,7 @@ impl<'a> Elf<'a> {
         let dst = region.as_mut_slice();
         let src = self.file.data();
 
-        let dst = &mut dst[sh.vaddr_range().into_range_in(app_vaddr_range)?];
+        let dst = &mut dst[sh.vaddr_range().to_range_in(app_vaddr_range)?];
         let src = &src[segment_file_range];
         dst[..src.len()].copy_from_slice(src);
 

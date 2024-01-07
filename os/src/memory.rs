@@ -36,7 +36,7 @@ impl AddressRange {
     pub fn size(&self) -> usize {
         self.range.end - self.range.start
     }
-    pub fn into_range_in(&self, region: &AddressRange) -> Result<Range<usize>> {
+    pub fn to_range_in(&self, region: &AddressRange) -> Result<Range<usize>> {
         let start = region.offset_of(self.start())?;
         if self.size() == 0 || region.contains(self.end() - 1) {
             Ok(start..start + self.size())
