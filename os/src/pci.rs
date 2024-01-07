@@ -7,7 +7,7 @@ use crate::println;
 use crate::rtl8139::Rtl8139Driver;
 use crate::x86_64::paging::with_current_page_table;
 use crate::x86_64::paging::PageAttr;
-use crate::xhci::driver::XhciDriver;
+use crate::xhci::driver::XhciDriverForPci;
 use alloc::boxed::Box;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
@@ -221,7 +221,7 @@ impl Pci {
         let pci_config_space_end = pci_config_space_base + (1 << 24);
         let drivers = vec![
             Rc::new(Box::<Rtl8139Driver>::default() as Box<dyn PciDeviceDriver>),
-            Rc::new(Box::<XhciDriver>::default() as Box<dyn PciDeviceDriver>),
+            Rc::new(Box::<XhciDriverForPci>::default() as Box<dyn PciDeviceDriver>),
         ];
 
         Pci {
