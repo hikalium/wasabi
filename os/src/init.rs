@@ -115,7 +115,7 @@ impl EfiServices {
     fn setup_acpi_tables(&self) -> Result<Acpi> {
         let rsdp_struct = self
             .efi_system_table
-            .get_table_with_guid(&efi::EFI_ACPI_TABLE_GUID)
+            .get_table_with_guid(&efi::constants::EFI_ACPI_TABLE_GUID)
             .expect("ACPI table not found");
 
         Acpi::new(rsdp_struct)

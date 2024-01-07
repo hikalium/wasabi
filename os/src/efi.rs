@@ -1,3 +1,5 @@
+pub mod constants;
+
 use crate::error::Error;
 use crate::error::Result;
 use crate::memory_map_holder;
@@ -61,43 +63,6 @@ pub struct EfiGuid {
     data2: u16,
     data3: [u8; 8],
 }
-
-pub const EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID: EfiGuid = EfiGuid {
-    data0: 0x9042a9de,
-    data1: 0x23dc,
-    data2: 0x4a38,
-    data3: [0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a],
-};
-pub const EFI_MP_SERVICES_PROTOCOL_GUID: EfiGuid = EfiGuid {
-    data0: 0x3fdda605,
-    data1: 0xa76e,
-    data2: 0x4f46,
-    data3: [0xad, 0x29, 0x12, 0xf4, 0x53, 0x1b, 0x3d, 0x08],
-};
-pub const EFI_LOADED_IMAGE_PROTOCOL_GUID: EfiGuid = EfiGuid {
-    data0: 0x5B1B31A1,
-    data1: 0x9562,
-    data2: 0x11d2,
-    data3: [0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
-};
-pub const EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID: EfiGuid = EfiGuid {
-    data0: 0x0964e5b22,
-    data1: 0x6459,
-    data2: 0x11d2,
-    data3: [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
-};
-pub const EFI_FILE_SYSTEM_INFO_GUID: EfiGuid = EfiGuid {
-    data0: 0x09576e93,
-    data1: 0x6d3f,
-    data2: 0x11d2,
-    data3: [0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b],
-};
-pub const EFI_ACPI_TABLE_GUID: EfiGuid = EfiGuid {
-    data0: 0x8868e871,
-    data1: 0xe4f1,
-    data2: 0x11d3,
-    data3: [0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81],
-};
 
 pub type EfiVoid = u8;
 
@@ -398,7 +363,7 @@ impl EfiFileProtocol {
         data
     }
     pub fn get_fs_info(&self) -> EfiFileSystemInfo {
-        unsafe { self.get_info(&EFI_FILE_SYSTEM_INFO_GUID) }
+        unsafe { self.get_info(&constants::EFI_FILE_SYSTEM_INFO_GUID) }
     }
 }
 
@@ -529,7 +494,7 @@ impl EfiBootServicesTable {
         unsafe {
             let status = (self.handle_protocol.handle_simple_file_system_protocol)(
                 device_handle,
-                &EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
+                &constants::EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
                 &mut simple_fs_protocol,
             );
             if status != EfiStatus::SUCCESS {
@@ -547,7 +512,7 @@ impl EfiBootServicesTable {
         let status = unsafe {
             (handle_protocol.handle_loaded_image_protocol)(
                 image_handle,
-                &EFI_LOADED_IMAGE_PROTOCOL_GUID,
+                &constants::EFI_LOADED_IMAGE_PROTOCOL_GUID,
                 &mut loaded_image_protocol,
             )
         };
@@ -689,7 +654,7 @@ pub fn locate_mp_services_protocol<'a>(
 ) -> Result<&'a EfiMPServicesProtocol> {
     let mut protocol: *mut EfiMPServicesProtocol = null_mut::<EfiMPServicesProtocol>();
     let status = (efi_system_table.boot_services.locate_protocol)(
-        &EFI_MP_SERVICES_PROTOCOL_GUID,
+        &constants::EFI_MP_SERVICES_PROTOCOL_GUID,
         null_mut::<EfiVoid>(),
         &mut protocol as *mut *mut EfiMPServicesProtocol as *mut *mut EfiVoid,
     );
@@ -736,7 +701,7 @@ pub fn locate_graphic_protocol<'a>(
     let mut graphic_output_protocol: *mut EfiGraphicsOutputProtocol =
         null_mut::<EfiGraphicsOutputProtocol>();
     let status = (efi_system_table.as_ref().boot_services.locate_protocol)(
-        &EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
+        &constants::EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
         null_mut::<EfiVoid>(),
         &mut graphic_output_protocol as *mut *mut EfiGraphicsOutputProtocol as *mut *mut EfiVoid,
     );
