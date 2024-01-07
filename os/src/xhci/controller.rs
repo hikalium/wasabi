@@ -84,7 +84,8 @@ impl From<&EndpointDescriptor> for EndpointType {
 
 type DeviceFuture = Pin<Box<dyn Future<Output = Result<()>>>>;
 
-pub struct Xhci {
+/// Abstraction of xHCI's host controller interfaces
+pub struct Controller {
     _bdf: BusDeviceFunction,
     cap_regs: Mmio<CapabilityRegisters>,
     op_regs: Mmio<OperationalRegisters>,
@@ -96,7 +97,7 @@ pub struct Xhci {
     device_context_base_array: Mutex<DeviceContextBaseAddressArray>,
     device_futures: Mutex<LinkedList<DeviceFuture>>,
 }
-impl Xhci {
+impl Controller {
     pub fn new(bdf: BusDeviceFunction) -> Result<Self> {
         let pci = Pci::take();
         pci.disable_interrupt(bdf)?;
@@ -132,7 +133,7 @@ impl Xhci {
         let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
         let device_context_base_array =
             Mutex::new(device_context_base_array, "Xhci.device_context_base_array");
-        let mut xhc = Xhci {
+        let mut xhc = Self {
             _bdf: bdf,
             cap_regs,
             op_regs,

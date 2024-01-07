@@ -7,7 +7,7 @@ use crate::usb::EndpointDescriptor;
 use crate::usb::InterfaceDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::xhci::context::InputContext;
-use crate::xhci::controller::Xhci;
+use crate::xhci::controller::Controller;
 use crate::xhci::future::TransferEventFuture;
 use crate::xhci::ring::CommandRing;
 use crate::xhci::ring::TransferRing;
@@ -57,7 +57,7 @@ pub enum UsbHidProtocol {
 pub struct UsbDeviceDriverContext {
     port: usize,
     slot: u8,
-    xhci: Rc<Xhci>,
+    xhci: Rc<Controller>,
     descriptors: Vec<UsbDescriptor>,
     _input_context: Pin<Box<InputContext>>,
     ctrl_ep_ring: Pin<Box<CommandRing>>,
@@ -68,7 +68,7 @@ impl UsbDeviceDriverContext {
     pub async fn new(
         port: usize,
         slot: u8,
-        xhci: Rc<Xhci>,
+        xhci: Rc<Controller>,
         mut input_context: Pin<Box<InputContext>>,
         ctrl_ep_ring: Pin<Box<CommandRing>>,
         descriptors: Vec<UsbDescriptor>,
@@ -99,7 +99,7 @@ impl UsbDeviceDriverContext {
     pub fn slot(&self) -> u8 {
         self.slot
     }
-    pub fn xhci(&self) -> Rc<Xhci> {
+    pub fn xhci(&self) -> Rc<Controller> {
         self.xhci.clone()
     }
     pub fn descriptors(&self) -> &Vec<UsbDescriptor> {

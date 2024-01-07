@@ -20,7 +20,7 @@ use crate::xhci::context::EndpointContext;
 use crate::xhci::context::InputContext;
 use crate::xhci::context::InputControlContext;
 use crate::xhci::context::OutputContext;
-use crate::xhci::controller::Xhci;
+use crate::xhci::controller::Controller;
 use crate::xhci::device::UsbDeviceDriverContext;
 use crate::xhci::registers::PortLinkState;
 use crate::xhci::registers::PortScIteratorItem;
@@ -41,7 +41,7 @@ use core::task::Context;
 pub struct XhciDriverForPci {}
 impl XhciDriverForPci {
     async fn update_max_packet_size(
-        xhc: &Rc<Xhci>,
+        xhc: &Rc<Controller>,
         port: usize,
         slot: u8,
         input_context: &mut Pin<Box<InputContext>>,
@@ -78,7 +78,7 @@ impl XhciDriverForPci {
         xhc.send_command(cmd).await?.completed()
     }
     async fn device_ready(
-        xhc: Rc<Xhci>,
+        xhc: Rc<Controller>,
         port: usize,
         slot: u8,
         mut input_context: Pin<Box<InputContext>>,
@@ -174,7 +174,7 @@ impl XhciDriverForPci {
         )))
     }
     async fn address_device(
-        xhc: Rc<Xhci>,
+        xhc: Rc<Controller>,
         port: usize,
         slot: u8,
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
@@ -207,7 +207,7 @@ impl XhciDriverForPci {
         xhc.send_command(cmd).await?.completed()?;
         Self::device_ready(xhc.clone(), port, slot, input_context, ctrl_ep_ring).await
     }
-    async fn ensure_ring_is_working(xhc: Rc<Xhci>) -> Result<()> {
+    async fn ensure_ring_is_working(xhc: Rc<Controller>) -> Result<()> {
         for _ in 0..TrbRing::NUM_TRB * 2 + 1 {
             xhc.send_command(GenericTrbEntry::cmd_no_op())
                 .await?
@@ -216,7 +216,7 @@ impl XhciDriverForPci {
         Ok(())
     }
     async fn enable_slot(
-        xhc: Rc<Xhci>,
+        xhc: Rc<Controller>,
         port: usize,
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         let portsc = xhc.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
@@ -233,7 +233,7 @@ impl XhciDriverForPci {
         Self::address_device(xhc.clone(), port, slot).await
     }
     async fn enable_port(
-        xhc: Rc<Xhci>,
+        xhc: Rc<Controller>,
         port: usize,
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
         // Reset port to enable the port (via Reset state)
@@ -247,7 +247,7 @@ impl XhciDriverForPci {
         }
         Self::enable_slot(xhc.clone(), port).await
     }
-    async fn poll(xhc: Rc<Xhci>) -> Result<()> {
+    async fn poll(xhc: Rc<Controller>) -> Result<()> {
         // 4.3 USB Device Initialization
         // USB3: Disconnected -> Polling -> Enabled
         // USB2: Disconnected -> Disabled
@@ -303,7 +303,7 @@ impl XhciDriverForPci {
     }
     fn spawn(bdf: BusDeviceFunction) -> Result<Self> {
         (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
-            let xhc = Xhci::new(bdf)?;
+            let xhc = Controller::new(bdf)?;
             let xhc = Rc::new(xhc);
             Self::ensure_ring_is_working(xhc.clone()).await?;
             loop {
