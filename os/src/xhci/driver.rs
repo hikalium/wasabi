@@ -12,10 +12,15 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
+use crate::xhci::context::EndpointContext;
+use crate::xhci::context::InputContext;
+use crate::xhci::context::InputControlContext;
+use crate::xhci::context::OutputContext;
 use crate::xhci::registers::PortLinkState;
 use crate::xhci::registers::PortScIteratorItem;
 use crate::xhci::registers::PortScWrapper;
 use crate::xhci::registers::PortState;
+use crate::xhci::ring::CommandRing;
 use crate::xhci::ring::TrbRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::Xhci;
@@ -29,6 +34,45 @@ use core::task::Context;
 #[derive(Default)]
 pub struct XhciDriverForPci {}
 impl XhciDriverForPci {
+    async fn address_device(
+        xhc: Rc<Xhci>,
+        port: usize,
+        slot: u8,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
+        // Setup an input context and send AddressDevice command.
+        // 4.3.3 Device Slot Initialization
+        let output_context = Box::pin(OutputContext::default());
+        xhc.set_output_context_for_slot(slot, output_context);
+        let mut input_ctrl_ctx = InputControlContext::default();
+        input_ctrl_ctx.add_context(0)?;
+        input_ctrl_ctx.add_context(1)?;
+        let mut input_context = Box::pin(InputContext::default());
+        input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
+        // 3. Initialize the Input Slot Context data structure (6.2.2)
+        input_context.as_mut().set_root_hub_port_number(port)?;
+        input_context.as_mut().set_last_valid_dci(1)?;
+        // 4. Initialize the Transfer Ring for the Default Control Endpoint
+        // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
+        let portsc = xhc
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC was invalid")?;
+        input_context.as_mut().set_port_speed(portsc.port_speed())?;
+        let mut ctrl_ep_ring = Box::pin(CommandRing::default());
+        input_context.as_mut().set_ep_ctx(
+            1,
+            EndpointContext::new_control_endpoint(
+                portsc.max_packet_size()?,
+                ctrl_ep_ring.as_mut().ring_phys_addr(),
+            )?,
+        )?;
+        // 8. Issue an Address Device Command for the Device Slot
+        let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
+        xhc.send_command(cmd).await?.completed()?;
+        xhc.device_ready(xhc.clone(), port, slot, input_context, ctrl_ep_ring)
+            .await
+    }
     async fn ensure_ring_is_working(xhc: Rc<Xhci>) -> Result<()> {
         for _ in 0..TrbRing::NUM_TRB * 2 + 1 {
             xhc.send_command(GenericTrbEntry::cmd_no_op())
@@ -56,7 +100,7 @@ impl XhciDriverForPci {
             .send_command(GenericTrbEntry::cmd_enable_slot())
             .await?
             .slot_id();
-        xhc.address_device(xhc.clone(), port, slot).await
+        Self::address_device(xhc.clone(), port, slot).await
     }
     async fn enable_port(
         xhc: Rc<Xhci>,

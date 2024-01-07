@@ -236,6 +236,11 @@ impl Xhci {
             .set_dcbaa_ptr(&mut self.device_context_base_array.lock())?;
         Ok(())
     }
+    fn set_output_context_for_slot(&self, slot: u8, output_context: Pin<Box<OutputContext>>) {
+        self.device_context_base_array
+            .lock()
+            .set_output_context(slot, output_context);
+    }
     fn init_command_ring(&mut self) -> Result<()> {
         unsafe { self.op_regs.get_unchecked_mut() }.set_cmd_ring_ctrl(&self.command_ring.lock());
         Ok(())
@@ -730,48 +735,6 @@ impl Xhci {
             "Device class {} is not supported yet",
             device_descriptor.device_class
         )))
-    }
-    async fn address_device(
-        &self,
-        rc: Rc<Self>,
-        port: usize,
-        slot: u8,
-    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
-        // Setup an input context and send AddressDevice command.
-        // 4.3.3 Device Slot Initialization
-        let output_context = Box::pin(OutputContext::default());
-        self.device_context_base_array
-            .lock()
-            .set_output_context(slot, output_context);
-        let mut input_ctrl_ctx = InputControlContext::default();
-        input_ctrl_ctx.add_context(0)?;
-        input_ctrl_ctx.add_context(1)?;
-        let mut input_context = Box::pin(InputContext::default());
-        input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
-        // 3. Initialize the Input Slot Context data structure (6.2.2)
-        input_context.as_mut().set_root_hub_port_number(port)?;
-        input_context.as_mut().set_last_valid_dci(1)?;
-        // 4. Initialize the Transfer Ring for the Default Control Endpoint
-        // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
-        let portsc = self
-            .portsc
-            .get(port)?
-            .upgrade()
-            .ok_or("PORTSC was invalid")?;
-        input_context.as_mut().set_port_speed(portsc.port_speed())?;
-        let mut ctrl_ep_ring = Box::pin(CommandRing::default());
-        input_context.as_mut().set_ep_ctx(
-            1,
-            EndpointContext::new_control_endpoint(
-                portsc.max_packet_size()?,
-                ctrl_ep_ring.as_mut().ring_phys_addr(),
-            )?,
-        )?;
-        // 8. Issue an Address Device Command for the Device Slot
-        let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
-        self.send_command(cmd).await?.completed()?;
-        self.device_ready(rc, port, slot, input_context, ctrl_ep_ring)
-            .await
     }
     async fn reset_port(&self, port: usize) -> Result<()> {
         let portsc = self
