@@ -12,13 +12,11 @@ use crate::allocator::ALLOCATOR;
 use crate::ax88179;
 use crate::error::Error;
 use crate::error::Result;
-use crate::executor::dummy_waker;
 use crate::executor::yield_execution;
 use crate::memory::Mmio;
 use crate::mutex::Mutex;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
-use crate::print;
 use crate::println;
 use crate::usb::ConfigDescriptor;
 use crate::usb::DescriptorIterator;
@@ -49,7 +47,6 @@ use core::mem::size_of;
 use core::pin::Pin;
 use core::ptr::write_volatile;
 use core::slice;
-use core::task::Context;
 
 use context::DeviceContextBaseAddressArray;
 use context::EndpointContext;
@@ -64,7 +61,7 @@ use registers::CapabilityRegisters;
 use registers::OperationalRegisters;
 use registers::PortLinkState;
 use registers::PortSc;
-use registers::PortScIteratorItem;
+use registers::PortScIterator;
 use registers::PortScWrapper;
 use registers::PortState;
 use registers::RuntimeRegisters;
@@ -223,6 +220,9 @@ impl Xhci {
     }
     pub fn portsc(&self, port: usize) -> Result<Weak<PortScWrapper>> {
         self.portsc.get(port)
+    }
+    pub fn portsc_iter(&self) -> PortScIterator {
+        self.portsc.iter()
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
         let eq = &mut self.primary_event_ring;
@@ -515,14 +515,6 @@ impl Xhci {
         )
         .await?;
         Ok(buf.as_ref().get_ref().to_vec())
-    }
-    async fn ensure_ring_is_working(&mut self) -> Result<()> {
-        for _ in 0..TrbRing::NUM_TRB * 2 + 1 {
-            self.send_command(GenericTrbEntry::cmd_no_op())
-                .await?
-                .completed()?;
-        }
-        Ok(())
     }
     pub async fn setup_endpoints(
         &self,
@@ -834,59 +826,5 @@ impl Xhci {
             yield_execution().await;
         }
         self.enable_slot(rc, port).await
-    }
-    async fn poll(&self, rc: Rc<Self>) -> Result<()> {
-        // 4.3 USB Device Initialization
-        // USB3: Disconnected -> Polling -> Enabled
-        // USB2: Disconnected -> Disabled
-        if let Some((port, portsc)) = self.portsc.iter().find_map(
-            |PortScIteratorItem { port, portsc }| -> Option<(usize, Rc<PortScWrapper>)> {
-                let portsc = portsc.upgrade()?;
-                if portsc.csc() {
-                    portsc.clear_csc();
-                    Some((port, portsc))
-                } else {
-                    None
-                }
-            },
-        ) {
-            if portsc.ccs() {
-                print!("Port {port}: Device attached: {portsc:?}: ");
-                if portsc.state() == PortState::Disabled {
-                    println!("USB2");
-                    match self.enable_port(rc, port).await {
-                        Ok(f) => {
-                            println!("device future attached",);
-                            self.device_futures.lock().push_back(f);
-                        }
-                        Err(e) => {
-                            println!(
-                                "Failed to initialize an USB2 device on port {}: {:?}",
-                                port, e
-                            );
-                        }
-                    }
-                } else if portsc.state() == PortState::Enabled {
-                    println!("USB3 (Skipping)");
-                } else {
-                    println!("Unexpected state");
-                }
-            } else {
-                println!("Port {}: Device detached: {:?}", port, portsc);
-            }
-        }
-        let waker = dummy_waker();
-        let mut ctx = Context::from_waker(&waker);
-        let mut device_futures = self.device_futures.lock();
-        let mut c = device_futures.cursor_front_mut();
-        while let Some(f) = c.current() {
-            let r = Future::poll(f.as_mut(), &mut ctx);
-            if r.is_ready() {
-                c.remove_current();
-            } else {
-                c.move_next();
-            }
-        }
-        Ok(())
     }
 }
