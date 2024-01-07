@@ -29,9 +29,9 @@ use os::input::enqueue_input_tasks;
 use os::loader::Elf;
 use os::println;
 use os::x86_64;
-use os::x86_64::init_syscall;
 use os::x86_64::paging::write_cr3;
 use os::x86_64::read_rsp;
+use os::x86_64::syscall::init_syscall;
 
 fn paint_wasabi_logo() {
     const SIZE: i64 = 256;

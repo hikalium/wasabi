@@ -105,6 +105,7 @@ fmt :
 commit :
 	make fmt
 	git add .
+	make check
 	make pre_upload_test
 	git diff HEAD --color=always | less -R
 	git commit
