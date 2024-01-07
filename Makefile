@@ -61,10 +61,10 @@ clippy:
 	cd font && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd os && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd noli && cargo clippy -- ${CLIPPY_OPTIONS}
-	cd dbgutil && cargo clippy
-	# cd font && cargo clippy --all-features --all-targets -- -D warnings
-	cd os && cargo clippy --all-features --all-targets -- -D warnings
-	# build all apps under app/ dir for dev
+	cd e2etest && cargo clippy -- ${CLIPPY_OPTIONS}
+	cd dbgutil && cargo clippy -- ${CLIPPY_OPTIONS}
+	cd os && cargo clippy --all-features --all-targets -- ${CLIPPY_OPTIONS}
+	# Run clippy on all apps under app dir
 	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
 		xargs -I {} -n 1 -- bash -c 'make -C {} clippy || exit 255'
 

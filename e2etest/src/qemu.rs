@@ -142,7 +142,7 @@ pub struct Qemu {
 }
 
 impl Qemu {
-    const MONITOR_SOCKET_NAME: &str = "monitor.sock";
+    const MONITOR_SOCKET_NAME: &'static str = "monitor.sock";
     pub fn new(path_to_ovmf: &str) -> Result<Self> {
         Ok(Self {
             proc: None,
@@ -250,10 +250,10 @@ impl Qemu {
             }
         })
         .unwrap();
-        status
-            .exit_ok()
-            .context("QEMU should exit succesfully with quit command, but got error")?;
-        eprintln!("QEMU exited succesfully");
+        // Before QEMU 5.0.0, vvfat implementation has a bug that causes SEGV on exit
+        // so not checking the exit status code here to avoid false-positives.
+        // c.f. https://github.com/qemu/qemu/commit/8475ea48544b313cf533312846a4899ddecb799c
+        eprintln!("QEMU exited with status: {status:?}");
         Ok(())
     }
     // No new lines in cmd is allowed (it will be added automatically)
