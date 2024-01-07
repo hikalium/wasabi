@@ -20,6 +20,7 @@ use crate::xhci::context::EndpointContext;
 use crate::xhci::context::InputContext;
 use crate::xhci::context::InputControlContext;
 use crate::xhci::context::OutputContext;
+use crate::xhci::controller::Xhci;
 use crate::xhci::device::UsbDeviceDriverContext;
 use crate::xhci::registers::PortLinkState;
 use crate::xhci::registers::PortScIteratorItem;
@@ -29,7 +30,6 @@ use crate::xhci::registers::UsbMode;
 use crate::xhci::ring::CommandRing;
 use crate::xhci::ring::TrbRing;
 use crate::xhci::trb::GenericTrbEntry;
-use crate::xhci::Xhci;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::Rc;
@@ -48,8 +48,7 @@ impl XhciDriverForPci {
         ctrl_ep_ring: &mut Pin<Box<CommandRing>>,
     ) -> Result<()> {
         if xhc
-            .portsc
-            .get(port)?
+            .portsc(port)?
             .upgrade()
             .ok_or("PORTSC was invalid")?
             .port_speed()
@@ -193,11 +192,7 @@ impl XhciDriverForPci {
         input_context.as_mut().set_last_valid_dci(1)?;
         // 4. Initialize the Transfer Ring for the Default Control Endpoint
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
-        let portsc = xhc
-            .portsc
-            .get(port)?
-            .upgrade()
-            .ok_or("PORTSC was invalid")?;
+        let portsc = xhc.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
         input_context.as_mut().set_port_speed(portsc.port_speed())?;
         let mut ctrl_ep_ring = Box::pin(CommandRing::default());
         input_context.as_mut().set_ep_ctx(
@@ -224,11 +219,7 @@ impl XhciDriverForPci {
         xhc: Rc<Xhci>,
         port: usize,
     ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
-        let portsc = xhc
-            .portsc
-            .get(port)?
-            .upgrade()
-            .ok_or("PORTSC was invalid")?;
+        let portsc = xhc.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
         if !portsc.ccs() {
             return Err(Error::FailedString(format!(
                 "port {} disconnected while initialization",
@@ -248,11 +239,7 @@ impl XhciDriverForPci {
         // Reset port to enable the port (via Reset state)
         xhc.reset_port(port).await?;
         loop {
-            let portsc = xhc
-                .portsc
-                .get(port)?
-                .upgrade()
-                .ok_or("PORTSC was invalid")?;
+            let portsc = xhc.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
             if let (PortState::Enabled, PortLinkState::U0) = (portsc.state(), portsc.pls()) {
                 break;
             }
@@ -282,7 +269,7 @@ impl XhciDriverForPci {
                     match Self::enable_port(xhc.clone(), port).await {
                         Ok(f) => {
                             println!("device future attached",);
-                            xhc.device_futures.lock().push_back(f);
+                            xhc.device_futures().lock().push_back(f);
                         }
                         Err(e) => {
                             println!(
@@ -302,7 +289,7 @@ impl XhciDriverForPci {
         }
         let waker = dummy_waker();
         let mut ctx = Context::from_waker(&waker);
-        let mut device_futures = xhc.device_futures.lock();
+        let mut device_futures = xhc.device_futures().lock();
         let mut c = device_futures.cursor_front_mut();
         while let Some(f) = c.current() {
             let r = Future::poll(f.as_mut(), &mut ctx);
