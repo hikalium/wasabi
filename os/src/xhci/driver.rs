@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::ax88179;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::dummy_waker;
@@ -12,14 +13,19 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
+use crate::usb::UsbDescriptor;
+use crate::usb_hid_keyboard;
+use crate::usb_hid_tablet;
 use crate::xhci::context::EndpointContext;
 use crate::xhci::context::InputContext;
 use crate::xhci::context::InputControlContext;
 use crate::xhci::context::OutputContext;
+use crate::xhci::device::UsbDeviceDriverContext;
 use crate::xhci::registers::PortLinkState;
 use crate::xhci::registers::PortScIteratorItem;
 use crate::xhci::registers::PortScWrapper;
 use crate::xhci::registers::PortState;
+use crate::xhci::registers::UsbMode;
 use crate::xhci::ring::CommandRing;
 use crate::xhci::ring::TrbRing;
 use crate::xhci::trb::GenericTrbEntry;
@@ -34,6 +40,140 @@ use core::task::Context;
 #[derive(Default)]
 pub struct XhciDriverForPci {}
 impl XhciDriverForPci {
+    async fn update_max_packet_size(
+        xhc: &Rc<Xhci>,
+        port: usize,
+        slot: u8,
+        input_context: &mut Pin<Box<InputContext>>,
+        ctrl_ep_ring: &mut Pin<Box<CommandRing>>,
+    ) -> Result<()> {
+        if xhc
+            .portsc
+            .get(port)?
+            .upgrade()
+            .ok_or("PORTSC was invalid")?
+            .port_speed()
+            != UsbMode::FullSpeed
+        {
+            return Ok(());
+        }
+        // TODO: refactor this part out
+        // For full speed device, we should read the first 8 bytes of the device descriptor to
+        // get proper MaxPacketSize parameter.
+        let device_descriptor = xhc
+            .request_initial_device_descriptor(slot, ctrl_ep_ring)
+            .await?;
+        let max_packet_size = device_descriptor.max_packet_size;
+        let mut input_ctrl_ctx = InputControlContext::default();
+        input_ctrl_ctx.add_context(0)?;
+        input_ctrl_ctx.add_context(1)?;
+        input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
+        input_context.as_mut().set_ep_ctx(
+            1,
+            EndpointContext::new_control_endpoint(
+                max_packet_size as u16,
+                ctrl_ep_ring.ring_phys_addr(),
+            )?,
+        )?;
+        let cmd = GenericTrbEntry::cmd_evaluate_context(input_context.as_ref(), slot);
+        xhc.send_command(cmd).await?.completed()
+    }
+    async fn device_ready(
+        xhc: Rc<Xhci>,
+        port: usize,
+        slot: u8,
+        mut input_context: Pin<Box<InputContext>>,
+        mut ctrl_ep_ring: Pin<Box<CommandRing>>,
+    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
+        Self::update_max_packet_size(&xhc, port, slot, &mut input_context, &mut ctrl_ep_ring)
+            .await?;
+        let device_descriptor = xhc
+            .request_device_descriptor(slot, &mut ctrl_ep_ring)
+            .await?;
+        let descriptors = xhc
+            .request_config_descriptor_and_rest(slot, &mut ctrl_ep_ring)
+            .await?;
+        if let Ok(e) = xhc
+            .request_string_descriptor_zero(slot, &mut ctrl_ep_ring)
+            .await
+        {
+            let lang_id = e[1];
+            let vendor = if device_descriptor.manufacturer_idx != 0 {
+                Some(
+                    xhc.request_string_descriptor(
+                        slot,
+                        &mut ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.manufacturer_idx,
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+            let product = if device_descriptor.product_idx != 0 {
+                Some(
+                    xhc.request_string_descriptor(
+                        slot,
+                        &mut ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.product_idx,
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+            let serial = if device_descriptor.serial_idx != 0 {
+                Some(
+                    xhc.request_string_descriptor(
+                        slot,
+                        &mut ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.serial_idx,
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+            println!("USB device detected: {vendor:?} {product:?} {serial:?}");
+        }
+        let device_vendor_id = device_descriptor.vendor_id;
+        let device_product_id = device_descriptor.product_id;
+        println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
+        let ddc =
+            UsbDeviceDriverContext::new(port, slot, xhc, input_context, ctrl_ep_ring, descriptors)
+                .await?;
+        if device_vendor_id == 2965 && device_product_id == 6032 {
+            ax88179::attach_usb_device(ddc).await?;
+        } else if device_vendor_id == 0x0bda
+            && (device_product_id == 0x8153 || device_product_id == 0x8151)
+        {
+            println!("rtl8153/8151 is not supported yet...");
+        } else if device_descriptor.device_class == 0 {
+            // Device class is derived from Interface Descriptor
+            for d in ddc.descriptors() {
+                if let UsbDescriptor::Interface(e) = d {
+                    match e.triple() {
+                        (3, 0, 0) => {
+                            let f = usb_hid_tablet::attach_usb_device(ddc);
+                            return Ok(Box::pin(f));
+                        }
+                        (3, 1, 1) => {
+                            let f = usb_hid_keyboard::attach_usb_device(ddc);
+                            return Ok(Box::pin(f));
+                        }
+                        triple => println!("Skipping unknown interface triple: {triple:?}"),
+                    }
+                }
+            }
+        }
+        Err(Error::FailedString(format!(
+            "Device class {} is not supported yet",
+            device_descriptor.device_class
+        )))
+    }
     async fn address_device(
         xhc: Rc<Xhci>,
         port: usize,
@@ -70,8 +210,7 @@ impl XhciDriverForPci {
         // 8. Issue an Address Device Command for the Device Slot
         let cmd = GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
         xhc.send_command(cmd).await?.completed()?;
-        xhc.device_ready(xhc.clone(), port, slot, input_context, ctrl_ep_ring)
-            .await
+        Self::device_ready(xhc.clone(), port, slot, input_context, ctrl_ep_ring).await
     }
     async fn ensure_ring_is_working(xhc: Rc<Xhci>) -> Result<()> {
         for _ in 0..TrbRing::NUM_TRB * 2 + 1 {

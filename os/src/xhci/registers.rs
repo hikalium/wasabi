@@ -451,3 +451,31 @@ impl RuntimeRegisters {
     }
 }
 const _: () = assert!(size_of::<RuntimeRegisters>() == 0x8020);
+
+// [xhci] 4.7 Doorbells
+// index 0: for the host controller
+// index 1-255: for device contexts (index by a Slot ID)
+// DO NOT implement Copy trait - this should be the only instance to have the ptr.
+pub struct Doorbell {
+    ptr: Mutex<*mut u32>,
+}
+impl Doorbell {
+    pub fn new(ptr: *mut u32) -> Self {
+        Self {
+            ptr: Mutex::new(ptr, "Doorbell"),
+        }
+    }
+    // [xhci] 5.6 Doorbell Registers
+    // bit 0..8: DB Target
+    // bit 8..16: RsvdZ
+    // bit 16..32: DB Task ID
+    // index 0: for the host controller
+    // index 1-255: for device contexts (index by a Slot ID)
+    pub fn notify(&self, target: u8, task: u16) {
+        let value = (target as u32) | (task as u32) << 16;
+        // SAFETY: This is safe as long as the ptr is valid
+        unsafe {
+            write_volatile(*self.ptr.lock(), value);
+        }
+    }
+}

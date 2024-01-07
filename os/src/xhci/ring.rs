@@ -9,7 +9,6 @@ use crate::x86_64::paging::IoBox;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
-use crate::xhci::EventRingSegmentTableEntry;
 use alloc::alloc::Layout;
 use alloc::fmt;
 use alloc::fmt::Debug;
@@ -321,5 +320,24 @@ impl EventRing {
             self.cycle_state_ours = !self.cycle_state_ours;
         }
         Ok(Some(e))
+    }
+}
+
+#[repr(C, align(4096))]
+pub struct EventRingSegmentTableEntry {
+    ring_segment_base_address: u64,
+    ring_segment_size: u16,
+    _rsvdz: [u16; 3],
+}
+const _: () = assert!(size_of::<EventRingSegmentTableEntry>() == 4096);
+impl EventRingSegmentTableEntry {
+    fn new(ring: &IoBox<TrbRing>) -> Result<IoBox<Self>> {
+        let mut erst: IoBox<Self> = IoBox::new();
+        {
+            let erst = unsafe { erst.get_unchecked_mut() };
+            erst.ring_segment_base_address = ring.as_ref() as *const TrbRing as u64;
+            erst.ring_segment_size = ring.as_ref().num_trbs().try_into()?;
+        }
+        Ok(erst)
     }
 }

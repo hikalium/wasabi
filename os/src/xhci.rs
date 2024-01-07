@@ -9,7 +9,6 @@ pub mod ring;
 pub mod trb;
 
 use crate::allocator::ALLOCATOR;
-use crate::ax88179;
 use crate::error::Error;
 use crate::error::Result;
 use crate::memory::Mmio;
@@ -23,16 +22,12 @@ use crate::usb::DescriptorType;
 use crate::usb::DeviceDescriptor;
 use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
-use crate::usb_hid_keyboard;
-use crate::usb_hid_tablet;
 use crate::util::IntoPinnedMutableSlice;
 use crate::util::PAGE_SIZE;
-use crate::x86_64::paging::IoBox;
 use alloc::alloc::Layout;
 use alloc::boxed::Box;
 use alloc::collections::LinkedList;
 use alloc::fmt::Debug;
-use alloc::format;
 use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::string::String;
@@ -44,7 +39,6 @@ use core::convert::AsRef;
 use core::future::Future;
 use core::mem::size_of;
 use core::pin::Pin;
-use core::ptr::write_volatile;
 use core::slice;
 
 use context::DeviceContextBaseAddressArray;
@@ -53,16 +47,15 @@ use context::InputContext;
 use context::InputControlContext;
 use context::OutputContext;
 use context::RawDeviceContextBaseAddressArray;
-use device::UsbDeviceDriverContext;
 use future::CommandCompletionEventFuture;
 use future::TransferEventFuture;
 use registers::CapabilityRegisters;
+use registers::Doorbell;
 use registers::OperationalRegisters;
 use registers::PortSc;
 use registers::PortScIterator;
 use registers::PortScWrapper;
 use registers::RuntimeRegisters;
-use registers::UsbMode;
 use ring::CommandRing;
 use ring::EventRing;
 use ring::TransferRing;
@@ -71,25 +64,6 @@ use trb::DataStageTrb;
 use trb::GenericTrbEntry;
 use trb::SetupStageTrb;
 use trb::StatusStageTrb;
-
-#[repr(C, align(4096))]
-struct EventRingSegmentTableEntry {
-    ring_segment_base_address: u64,
-    ring_segment_size: u16,
-    _rsvdz: [u16; 3],
-}
-const _: () = assert!(size_of::<EventRingSegmentTableEntry>() == 4096);
-impl EventRingSegmentTableEntry {
-    fn new(ring: &IoBox<TrbRing>) -> Result<IoBox<Self>> {
-        let mut erst: IoBox<Self> = IoBox::new();
-        {
-            let erst = unsafe { erst.get_unchecked_mut() };
-            erst.ring_segment_base_address = ring.as_ref() as *const TrbRing as u64;
-            erst.ring_segment_size = ring.as_ref().num_trbs().try_into()?;
-        }
-        Ok(erst)
-    }
-}
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
@@ -114,34 +88,6 @@ impl From<&EndpointDescriptor> for EndpointType {
             (1, 2) => Self::BulkIn,
             (1, 3) => Self::InterruptIn,
             _ => unreachable!(),
-        }
-    }
-}
-
-// [xhci] 4.7 Doorbells
-// index 0: for the host controller
-// index 1-255: for device contexts (index by a Slot ID)
-// DO NOT implement Copy trait - this should be the only instance to have the ptr.
-pub struct Doorbell {
-    ptr: Mutex<*mut u32>,
-}
-impl Doorbell {
-    fn new(ptr: *mut u32) -> Self {
-        Self {
-            ptr: Mutex::new(ptr, "Doorbell"),
-        }
-    }
-    // [xhci] 5.6 Doorbell Registers
-    // bit 0..8: DB Target
-    // bit 8..16: RsvdZ
-    // bit 16..32: DB Task ID
-    // index 0: for the host controller
-    // index 1-255: for device contexts (index by a Slot ID)
-    fn notify(&self, target: u8, task: u16) {
-        let value = (target as u32) | (task as u32) << 16;
-        // SAFETY: This is safe as long as the ptr is valid
-        unsafe {
-            write_volatile(*self.ptr.lock(), value);
         }
     }
 }
@@ -600,141 +546,6 @@ impl Xhci {
         let cmd = GenericTrbEntry::cmd_configure_endpoint(input_context.as_ref(), slot);
         self.send_command(cmd).await?.completed()?;
         Ok(ep_rings)
-    }
-    async fn update_max_packet_size(
-        &self,
-        port: usize,
-        slot: u8,
-        input_context: &mut Pin<Box<InputContext>>,
-        ctrl_ep_ring: &mut Pin<Box<CommandRing>>,
-    ) -> Result<()> {
-        if self
-            .portsc
-            .get(port)?
-            .upgrade()
-            .ok_or("PORTSC was invalid")?
-            .port_speed()
-            != UsbMode::FullSpeed
-        {
-            return Ok(());
-        }
-        // TODO: refactor this part out
-        // For full speed device, we should read the first 8 bytes of the device descriptor to
-        // get proper MaxPacketSize parameter.
-        let device_descriptor = self
-            .request_initial_device_descriptor(slot, ctrl_ep_ring)
-            .await?;
-        let max_packet_size = device_descriptor.max_packet_size;
-        let mut input_ctrl_ctx = InputControlContext::default();
-        input_ctrl_ctx.add_context(0)?;
-        input_ctrl_ctx.add_context(1)?;
-        input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
-        input_context.as_mut().set_ep_ctx(
-            1,
-            EndpointContext::new_control_endpoint(
-                max_packet_size as u16,
-                ctrl_ep_ring.ring_phys_addr(),
-            )?,
-        )?;
-        let cmd = GenericTrbEntry::cmd_evaluate_context(input_context.as_ref(), slot);
-        self.send_command(cmd).await?.completed()
-    }
-    async fn device_ready(
-        &self,
-        rc: Rc<Self>,
-        port: usize,
-        slot: u8,
-        mut input_context: Pin<Box<InputContext>>,
-        mut ctrl_ep_ring: Pin<Box<CommandRing>>,
-    ) -> Result<Pin<Box<dyn Future<Output = Result<()>>>>> {
-        self.update_max_packet_size(port, slot, &mut input_context, &mut ctrl_ep_ring)
-            .await?;
-        let device_descriptor = self
-            .request_device_descriptor(slot, &mut ctrl_ep_ring)
-            .await?;
-        let descriptors = self
-            .request_config_descriptor_and_rest(slot, &mut ctrl_ep_ring)
-            .await?;
-        if let Ok(e) = self
-            .request_string_descriptor_zero(slot, &mut ctrl_ep_ring)
-            .await
-        {
-            let lang_id = e[1];
-            let vendor = if device_descriptor.manufacturer_idx != 0 {
-                Some(
-                    self.request_string_descriptor(
-                        slot,
-                        &mut ctrl_ep_ring,
-                        lang_id,
-                        device_descriptor.manufacturer_idx,
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
-            let product = if device_descriptor.product_idx != 0 {
-                Some(
-                    self.request_string_descriptor(
-                        slot,
-                        &mut ctrl_ep_ring,
-                        lang_id,
-                        device_descriptor.product_idx,
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
-            let serial = if device_descriptor.serial_idx != 0 {
-                Some(
-                    self.request_string_descriptor(
-                        slot,
-                        &mut ctrl_ep_ring,
-                        lang_id,
-                        device_descriptor.serial_idx,
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
-            println!("USB device detected: {vendor:?} {product:?} {serial:?}");
-        }
-        let device_vendor_id = device_descriptor.vendor_id;
-        let device_product_id = device_descriptor.product_id;
-        println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
-        let ddc =
-            UsbDeviceDriverContext::new(port, slot, rc, input_context, ctrl_ep_ring, descriptors)
-                .await?;
-        if device_vendor_id == 2965 && device_product_id == 6032 {
-            ax88179::attach_usb_device(ddc).await?;
-        } else if device_vendor_id == 0x0bda
-            && (device_product_id == 0x8153 || device_product_id == 0x8151)
-        {
-            println!("rtl8153/8151 is not supported yet...");
-        } else if device_descriptor.device_class == 0 {
-            // Device class is derived from Interface Descriptor
-            for d in ddc.descriptors() {
-                if let UsbDescriptor::Interface(e) = d {
-                    match e.triple() {
-                        (3, 0, 0) => {
-                            let f = usb_hid_tablet::attach_usb_device(ddc);
-                            return Ok(Box::pin(f));
-                        }
-                        (3, 1, 1) => {
-                            let f = usb_hid_keyboard::attach_usb_device(ddc);
-                            return Ok(Box::pin(f));
-                        }
-                        triple => println!("Skipping unknown interface triple: {triple:?}"),
-                    }
-                }
-            }
-        }
-        Err(Error::FailedString(format!(
-            "Device class {} is not supported yet",
-            device_descriptor.device_class
-        )))
     }
     async fn reset_port(&self, port: usize) -> Result<()> {
         let portsc = self
