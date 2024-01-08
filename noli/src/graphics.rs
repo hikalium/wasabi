@@ -42,6 +42,16 @@ pub fn draw_string(color: u32, x: i64, y: i64, s: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn draw_string_with_underline(color: u32, x: i64, y: i64, s: &str) -> Result<()> {
+    let mut pos = 0;
+    for c in s.chars() {
+        draw_char(color, x + pos, y, c)?;
+        pos += 8;
+    }
+    draw_line(color, x, y + 16, x + pos, y + 16)?;
+    Ok(())
+}
+
 // 1x
 // ooo
 // o1o

@@ -17,7 +17,14 @@ fn main() -> u64 {
 
     window2.fill_rect(0xff0000, 0, 0, 50, 50).unwrap();
     window2
-        .draw_string(0x000000, 5, 10, "test", window::StringSize::Large)
+        .draw_string(
+            0x000000,
+            5,
+            10,
+            "test",
+            window::StringSize::Large,
+            /*underline*/ false,
+        )
         .unwrap();
 
     0

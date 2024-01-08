@@ -159,19 +159,38 @@ impl Window {
         Ok(())
     }
 
-    pub fn draw_string(&self, color: u32, x: i64, y: i64, s: &str, size: StringSize) -> Result<()> {
+    pub fn draw_string(
+        &self,
+        color: u32,
+        x: i64,
+        y: i64,
+        s: &str,
+        size: StringSize,
+        underline: bool,
+    ) -> Result<()> {
         if x < 0 || x > self.width || y < 0 || y > self.height {
             return Err(Error::Failed("draw_string: out of range"));
         }
 
         match size {
             StringSize::Medium => {
-                graphics::draw_string(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+                if underline {
+                    graphics::draw_string_with_underline(
+                        color,
+                        self.x + x,
+                        self.y + y + TITLE_BAR_HEIGHT,
+                        s,
+                    )?;
+                } else {
+                    graphics::draw_string(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
+                }
             }
             StringSize::Large => {
+                // TODO: support underline
                 graphics::draw_string_2x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
             }
             StringSize::XLarge => {
+                // TODO: support underline
                 graphics::draw_string_3x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
             }
         }
