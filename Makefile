@@ -52,7 +52,7 @@ default: os
 
 .PHONY : os
 os:
-	rustup component add rust-src
+	rustup component add rust-src --toolchain `rustup show active-toolchain | cut -d ' ' -f 1`
 	cd os && cargo build --all-targets --all-features
 
 .PHONY : clippy
