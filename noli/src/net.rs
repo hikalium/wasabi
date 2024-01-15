@@ -3,10 +3,10 @@ extern crate alloc;
 use crate::error::Error;
 use crate::error::Result;
 use crate::print::hexdump;
-use crate::println;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::fmt::Display;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
 use core::convert::From;
@@ -127,6 +127,23 @@ impl TcpStream {
     }
 }
 
+pub fn lookup_host(host: &str) -> Result<Vec<IpV4Addr>> {
+    println!("noli::net::lookup_host: Fake lookup for {host}");
+    let addrs = if host == "example.com" {
+        vec![IpV4Addr::new([127, 0, 0, 1])]
+    } else if host == "example.invalid" {
+        // c.f. https://www.rfc-editor.org/rfc/rfc6761.html
+        // >  The domain "invalid." and any names falling within ".invalid." are special in the ways listed below.
+        // > Users MAY assume that queries for "invalid" names will always return NXDOMAIN responses.
+        // > Name resolution APIs and libraries SHOULD recognize "invalid" names as special and SHOULD always return immediate negative responses.
+        return Err(Error::Failed("NXDOMAIN"));
+    } else {
+        Vec::new()
+    };
+
+    Ok(addrs)
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod test {
     use super::*;
@@ -136,5 +153,19 @@ mod test {
         let port = 80;
         let socket_addr: SocketAddr = (ip_addr, port).into();
         assert!(TcpStream::connect(socket_addr).is_ok());
+    }
+    #[test]
+    fn lookup_example_com() {
+        let addrs = lookup_host("example.com").expect("lookup_host should succeeds");
+        assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0], IpV4Addr::new([127, 0, 0, 1]));
+    }
+    #[test]
+    fn lookup_nx_domain() {
+        // c.f. https://www.rfc-editor.org/rfc/rfc6761.html
+        // >  The domain "invalid." and any names falling within ".invalid." are special in the ways listed below.
+        // > Users MAY assume that queries for "invalid" names will always return NXDOMAIN responses.
+        // > Name resolution APIs and libraries SHOULD recognize "invalid" names as special and SHOULD always return immediate negative responses.
+        assert!(lookup_host("example.invalid").is_err());
     }
 }
