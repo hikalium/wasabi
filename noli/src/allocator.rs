@@ -25,6 +25,7 @@ static mut ALLOCATOR: GlobalAllocatorWrapper = GlobalAllocatorWrapper {
     },
 };
 
+#[cfg(not(target_os = "linux"))]
 #[alloc_error_handler]
 fn alloc_error_handler(layout: Layout) -> ! {
     panic!("allocation error: {:?}", layout)

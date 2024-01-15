@@ -1,48 +1,21 @@
-#![cfg_attr(not(test), no_std)]
 #![feature(alloc_error_handler)]
-
+#![no_std]
 mod allocator;
+
 mod error;
 mod font;
 pub mod graphics;
 pub mod net;
+pub mod print;
 pub mod syscall;
 pub mod window;
 
-use core::fmt;
-use core::panic::PanicInfo;
-
+#[cfg(not(target_os = "linux"))]
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("PANIC!!!");
     println!("{}", info);
     syscall::exit(1)
-}
-
-#[macro_export]
-macro_rules! print {
-        ($($arg:tt)*) => ($crate::_print(format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! println {
-        () => ($crate::print!("\n"));
-            ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-pub struct StdIoWriter {}
-impl StdIoWriter {}
-impl fmt::Write for StdIoWriter {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        syscall::print(s);
-        Ok(())
-    }
-}
-
-#[doc(hidden)]
-pub fn _print(args: fmt::Arguments) {
-    let mut writer = crate::StdIoWriter {};
-    fmt::write(&mut writer, args).unwrap();
 }
 
 #[macro_export]

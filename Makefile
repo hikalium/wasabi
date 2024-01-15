@@ -90,7 +90,7 @@ pre_upload_test:
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test
-	cd noli && cargo test --target=x86_64-unknown-none
+	cargo test --package noli
 
 .PHONY : post_upload_test
 post_upload_test:
