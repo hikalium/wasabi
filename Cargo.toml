@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "app/hello0",
     "app/hello1",
+    "app/httpget",
     "app/loop",
     "app/uname",
     "app/window0",

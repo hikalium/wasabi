@@ -2,7 +2,7 @@
 #![no_std]
 mod allocator;
 
-mod error;
+pub mod error;
 mod font;
 pub mod graphics;
 pub mod net;
@@ -24,9 +24,10 @@ macro_rules! entry_point {
     ($path:path) => {
         #[no_mangle]
         pub unsafe extern "C" fn entry() -> ! {
-            // validate the signature of the program entry point
-            let f: fn() -> u64 = $path;
-            let ret = f();
+            // Using this trait to accept multiple return types.
+            // c.f. https://github.com/rust-lang/rfcs/issues/1176#issuecomment-115058364
+            use $crate::error::MainReturn;
+            let ret = $path().into_error_code();
             noli::syscall::exit(ret);
         }
     };
