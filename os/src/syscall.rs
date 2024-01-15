@@ -35,12 +35,9 @@ fn return_to_os() -> ! {
 }
 
 fn sys_exit(regs: &[u64; 7]) -> ! {
-    println!("program exited with code {}", regs[1]);
-    {
-        let retv = regs[1];
-        write_return_value(retv);
-        return_to_os()
-    }
+    let retv = regs[1];
+    write_return_value(retv);
+    return_to_os()
 }
 
 fn sys_print(args: &[u64; 7]) -> u64 {

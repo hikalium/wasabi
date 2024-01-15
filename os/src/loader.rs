@@ -143,7 +143,6 @@ impl<'a> LoadedElf<'a> {
                 in("rdi") entry_point,
                 lateout("rax") retcode,
             );
-            println!("returned from the code! retcode = {}", retcode);
         }
         Ok(retcode)
     }
