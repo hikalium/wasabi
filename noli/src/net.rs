@@ -8,6 +8,7 @@ use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::fmt::Display;
 use alloc::vec::Vec;
+use core::cmp::min;
 use core::convert::From;
 use core::str::FromStr;
 
@@ -71,6 +72,29 @@ impl From<(IpV4Addr, u16)> for SocketAddr {
     }
 }
 
+static FAKE_TCP_DATA: &str = r#"
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=UTF-8
+Date: Mon, 15 Jan 2024 10:05:49 GMT
+Content-Length: 433
+
+<!doctype html>
+<html>
+<head>
+    <title>Example Domain Response</title>
+    <meta charset="utf-8" />
+</head>
+<body>
+<div>
+    <h1>Example Domain Response</h1>
+    <p>This domain is for use in illustrative examples in documents. You may use this
+    domain in literature without prior coordination or asking for permission.</p>
+    <p><a href="https://www.iana.org/domains/example">More information...</a></p>
+</div>
+</body>
+</html>
+"#;
+
 #[derive(Debug)]
 pub struct TcpStream {
     addr: SocketAddr,
@@ -86,13 +110,20 @@ impl TcpStream {
         // There's no core::io::Write trait so implement this directly.
         println!("TcpStream::write: {self:?}");
         hexdump(buf);
-        Ok(0)
+        Ok(buf.len())
     }
     pub fn flush(&mut self) -> Result<()> {
         // There's no core::io::Write trait so implement this directly.
         // Do nothing for now.
         println!("TcpStream::flush: {self:?}");
         Ok(())
+    }
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        // There's no core::io::Read trait so implement this directly.
+        println!("TcpStream::read: {self:?}");
+        let copy_size = min(buf.len(), FAKE_TCP_DATA.len());
+        buf[..copy_size].copy_from_slice(&FAKE_TCP_DATA.as_bytes()[..copy_size]);
+        Ok(copy_size)
     }
 }
 
