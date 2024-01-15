@@ -13,7 +13,7 @@ BIN_PATH_DEBUG=$(shell cargo metadata --format-version 1 | jq -r .target_directo
 build :
 	rustup target add $(TARGET)
 	$(CARGO) build --target=$(TARGET)
-	$(CARGO) install --target=$(TARGET) --force --root $(ROOT) --path .
+	$(CARGO) install --target=$(TARGET) --force --offline --root $(ROOT) --path .
 
 .PHONY : clippy
 clippy :
