@@ -2,11 +2,12 @@
 #![no_main]
 
 use noli::entry_point;
-use noli::syscall;
+use noli::sys::exit;
+use noli::sys::write_string;
 
-fn main() -> u64 {
-    syscall::print("**** Hello from an app!\n");
-    syscall::exit(42);
+fn main() {
+    write_string("**** Hello from an app!\n");
+    exit(42);
 }
 
 entry_point!(main);

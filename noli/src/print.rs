@@ -1,3 +1,32 @@
+use core::fmt;
+
+#[macro_export]
+macro_rules! print {
+        ($($arg:tt)*) => ($crate::print::print(format_args!($($arg)*)));
+}
+
+#[macro_export]
+macro_rules! println {
+    // Note: exported macros will be exposed as the crate's root item.
+    // c.f. https://doc.rust-lang.org/reference/macros-by-example.html#path-based-scope
+        () => ($crate::print!("\n"));
+            ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+}
+
+pub struct StdIoWriter {}
+impl StdIoWriter {}
+impl fmt::Write for StdIoWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        crate::sys::write_string(s);
+        Ok(())
+    }
+}
+
+pub fn print(args: fmt::Arguments) {
+    let mut writer = StdIoWriter {};
+    fmt::write(&mut writer, args).unwrap();
+}
+
 pub fn hexdump(bytes: &[u8]) {
     let mut i = 0;
     let mut ascii = [0u8; 16];

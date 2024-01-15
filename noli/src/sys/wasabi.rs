@@ -1,6 +1,5 @@
 use core::alloc::GlobalAlloc;
 use core::alloc::Layout;
-use core::fmt;
 use core::ptr::null_mut;
 
 #[panic_handler]
@@ -10,6 +9,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     exit(1)
 }
 
+#[macro_export]
 macro_rules! entry_point {
     // c.f. https://docs.rs/bootloader/0.6.4/bootloader/macro.entry_point.html
     ($path:path) => {
@@ -19,7 +19,7 @@ macro_rules! entry_point {
             // c.f. https://github.com/rust-lang/rfcs/issues/1176#issuecomment-115058364
             use $crate::error::MainReturn;
             let ret = $path().into_error_code();
-            crate::sys::wasabi::exit(ret);
+            $crate::sys::exit(ret);
         }
     };
 }
@@ -146,7 +146,7 @@ pub fn exit(code: u64) -> ! {
     syscall_1(0, code);
     unreachable!()
 }
-pub fn print(s: &str) -> u64 {
+pub fn write_string(s: &str) -> u64 {
     let len = s.len() as u64;
     let s = s.as_ptr() as u64;
     syscall_2(1, s, len)
@@ -156,30 +156,4 @@ pub fn draw_point(x: i64, y: i64, c: u32) -> u64 {
 }
 pub fn noop() -> u64 {
     syscall_0(3)
-}
-
-macro_rules! print {
-        ($($arg:tt)*) => ($crate::sys::wasabi::_print(format_args!($($arg)*)));
-}
-
-macro_rules! println {
-    // Note: exported macros will be exposed as the crate's root item.
-    // c.f. https://doc.rust-lang.org/reference/macros-by-example.html#path-based-scope
-        () => ($crate::print!("\n"));
-            ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-pub struct StdIoWriter {}
-impl StdIoWriter {}
-impl fmt::Write for StdIoWriter {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        print(s);
-        Ok(())
-    }
-}
-
-#[doc(hidden)]
-pub fn _print(args: fmt::Arguments) {
-    let mut writer = StdIoWriter {};
-    fmt::write(&mut writer, args).unwrap();
 }

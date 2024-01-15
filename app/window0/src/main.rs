@@ -4,14 +4,14 @@
 use noli::entry_point;
 use noli::graphics;
 use noli::println;
-use noli::syscall;
+use noli::sys::draw_point;
 
 fn main() -> u64 {
     println!("window0!!!!");
     println!("window0 {}x{}", 32, 64);
     for y in 0..64 {
         for x in 0..64 {
-            syscall::draw_point(100 + x, 100 + y, 0xff0000);
+            draw_point(100 + x, 100 + y, 0xff0000);
         }
     }
     graphics::draw_line(0x00ff00, 100, 100, 163, 163).unwrap();
