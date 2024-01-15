@@ -98,6 +98,19 @@ gh act
 gh act --pull=false
 ```
 
+## FAQ
+
+### Neovim + coc-rust-analyzer fails
+Try uninstalling all the toolchains installed and `make` again to install the desired version, with this:
+```
+rustup toolchain uninstall `rustup toolchain list | cut -d ' ' -f 1`
+make
+```
+
+Also, it is possible that your neovim installation is outdated.
+
+FYI: hikalium is using [this version of neovim](https://github.com/hikalium/dotfiles/blob/master/scripts/setup_nvim_linux.sh#L2).
+
 ## References
 - https://rust-lang.github.io/unsafe-code-guidelines/introduction.html
 - https://www.cqpub.co.jp/interface/sample/200512/if0512_chap1.pdf
