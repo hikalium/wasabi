@@ -10,8 +10,10 @@ use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
 use alloc::alloc::Layout;
+use alloc::collections::VecDeque;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::vec::Vec;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::ptr::null_mut;
@@ -279,18 +281,22 @@ pub struct EventRing {
     erst: IoBox<EventRingSegmentTableEntry>,
     cycle_state_ours: bool,
     erdp: Option<*mut u64>,
+    // slot_queues[slot]
+    slot_queues: Vec<VecDeque<GenericTrbEntry>>,
 }
 impl EventRing {
     pub fn new() -> Result<Self> {
         let ring = TrbRing::new();
         let erst = EventRingSegmentTableEntry::new(&ring)?;
         disable_cache(&erst);
-
+        let mut slot_queues = Vec::new();
+        slot_queues.resize_with(256, Default::default);
         Ok(Self {
             ring,
             erst,
             cycle_state_ours: true,
             erdp: None,
+            slot_queues,
         })
     }
     pub fn set_erdp(&mut self, erdp: *mut u64) {
@@ -305,6 +311,7 @@ impl EventRing {
     fn has_next_event(&self) -> bool {
         self.ring.as_ref().current().cycle_state() == self.cycle_state_ours
     }
+    /// Non-blocking
     pub fn pop(&mut self) -> Result<Option<GenericTrbEntry>> {
         if !self.has_next_event() {
             return Ok(None);
@@ -320,6 +327,26 @@ impl EventRing {
             self.cycle_state_ours = !self.cycle_state_ours;
         }
         Ok(Some(e))
+    }
+    /// Non-blocking
+    pub fn pop_for_slot(&mut self, slot: u8) -> Result<Option<GenericTrbEntry>> {
+        {
+            let sq = &mut self.slot_queues[slot as usize];
+            if let Some(e) = sq.pop_front() {
+                return Ok(Some(e));
+            }
+        }
+        while self.has_next_event() {
+            let e = self
+                .pop()?
+                .ok_or(Error::Failed("Expected some entries but it was empty"))?;
+            if e.slot_id() == slot {
+                return Ok(Some(e));
+            }
+            let sq = &mut self.slot_queues[slot as usize];
+            sq.push_back(e);
+        }
+        Ok(None)
     }
 }
 

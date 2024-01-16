@@ -155,6 +155,7 @@ impl UsbDeviceDriverContext {
     pub async fn wait_transfer_event(&mut self, trb_ptr_to_wait: u64) -> Result<()> {
         TransferEventFuture::new_with_timeout(
             self.xhci.primary_event_ring(),
+            self.slot,
             trb_ptr_to_wait,
             10 * 1000,
         )

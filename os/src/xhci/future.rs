@@ -23,10 +23,10 @@ pub struct EventFuture<'a, const E: TrbType> {
     _pinned: PhantomPinned,
 }
 impl<'a, const E: TrbType> EventFuture<'a, E> {
-    pub fn new(event_ring: &'a Mutex<EventRing>, trb_addr: u64) -> Self {
-        Self::new_with_timeout(event_ring, trb_addr, 100)
+    pub fn new(event_ring: &'a Mutex<EventRing>, slot: u8, trb_addr: u64) -> Self {
+        Self::new_with_timeout(event_ring, slot, trb_addr, 100)
     }
-    pub fn new_with_timeout(event_ring: &'a Mutex<EventRing>, trb_addr: u64, wait_ms: u64) -> Self {
+    pub fn new_with_timeout(event_ring: &'a Mutex<EventRing>, slot: u8, trb_addr: u64, wait_ms: u64) -> Self {
         let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * wait_ms;
         Self {
             event_ring,
@@ -50,26 +50,26 @@ impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<Option<GenericTrbEntry>>> {
         let time_out = self.time_out;
         let mut_self = unsafe { self.get_unchecked_mut() };
-        let event = mut_self.event_ring.lock().pop();
-        match event {
-            Err(e) => Poll::Ready(Err(e)),
-            Ok(None) => {
-                if time_out < Hpet::take().main_counter() {
-                    Poll::Ready(Ok(None))
+        match mut_self.wait_on {
+            EventFutureWaitType::Slot(slot) => {
+            let event = mut_self.event_ring.lock().pop_for_slot(slot);
+                if let Ok(Some(_)) = event {
+                    return Poll::Ready(event)
+                } else if time_out < Hpet::take().main_counter() {
+                    return Poll::Ready(Ok(None))
                 } else {
-                    Poll::Pending
+                    return Poll::Pending
                 }
             }
-            Ok(Some(trb)) => {
-                if trb.trb_type() != E as u32 {
-                    println!("Ignoring event (!= type): {:?}", trb);
-                    return Poll::Pending;
-                }
+            EventFutureWaitType::TrbAddr(trb_addr) => {
+                let event = mut_self.event_ring.lock().pop();
+                if let Some()
+                if event.data
                 match mut_self.wait_on {
-                    EventFutureWaitType::TrbAddr(trb_addr) if trb_addr == trb.data() => {
+                    EventFutureWaitType::TrbAddr(trb_addr) {
                         Poll::Ready(Ok(Some(trb)))
                     }
-                    EventFutureWaitType::Slot(slot) if trb.slot_id() == slot => {
+                    EventFutureWaitType::Slot(slot) {
                         Poll::Ready(Ok(Some(trb)))
                     }
                     _ => {

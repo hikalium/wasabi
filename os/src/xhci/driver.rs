@@ -233,6 +233,7 @@ impl XhciDriverForPci {
             .slot_id();
         Self::address_device(xhc.clone(), port, slot).await
     }
+    /// Returns a future that handles device disconnect when needed.
     async fn enable_port(
         xhc: Rc<Controller>,
         port: usize,
