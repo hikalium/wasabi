@@ -85,11 +85,17 @@ check:
 	make spellcheck
 	make os
 
+.PHONY : app_unit_test
+app_unit_test:
+	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
+		xargs -I {} -n 1 -- bash -c 'make -C {} test'
+
 .PHONY : pre_upload_test
 pre_upload_test:
 	make internal_run_app_test INIT="hello1"
 	make run_os_test
 	make run_os_lib_test
+	make app_unit_test
 	cargo test --package noli
 
 .PHONY : post_upload_test

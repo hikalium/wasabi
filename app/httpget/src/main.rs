@@ -1,5 +1,5 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(target_os = "linux"), no_main)]
 
 extern crate alloc;
 use noli::entry_point;

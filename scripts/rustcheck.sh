@@ -71,5 +71,22 @@ else
 	exit 1
 fi
 
+set +e
+LIST=`git grep 'test *= *false' | grep toml:`
+RESULT_STATUS=$?
+set -e
+if test $RESULT_STATUS -eq 0; then
+	echo "----"
+	echo "${LIST}"
+	echo "----"
+	echo "FAIL: Please don't disable tests for crates. You can make it work...!"
+	exit 1
+elif test $RESULT_STATUS -eq 1; then
+	echo "PASS: No disabled tests at crate level found"
+else
+	echo "FAIL: something went wrong"
+	exit 1
+fi
+
 echo "PASS: rustcheck done"
 exit 0

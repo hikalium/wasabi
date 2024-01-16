@@ -15,10 +15,16 @@ build :
 	$(CARGO) build --target=$(TARGET)
 	$(CARGO) install --target=$(TARGET) --force --offline --root $(ROOT) --path .
 
+.PHONY : test
+test :
+	cargo build
+	cargo test
+
 .PHONY : clippy
 clippy :
 	rustup target add $(TARGET)
 	cargo clippy --all-features --target=$(TARGET) -- -D warnings
+	cargo clippy --all-features -- -D warnings
 
 .PHONY : objdump
 objdump :

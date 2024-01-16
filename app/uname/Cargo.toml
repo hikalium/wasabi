@@ -3,9 +3,5 @@ name = "uname"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name="uname"
-test=false
-
 [dependencies]
 noli = { path = "../../noli", version = "0.1.0" }

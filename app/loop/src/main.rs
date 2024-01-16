@@ -1,9 +1,9 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(target_os = "linux"), no_main)]
 
 use noli::entry_point;
 
-fn main() -> u64 {
+fn main() {
     #[allow(clippy::empty_loop)]
     loop {}
 }

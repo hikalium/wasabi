@@ -1,12 +1,12 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(target_os = "linux"), no_main)]
 
 use noli::entry_point;
 use noli::graphics;
 use noli::println;
 use noli::sys::draw_point;
 
-fn main() -> u64 {
+fn main() {
     println!("window0!!!!");
     println!("window0 {}x{}", 32, 64);
     for y in 0..64 {
@@ -35,7 +35,6 @@ fn main() -> u64 {
     graphics::draw_string_2x(0xffffff, 100, 540, "Hello World").unwrap();
 
     graphics::draw_string_3x(0xffffff, 100, 600, "Hello World").unwrap();
-    0
 }
 
 entry_point!(main);

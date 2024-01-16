@@ -5,7 +5,6 @@ edition = "2021"
 
 [[bin]]
 name="httpget"
-test=false
 
 [dependencies]
 noli = { path = "../../noli", version = "0.1.0" }

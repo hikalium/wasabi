@@ -1,5 +1,5 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(target_os = "linux"), no_main)]
 
 extern crate alloc;
 
@@ -8,7 +8,7 @@ use noli::entry_point;
 use noli::println;
 use noli::window;
 
-fn main() -> u64 {
+fn main() {
     println!("window 1");
 
     window::Window::new("first window!".to_string(), 0xffffff, 0, 0, 200, 100).unwrap();
@@ -26,8 +26,6 @@ fn main() -> u64 {
             /*underline*/ false,
         )
         .unwrap();
-
-    0
 }
 
 entry_point!(main);
