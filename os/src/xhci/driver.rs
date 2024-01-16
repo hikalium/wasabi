@@ -13,7 +13,7 @@ use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
 use crate::print;
 use crate::println;
-use crate::usb::UsbDescriptor;
+use crate::usb::descriptor::UsbDescriptor;
 use crate::usb_hid_keyboard;
 use crate::usb_hid_tablet;
 use crate::xhci::context::EndpointContext;
