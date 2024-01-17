@@ -216,7 +216,7 @@ impl Controller {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, slot, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
@@ -240,7 +240,7 @@ impl Controller {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, slot, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
@@ -267,7 +267,7 @@ impl Controller {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, slot, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
@@ -294,7 +294,7 @@ impl Controller {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, slot, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
@@ -321,7 +321,7 @@ impl Controller {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new(&self.primary_event_ring, trb_ptr_waiting)
+        TransferEventFuture::new(&self.primary_event_ring, slot, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()

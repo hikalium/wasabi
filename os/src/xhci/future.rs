@@ -23,28 +23,26 @@ pub struct EventFuture<'a, const E: TrbType> {
     _pinned: PhantomPinned,
 }
 impl<'a, const E: TrbType> EventFuture<'a, E> {
-    pub fn new(event_ring: &'a Mutex<EventRing>, slot: u8, trb_addr: u64) -> Self {
-        Self::new_with_timeout(event_ring, slot, trb_addr, 100)
-    }
-    pub fn new_with_timeout(event_ring: &'a Mutex<EventRing>, slot: u8, trb_addr: u64, wait_ms: u64) -> Self {
+    pub fn new_with_timeout(event_ring: &'a Mutex<EventRing>, wait_ms: u64, wait_on: EventFutureWaitType) -> Self {
         let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * wait_ms;
         Self {
             event_ring,
-            wait_on: EventFutureWaitType::TrbAddr(trb_addr),
+            wait_on,
             time_out,
             _pinned: PhantomPinned,
         }
+    }
+    pub fn new_on_slot_with_timeout(event_ring: &'a Mutex<EventRing>, slot: u8, wait_ms: u64) -> Self {
+        Self::new_with_timeout(event_ring, 100, EventFutureWaitType::Slot(slot))
     }
     pub fn new_on_slot(event_ring: &'a Mutex<EventRing>, slot: u8) -> Self {
-        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 10;
-        Self {
-            event_ring,
-            wait_on: EventFutureWaitType::Slot(slot),
-            time_out,
-            _pinned: PhantomPinned,
-        }
+        Self::new_on_slot_with_timeout(event_ring, slot, 100)
+    }
+    pub fn new_on_trb(event_ring: &'a Mutex<EventRing>, trb_addr: u8) -> Self {
+        Self::new_on_trb_with_timeout(event_ring, 100, EventFutureWaitType::TrbAddr(trb_addr))
     }
 }
+/// Event
 impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
     type Output = Result<Option<GenericTrbEntry>>;
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<Option<GenericTrbEntry>>> {
