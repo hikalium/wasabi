@@ -4,16 +4,16 @@ use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
 use crate::mutex::Mutex;
+use crate::println;
 use crate::x86_64::paging::disable_cache;
 use crate::x86_64::paging::IoBox;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
 use alloc::alloc::Layout;
-use alloc::collections::VecDeque;
+use alloc::collections::BTreeMap;
 use alloc::fmt;
 use alloc::fmt::Debug;
-use alloc::vec::Vec;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::ptr::null_mut;
@@ -281,22 +281,21 @@ pub struct EventRing {
     erst: IoBox<EventRingSegmentTableEntry>,
     cycle_state_ours: bool,
     erdp: Option<*mut u64>,
-    // slot_queues[slot]
-    slot_queues: Vec<VecDeque<GenericTrbEntry>>,
+    events_per_slot: BTreeMap<u8, GenericTrbEntry>,
+    events_per_trb: BTreeMap<u64, GenericTrbEntry>,
 }
 impl EventRing {
     pub fn new() -> Result<Self> {
         let ring = TrbRing::new();
         let erst = EventRingSegmentTableEntry::new(&ring)?;
         disable_cache(&erst);
-        let mut slot_queues = Vec::new();
-        slot_queues.resize_with(256, Default::default);
         Ok(Self {
             ring,
             erst,
             cycle_state_ours: true,
             erdp: None,
-            slot_queues,
+            events_per_slot: BTreeMap::new(),
+            events_per_trb: BTreeMap::new(),
         })
     }
     pub fn set_erdp(&mut self, erdp: *mut u64) {
@@ -312,7 +311,7 @@ impl EventRing {
         self.ring.as_ref().current().cycle_state() == self.cycle_state_ours
     }
     /// Non-blocking
-    pub fn pop(&mut self) -> Result<Option<GenericTrbEntry>> {
+    fn pop(&mut self) -> Result<Option<GenericTrbEntry>> {
         if !self.has_next_event() {
             return Ok(None);
         }
@@ -331,8 +330,8 @@ impl EventRing {
     /// Non-blocking
     pub fn pop_for_slot(&mut self, slot: u8) -> Result<Option<GenericTrbEntry>> {
         {
-            let sq = &mut self.slot_queues[slot as usize];
-            if let Some(e) = sq.pop_front() {
+            // If an event for a slot is already there, pop it.
+            if let Some(e) = self.events_per_slot.remove(&slot) {
                 return Ok(Some(e));
             }
         }
@@ -343,8 +342,34 @@ impl EventRing {
             if e.slot_id() == slot {
                 return Ok(Some(e));
             }
-            let sq = &mut self.slot_queues[slot as usize];
-            sq.push_back(e);
+            let slot = e.slot_id();
+            if let Some(e) = self.events_per_slot.get(&slot) {
+                println!("Warning: losing {e:?}");
+            }
+            self.events_per_slot.insert(slot, e);
+        }
+        Ok(None)
+    }
+    /// Checks new events arrived, and if an event for the specified slot is found, return it.
+    /// Non-blocking
+    pub fn pop_for_trb(&mut self, trb_addr: u64) -> Result<Option<GenericTrbEntry>> {
+        {
+            // If an event for a slot is already there, pop it.
+            if let Some(e) = self.events_per_trb.remove(&trb_addr) {
+                return Ok(Some(e));
+            }
+        }
+        while self.has_next_event() {
+            let e = self
+                .pop()?
+                .ok_or(Error::Failed("Expected some entries but it was empty"))?;
+            if e.data() == trb_addr {
+                return Ok(Some(e));
+            }
+            if let Some(e) = self.events_per_trb.get(&trb_addr) {
+                println!("Warning: losing {e:?}");
+            }
+            self.events_per_trb.insert(trb_addr, e);
         }
         Ok(None)
     }

@@ -23,7 +23,11 @@ pub struct EventFuture<'a, const E: TrbType> {
     _pinned: PhantomPinned,
 }
 impl<'a, const E: TrbType> EventFuture<'a, E> {
-    pub fn new_with_timeout(event_ring: &'a Mutex<EventRing>, wait_ms: u64, wait_on: EventFutureWaitType) -> Self {
+    pub fn new_with_timeout(
+        event_ring: &'a Mutex<EventRing>,
+        wait_ms: u64,
+        wait_on: EventFutureWaitType,
+    ) -> Self {
         let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * wait_ms;
         Self {
             event_ring,
@@ -32,48 +36,50 @@ impl<'a, const E: TrbType> EventFuture<'a, E> {
             _pinned: PhantomPinned,
         }
     }
-    pub fn new_on_slot_with_timeout(event_ring: &'a Mutex<EventRing>, slot: u8, wait_ms: u64) -> Self {
+    pub fn new_on_slot_with_timeout(
+        event_ring: &'a Mutex<EventRing>,
+        slot: u8,
+        wait_ms: u64,
+    ) -> Self {
         Self::new_with_timeout(event_ring, 100, EventFutureWaitType::Slot(slot))
     }
     pub fn new_on_slot(event_ring: &'a Mutex<EventRing>, slot: u8) -> Self {
         Self::new_on_slot_with_timeout(event_ring, slot, 100)
     }
-    pub fn new_on_trb(event_ring: &'a Mutex<EventRing>, trb_addr: u8) -> Self {
-        Self::new_on_trb_with_timeout(event_ring, 100, EventFutureWaitType::TrbAddr(trb_addr))
+    pub fn new_on_trb_with_timeout(
+        event_ring: &'a Mutex<EventRing>,
+        trb_addr: u64,
+        wait_ms: u64,
+    ) -> Self {
+        Self::new_with_timeout(event_ring, wait_ms, EventFutureWaitType::TrbAddr(trb_addr))
+    }
+    pub fn new_on_trb(event_ring: &'a Mutex<EventRing>, trb_addr: u64) -> Self {
+        Self::new_on_trb_with_timeout(event_ring, trb_addr, 100)
     }
 }
 /// Event
 impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
     type Output = Result<Option<GenericTrbEntry>>;
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<Option<GenericTrbEntry>>> {
-        let time_out = self.time_out;
+        if self.time_out < Hpet::take().main_counter() {
+            return Poll::Ready(Ok(None));
+        }
         let mut_self = unsafe { self.get_unchecked_mut() };
         match mut_self.wait_on {
             EventFutureWaitType::Slot(slot) => {
-            let event = mut_self.event_ring.lock().pop_for_slot(slot);
+                let event = mut_self.event_ring.lock().pop_for_slot(slot);
                 if let Ok(Some(_)) = event {
-                    return Poll::Ready(event)
-                } else if time_out < Hpet::take().main_counter() {
-                    return Poll::Ready(Ok(None))
+                    return Poll::Ready(event);
                 } else {
-                    return Poll::Pending
+                    return Poll::Pending;
                 }
             }
             EventFutureWaitType::TrbAddr(trb_addr) => {
-                let event = mut_self.event_ring.lock().pop();
-                if let Some()
-                if event.data
-                match mut_self.wait_on {
-                    EventFutureWaitType::TrbAddr(trb_addr) {
-                        Poll::Ready(Ok(Some(trb)))
-                    }
-                    EventFutureWaitType::Slot(slot) {
-                        Poll::Ready(Ok(Some(trb)))
-                    }
-                    _ => {
-                        println!("Ignoring event (!= wait_on): {:?}", trb);
-                        Poll::Pending
-                    }
+                let event = mut_self.event_ring.lock().pop_for_trb(trb_addr);
+                if let Ok(Some(_)) = event {
+                    return Poll::Ready(event);
+                } else {
+                    return Poll::Pending;
                 }
             }
         }

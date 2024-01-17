@@ -106,10 +106,10 @@ async fn read_from_device<T: Sized>(
     ddc.push_trb_to_ctrl_ep(
         SetupStageTrb::new_vendor_device_in(request, value, index, buf.len() as u16).into(),
     )?;
-    let trb_ptr_to_wait = ddc.push_trb_to_ctrl_ep(DataStageTrb::new_in(buf).into())?;
+    ddc.push_trb_to_ctrl_ep(DataStageTrb::new_in(buf).into())?;
     ddc.push_trb_to_ctrl_ep(StatusStageTrb::new_out().into())?;
     ddc.notify_ctrl_ep()?;
-    ddc.wait_transfer_event(trb_ptr_to_wait).await
+    ddc.wait_transfer_event().await
 }
 
 async fn write_to_device<T: Sized>(
@@ -122,10 +122,10 @@ async fn write_to_device<T: Sized>(
     ddc.push_trb_to_ctrl_ep(
         SetupStageTrb::new_vendor_device_out(request, reg, index, buf.len() as u16).into(),
     )?;
-    let trb_ptr_to_wait = ddc.push_trb_to_ctrl_ep(DataStageTrb::new_out(buf).into())?;
+    ddc.push_trb_to_ctrl_ep(DataStageTrb::new_out(buf).into())?;
     ddc.push_trb_to_ctrl_ep(StatusStageTrb::new_in().into())?;
     ddc.notify_ctrl_ep()?;
-    ddc.wait_transfer_event(trb_ptr_to_wait).await
+    ddc.wait_transfer_event().await
 }
 
 async fn write_phy_reg(ddc: &mut UsbDeviceDriverContext, index: u16, value: u16) -> Result<()> {
