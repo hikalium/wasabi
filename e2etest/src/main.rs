@@ -3,6 +3,10 @@
 use anyhow::bail;
 use anyhow::Result;
 
+fn main() -> Result<()> {
+    bail!("Please run `cargo test` instead.");
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -49,7 +53,7 @@ mod test {
         let dev_env = DevEnv::new()?;
         let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
-        qemu.wait_until_serial_output_contains("INFO: usb_hid_keyboard is ready")?;
+        qemu.wait_until_serial_output_contains("usb_hid_keyboard is ready")?;
         // Confirm that TEST_STRING is not typed into the machine yet.
         let output = qemu.read_serial_output()?;
         assert!(!output.contains(TEST_STRING));
@@ -65,8 +69,4 @@ mod test {
         qemu.kill().await?;
         Ok(())
     }
-}
-
-fn main() -> Result<()> {
-    bail!("Please run `cargo test` instead.");
 }

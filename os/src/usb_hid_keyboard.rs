@@ -118,6 +118,7 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
     let xhci = ddc.xhci();
     let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut prev_pressed_keys = BitSet::<32>::new();
+    // Note: this message is used by e2etest - please keep this as is!
     info!("usb_hid_keyboard is ready");
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
