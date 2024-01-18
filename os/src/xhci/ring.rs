@@ -12,6 +12,7 @@ use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
 use alloc::alloc::Layout;
 use alloc::collections::BTreeMap;
+use alloc::collections::VecDeque;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use core::marker::PhantomPinned;
@@ -281,7 +282,7 @@ pub struct EventRing {
     erst: IoBox<EventRingSegmentTableEntry>,
     cycle_state_ours: bool,
     erdp: Option<*mut u64>,
-    events_per_slot: BTreeMap<u8, GenericTrbEntry>,
+    events_per_slot: BTreeMap<u8, VecDeque<GenericTrbEntry>>,
     events_per_trb: BTreeMap<u64, GenericTrbEntry>,
 }
 impl EventRing {
@@ -329,11 +330,14 @@ impl EventRing {
     }
     /// Non-blocking
     pub fn pop_for_slot(&mut self, slot: u8) -> Result<Option<GenericTrbEntry>> {
-        {
+        if let Some(q) = self.events_per_slot.get_mut(&slot) {
             // If an event for a slot is already there, pop it.
-            if let Some(e) = self.events_per_slot.remove(&slot) {
+            if let Some(e) = q.pop_front() {
                 return Ok(Some(e));
             }
+        } else {
+            // No entry in the per-slot table. Add one.
+            self.events_per_slot.insert(slot, VecDeque::new());
         }
         while self.has_next_event() {
             let e = self
@@ -343,10 +347,15 @@ impl EventRing {
                 return Ok(Some(e));
             }
             let slot = e.slot_id();
-            if let Some(e) = self.events_per_slot.get(&slot) {
-                println!("Warning: losing {e:?}");
+            let q = self
+                .events_per_slot
+                .get_mut(&slot)
+                .ok_or("Expected VecDeque but not found")?;
+            if q.len() > 10 {
+                let e = q.pop_front();
+                println!("Warning: Too many entries. popped the oldest one: {e:?}");
             }
-            self.events_per_slot.insert(slot, e);
+            q.push_back(e);
         }
         Ok(None)
     }
@@ -367,7 +376,7 @@ impl EventRing {
                 return Ok(Some(e));
             }
             if let Some(e) = self.events_per_trb.get(&trb_addr) {
-                println!("Warning: losing {e:?}");
+                println!("Warning: pop_for_trb: losing {e:?}");
             }
             self.events_per_trb.insert(trb_addr, e);
         }
