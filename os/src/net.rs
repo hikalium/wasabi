@@ -12,6 +12,7 @@ pub mod udp;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::TimeoutFuture;
+use crate::info;
 use crate::mutex::Mutex;
 use crate::net::arp::ArpPacket;
 use crate::net::checksum::InternetChecksum;
@@ -37,8 +38,8 @@ use crate::net::tcp::TcpPacket;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
-use crate::println;
 use crate::util::Sliceable;
+use crate::warn;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
@@ -141,7 +142,7 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
                 // Not a reply, skip this message
                 return Ok(());
             }
-            println!("net: rx: DHCP: SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr());
+            info!("net: rx: DHCP: SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr());
             network.set_self_ip(Some(dhcp.yiaddr()));
             let options = &packet[size_of::<DhcpPacket>()..];
             let mut it = options.iter();
@@ -157,37 +158,37 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
                         break;
                     }
                     let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
-                    println!("op = {op}, data = {data:?}");
+                    info!("op = {op}, data = {data:?}");
                     match op {
                         DHCP_OPT_MESSAGE_TYPE => match data[0] {
                             DHCP_OPT_MESSAGE_TYPE_ACK => {
-                                println!("DHCPACK");
+                                info!("DHCPACK");
                             }
                             DHCP_OPT_MESSAGE_TYPE_OFFER => {
-                                println!("DHCPOFFER");
+                                info!("DHCPOFFER");
                             }
                             DHCP_OPT_MESSAGE_TYPE_DISCOVER => {
-                                println!("DHCPDISCOVER");
+                                info!("DHCPDISCOVER");
                             }
                             t => {
-                                println!("DHCP MESSAGE_TYPE = {t}");
+                                info!("DHCP MESSAGE_TYPE = {t}");
                             }
                         },
                         DHCP_OPT_NETMASK => {
                             if let Ok(netmask) = IpV4Addr::from_slice(&data) {
-                                println!("netmask: {netmask}");
+                                info!("netmask: {netmask}");
                                 network.set_netmask(Some(*netmask));
                             }
                         }
                         DHCP_OPT_ROUTER => {
                             if let Ok(router) = IpV4Addr::from_slice(&data) {
-                                println!("router: {router}");
+                                info!("router: {router}");
                                 network.set_router(Some(*router));
                             }
                         }
                         DHCP_OPT_DNS => {
                             if let Ok(dns) = IpV4Addr::from_slice(&data) {
-                                println!("dns: {dns}");
+                                info!("dns: {dns}");
                                 network.set_dns(Some(*dns));
                             }
                         }
@@ -199,7 +200,7 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
             }
         }
         (src, dst) => {
-            println!("net: rx: UDP :{src} -> :{dst}");
+            info!("net: rx: UDP :{src} -> :{dst}");
         }
     }
 
@@ -208,7 +209,7 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
 
 fn handle_rx_tcp(packet: &[u8]) -> Result<()> {
     let header = TcpPacket::from_slice(packet)?;
-    println!(
+    info!(
         "net: rx: TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b} ({})",
         header.src_port(),
         header.dst_port(),
@@ -218,18 +219,18 @@ fn handle_rx_tcp(packet: &[u8]) -> Result<()> {
         if header.is_syn() { "SYN" } else { "" },
     );
     let data = &packet[header.header_len()..];
-    println!("net: rx: TCP: data: {data:X?}");
+    info!("net: rx: TCP: data: {data:X?}");
     Ok(())
 }
 
 fn handle_rx_icmp(packet: &[u8]) -> Result<()> {
     let icmp = IcmpPacket::from_slice(packet)?;
-    println!("net: rx: ICMP: {icmp:?}");
+    info!("net: rx: ICMP: {icmp:?}");
     Ok(())
 }
 fn handle_rx_arp(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> {
     if let Ok(arp) = ArpPacket::from_slice(packet) {
-        println!("net: rx: ARP: {arp:?}");
+        info!("net: rx: ARP: {arp:?}");
         if arp.is_response() {
             Network::take().arp_table_register(
                 arp.sender_ip_addr(),
@@ -250,20 +251,20 @@ fn handle_receive(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()>
             e if e == IpV4Protocol::tcp() => handle_rx_tcp(packet),
             e if e == IpV4Protocol::icmp() => handle_rx_icmp(packet),
             e => {
-                println!("handle_receive: Unknown ip_v4.protocol: {e:?}");
+                warn!("handle_receive: Unknown ip_v4.protocol: {e:?}");
                 Ok(())
             }
         },
         e if e == EthernetType::arp() => handle_rx_arp(packet, iface),
         e => {
-            println!("handle_receive: Unknown eth_type {e:?}");
+            warn!("handle_receive: Unknown eth_type {e:?}");
             Ok(())
         }
     }
 }
 
 pub async fn network_manager_thread() -> Result<()> {
-    println!("Network manager started running");
+    info!("Network manager started running");
     let network = Network::take();
 
     loop {
@@ -273,10 +274,10 @@ pub async fn network_manager_thread() -> Result<()> {
             .compare_exchange_weak(true, false, Ordering::SeqCst, Ordering::Relaxed)
             .is_ok()
         {
-            println!("Network: network interfaces updated:");
+            info!("Network: network interfaces updated:");
             for iface in &*interfaces {
                 if let Some(iface) = iface.upgrade() {
-                    println!("  {:?} {}", iface.ethernet_addr(), iface.name());
+                    info!("  {:?} {}", iface.ethernet_addr(), iface.name());
                     let arp_req = ArpPacket::request(
                         iface.ethernet_addr(),
                         IpV4Addr::new([10, 0, 2, 15]),
@@ -296,10 +297,8 @@ pub async fn network_manager_thread() -> Result<()> {
                 {
                     let network_prefix = src_ip.network_prefix(mask);
                     let next_hop_info = if network_prefix == dst_ip.network_prefix(mask) {
-                        println!("Same network");
                         network.arp_table.lock().get(&dst_ip).cloned()
                     } else {
-                        println!("Different network");
                         network
                             .router
                             .lock()
@@ -323,7 +322,7 @@ pub async fn network_manager_thread() -> Result<()> {
                             }
                         }
                     } else {
-                        println!("No route to {dst_ip}. Dropping the packet.");
+                        warn!("No route to {dst_ip}. Dropping the packet.");
                     }
                 }
             }

@@ -63,7 +63,6 @@ pub mod syscall;
 extern crate alloc;
 
 use crate::mutex::Mutex;
-use crate::println;
 use alloc::boxed::Box;
 use core::arch::asm;
 use core::fmt;
@@ -103,7 +102,6 @@ pub struct ExecutionContext {
 impl ExecutionContext {
     pub fn allocate() -> *mut Self {
         let ctx = Box::leak(Box::default());
-        println!("ExecutionContext @ {:#p} is created", ctx);
         ctx
     }
 }
@@ -113,11 +111,6 @@ impl Default for ExecutionContext {
             fpu: FpuContext { data: [0u8; 512] },
             cpu: CpuContext::default(),
         }
-    }
-}
-impl Drop for ExecutionContext {
-    fn drop(&mut self) {
-        println!("ExecutionContext @ {:#p} is dropped", self);
     }
 }
 const _: () =
@@ -396,7 +389,6 @@ pub fn disable_legacy_pic() {
     // https://wiki.osdev.org/8259_PIC#Disabling
     write_io_port_u8(0xa1, 0xff);
     write_io_port_u8(0x21, 0xff);
-    println!("Disabled legacy PIC");
 }
 
 pub fn hlt() {

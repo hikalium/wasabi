@@ -1,10 +1,10 @@
 extern crate alloc;
 
 use crate::boot_info::BootInfo;
+use crate::error;
 use crate::error::Result;
+use crate::info;
 use crate::memory::alloc_pages;
-use crate::print;
-use crate::println;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::read_cr2;
 use alloc::boxed::Box;
@@ -246,25 +246,25 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
         bsp_local_apic.notify_end_of_interrupt();
         return;
     }
-    println!("Interrupt Info: {:?}", info);
-    print!("Exception {index:#04X}: ");
+    error!("Interrupt Info: {:?}", info);
+    error!("Exception {index:#04X}: ");
     match index {
         3 => {
-            println!("Breakpoint");
+            error!("Breakpoint");
         }
         6 => {
-            println!("Invalid Opcode");
+            error!("Invalid Opcode");
         }
         8 => {
-            println!("Double Fault");
+            error!("Double Fault");
         }
         13 => {
-            println!("General Protection Fault");
+            error!("General Protection Fault");
         }
         14 => {
-            println!("Page Fault");
-            println!("CR2={:#018X}", read_cr2());
-            println!(
+            error!("Page Fault");
+            error!("CR2={:#018X}", read_cr2());
+            error!(
                 "Caused by: A {} mode {} on a {} page, page structures are {}",
                 if info.error_code & 0b0000_0100 != 0 {
                     "user"
@@ -291,7 +291,7 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
             );
         }
         _ => {
-            println!("Not handled");
+            error!("Not handled");
         }
     }
     panic!("fatal exception");
@@ -413,7 +413,7 @@ impl Idt {
             limit: size_of::<Self>() as u16 - 1,
             base: &idt.entries,
         };
-        println!("Loading IDT @ {:#018X}", params.base.as_ptr() as u64);
+        info!("Loading IDT @ {:#018X}", params.base.as_ptr() as u64);
         // SAFETY: This is safe since it loads a valid IDT that is constructed in the code just above
         unsafe {
             asm!("lidt [rcx]",
@@ -463,7 +463,7 @@ impl TaskStateSegment64 {
             _io_map_base_addr: 0,
         };
         let this = Box::pin(Self { tss64 });
-        println!("TSS64 created @ {:#p}", this.as_ref().get_ref(),);
+        info!("TSS64 created @ {:#p}", this.as_ref().get_ref(),);
         Ok(this)
     }
 }

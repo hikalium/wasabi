@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use crate::error::Result;
-use crate::println;
+use crate::info;
 use crate::x86_64::idt::TaskStateSegment64;
 use crate::x86_64::TSS64_SEL;
 use alloc::boxed::Box;
@@ -64,13 +64,13 @@ impl Gdt {
             limit: (size_of::<Gdt>() - 1) as u16,
             base: gdt.as_ref().get_ref() as *const Gdt,
         };
-        println!("Loading GDT @ {:#018X}", params.base as u64);
+        info!("Loading GDT @ {:#018X}", params.base as u64);
         // SAFETY: This is safe since it is loading a valid GDT just constructed in the above
         unsafe {
             asm!("lgdt [rcx]",
                 in("rcx") &params);
         }
-        println!("Loading TSS ( selector = {:#X} )", TSS64_SEL);
+        info!("Loading TSS ( selector = {:#X} )", TSS64_SEL);
         unsafe {
             asm!("ltr cx",
                 in("cx") TSS64_SEL);

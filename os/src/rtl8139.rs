@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::executor::ROOT_EXECUTOR;
+use crate::info;
 use crate::mutex::Mutex;
 use crate::net::eth::EthernetAddr;
 use crate::net::Network;
@@ -14,8 +15,6 @@ use crate::pci::Pci;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
-use crate::print::hexdump;
-use crate::println;
 use crate::x86_64::busy_loop_hint;
 use crate::x86_64::read_io_port_u32;
 use crate::x86_64::read_io_port_u8;
@@ -107,7 +106,7 @@ impl Rtl8139 {
             *e = read_io_port_u8(io_base + i as u16);
         }
         let eth_addr = EthernetAddr::new(eth_addr);
-        println!("Rtl8139: eth_addr: {:?}", eth_addr);
+        info!("eth_addr: {:?}", eth_addr);
         // Turn on
         write_io_port_u8(io_base + 0x52, 0);
         // Software Reset
@@ -215,7 +214,6 @@ impl Rtl8139 {
             if rx_status == 0 {
                 break;
             }
-            println!("rx_status: {rx_status:#b}");
             // Rx Status Info
             // bit 0
             // - 1 if a good packet is received
@@ -227,7 +225,7 @@ impl Rtl8139 {
             // - 1 if physical address is received.
             let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
             let packet = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
-            hexdump(packet);
+            // crate::print::hexdump(packet);
             rx.pending_packets.push_back(packet.into());
 
             // Erase the packet for the next cycle
@@ -235,7 +233,6 @@ impl Rtl8139 {
             self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());
             write_io_port_u16(self.io_base + 0x3E, 0x1);
             rx.next_index += packet_len + 4;
-            println!("rx.next_index: {}", rx.next_index);
             if rx.next_index >= 8192 {
                 rx.next_index %= 8192;
                 self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());

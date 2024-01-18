@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::error::Result;
 use crate::hpet;
-use crate::println;
+use crate::info;
 use core::fmt;
 use core::mem::size_of;
 use core::slice;
@@ -64,11 +64,6 @@ trait AcpiTable {
     fn table(&self) -> &Self::Table;
     fn new(header: &SystemDescriptionTableHeader) -> &Self::Table {
         header.expect_signature(Self::SIGNATURE);
-        println!(
-            "Got valid {} table @ {:#p}",
-            core::str::from_utf8(Self::SIGNATURE).unwrap(),
-            header
-        );
         // This is safe as far as phys_addr points to a valid MCFG table and it alives forever.
         let mcfg: &Self::Table =
             unsafe { &*(header as *const SystemDescriptionTableHeader as *const Self::Table) };
@@ -153,9 +148,9 @@ const _: () = assert!(size_of::<Xsdt>() == 36);
 impl Xsdt {
     fn list_all_tables(&self) {
         self.header.expect_signature(b"XSDT");
-        println!("ACPI tables in XSDT:");
+        info!("ACPI tables in XSDT:");
         for (i, e) in self.iter().enumerate() {
-            println!("XSDT[{}]: {:?}", i, e);
+            info!("XSDT[{}]: {:?}", i, e);
         }
     }
     fn find_table(&self, sig: &'static [u8; 4]) -> Option<&'static SystemDescriptionTableHeader> {
@@ -307,7 +302,6 @@ impl<'a> Acpi {
         if &rsdp_struct.signature != b"RSD PTR " {
             return Err("Invalid RSDP Struct Signature".into());
         }
-        println!("{:?}", rsdp_struct);
         if rsdp_struct.revision < 2 {
             return Err("Expected RSDP rev.2 or above".into());
         }
@@ -317,10 +311,7 @@ impl<'a> Acpi {
         let mcfg = Mcfg::new(xsdt.find_table(b"MCFG").expect("MCFG not found"));
         let hpet = Hpet::new(xsdt.find_table(b"HPET").expect("HPET not found"));
         let fadt = Fadt::new(xsdt.find_table(b"FACP").expect("FACP not found"));
-        println!("fadt: {:p}", fadt);
         let dsdt = fadt.dsdt();
-        println!("dsdt: {:p}", dsdt);
-        println!("dsdt: {:?}", dsdt);
         Ok(Acpi { mcfg, hpet, dsdt })
     }
     pub fn dsdt(&'a self) -> &'a Dsdt {

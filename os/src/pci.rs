@@ -1,9 +1,10 @@
 extern crate alloc;
 
 use crate::acpi::Mcfg;
+use crate::error;
 use crate::error::Error;
 use crate::error::Result;
-use crate::println;
+use crate::info;
 use crate::rtl8139::Rtl8139Driver;
 use crate::x86_64::paging::with_current_page_table;
 use crate::x86_64::paging::PageAttr;
@@ -340,11 +341,11 @@ impl Pci {
                     if d.supports(vd) {
                         match d.attach(bdf) {
                             Ok(di) => {
-                                println!("{:?} driver is loaded for {:?}", di, bdf);
+                                info!("{:?} driver is loaded for {:?}", di, bdf);
                                 self.devices.borrow_mut().insert(bdf, Rc::new(di));
                             }
                             Err(e) => {
-                                println!("Failed to attach {:?} for {:?}: {:?}", d, bdf, e);
+                                error!("Failed to attach {:?} for {:?}: {:?}", d, bdf, e);
                             }
                         }
                     }
@@ -352,12 +353,6 @@ impl Pci {
             }
         }
         Ok(())
-    }
-    pub fn list_drivers(&self) {
-        println!("{:?}", self.drivers)
-    }
-    pub fn list_devices(&self) {
-        println!("{:?}", self.devices)
     }
     pub fn take() -> &'static Self {
         // SAFETY: Taking static immutable reference here is safe because BOOT_INFO is only set once and no

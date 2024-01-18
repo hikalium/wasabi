@@ -113,7 +113,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
                         print!("{c}");
                         s.push(c);
                     }
-                    c if c as u8 == 0x7f => {
+                    '\x7f' | '\x08' => {
                         print!("{0} {0}", 0x08 as char);
                         s.pop();
                     }

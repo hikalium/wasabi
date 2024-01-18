@@ -4,8 +4,10 @@ use crate::boot_info::BootInfo;
 #[cfg(test)]
 use crate::debug_exit;
 use crate::efi::fs::EfiFileName;
+use crate::error;
 use crate::error::Error;
 use crate::error::Result;
+use crate::info;
 use crate::loader::Elf;
 use crate::net::icmp::IcmpPacket;
 use crate::net::ip::IpV4Addr;
@@ -36,7 +38,7 @@ async fn run_app(name: &str) -> Result<i64> {
         #[cfg(not(test))]
         Ok(result)
     } else {
-        Err(Error::Failed("comand::run_app: No such file or app"))
+        Err(Error::Failed("command::run_app: No such file or app"))
     }
 }
 
@@ -72,7 +74,11 @@ pub async fn run(cmdline: &str) -> Result<()> {
             }
             app_name => {
                 let result = run_app(app_name).await;
-                println!("{result:?}");
+                if result.is_ok() {
+                    info!("{result:?}");
+                } else {
+                    error!("{result:?}");
+                }
             }
         }
     }

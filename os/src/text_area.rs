@@ -4,6 +4,7 @@ use crate::graphics::draw_rect;
 use crate::graphics::transfer_rect;
 use crate::graphics::Bitmap;
 use crate::graphics::GraphicsResult;
+use core::cmp::max;
 use core::fmt;
 
 pub enum TextAreaMode {
@@ -98,16 +99,21 @@ impl<T: Bitmap> TextArea<T> {
         }
         Ok(())
     }
-    fn advance_cursor(&mut self) -> GraphicsResult {
+    fn move_cursor_next(&mut self) -> GraphicsResult {
         self.cx += 1;
         if self.cx * 8 + 8 <= self.w {
             return Ok(());
         }
         self.new_line()
     }
+    fn move_cursor_prev(&mut self) -> GraphicsResult {
+        self.cx = max(0, self.cx - 1);
+        Ok(())
+    }
     pub fn print_char_with_color(&mut self, c: char, fg: u32, bg: u32) -> GraphicsResult {
         match c {
             '\n' => self.new_line(),
+            '\x08' | '\x7f' => self.move_cursor_prev(),
             _ => draw_char(
                 &mut self.buf,
                 fg,
@@ -116,7 +122,7 @@ impl<T: Bitmap> TextArea<T> {
                 self.y + self.cy * 16,
                 c,
             )
-            .and_then(|_| -> GraphicsResult { self.advance_cursor() }),
+            .and_then(|_| -> GraphicsResult { self.move_cursor_next() }),
         }
     }
     pub fn print_char(&mut self, c: char) -> GraphicsResult {

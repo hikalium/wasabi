@@ -1,6 +1,5 @@
 use crate::error::Error;
 use crate::error::Result;
-use crate::println;
 use crate::x86_64;
 use crate::x86_64::CpuidRequest;
 use core::ptr::write_volatile;
@@ -28,15 +27,12 @@ impl Default for LocalApic {
     /// creates an instance to manage Local APIC for the current processor
     fn default() -> Self {
         let x2apic_id = x86_64::read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx();
-        println!("x2APIC ID: {}", x2apic_id);
         let apic_base = unsafe {
             // This is safe since IA32_APIC_BASE is one of IA-32 Architectural MSRs
             // so it always exists on x86_64 platform.
             x86_64::read_msr(x86_64::MSR_IA32_APIC_BASE)
         };
-        println!("MSR_IA32_APIC_BASE={:#X}", apic_base);
         let status = LocalApicStatus::new(apic_base);
-        println!("{:?}", status);
         Self {
             x2apic_id,
             base_addr: apic_base & !((1u64 << 12) - 1),

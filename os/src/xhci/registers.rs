@@ -4,8 +4,6 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::mutex::Mutex;
 use crate::pci::BarMem64;
-use crate::print;
-use crate::println;
 use crate::util::extract_bits;
 use crate::util::PAGE_SIZE;
 use crate::volatile::Volatile;
@@ -249,7 +247,6 @@ impl PortSc {
     pub fn new(bar: &BarMem64, cap_regs: &CapabilityRegisters) -> Self {
         let base = unsafe { bar.addr().add(cap_regs.length()).add(0x400) } as *mut u32;
         let num_ports = cap_regs.num_of_ports();
-        println!("PORTSC @ {:p}, max_port_num = {}", base, num_ports);
         let mut entries = Vec::new();
         for port in 1..=num_ports {
             // SAFETY: This is safe since the result of ptr calculation
@@ -399,22 +396,18 @@ impl OperationalRegisters {
     pub fn reset_xhc(&mut self) {
         self.clear_command_bits(Self::CMD_RUN_STOP);
         while self.status() & Self::STATUS_HC_HALTED == 0 {
-            print!(".");
             busy_loop_hint();
         }
         self.set_command_bits(Self::CMD_HC_RESET);
         while self.command() & Self::CMD_HC_RESET != 0 {
-            print!(".");
             busy_loop_hint();
         }
     }
     pub fn start_xhc(&mut self) {
         self.set_command_bits(Self::CMD_RUN_STOP);
         while self.status() & Self::STATUS_HC_HALTED != 0 {
-            print!(".");
             busy_loop_hint();
         }
-        println!("xHC started");
     }
 }
 

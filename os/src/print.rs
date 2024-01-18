@@ -43,15 +43,15 @@ macro_rules! println {
 
 #[macro_export]
 macro_rules! info {
-            ($($arg:tt)*) => ($crate::print!("[ INFO]: {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
+            ($($arg:tt)*) => ($crate::print!("[INFO]  {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
 }
 #[macro_export]
 macro_rules! warn {
-            ($($arg:tt)*) => ($crate::print!("[ WARN]: {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
+            ($($arg:tt)*) => ($crate::print!("[WARN]  {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
 }
 #[macro_export]
 macro_rules! error {
-            ($($arg:tt)*) => ($crate::print!("[ERROR]: {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
+            ($($arg:tt)*) => ($crate::print!("[ERROR] {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
 }
 
 #[doc(hidden)]

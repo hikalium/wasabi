@@ -1,10 +1,10 @@
 extern crate alloc;
 
+use crate::error;
 use crate::error::Error;
 use crate::error::Result;
 use crate::memory::Mmio;
 use crate::mutex::Mutex;
-use crate::println;
 use crate::usb::descriptor::ConfigDescriptor;
 use crate::usb::descriptor::DescriptorIterator;
 use crate::usb::descriptor::DescriptorType;
@@ -469,7 +469,7 @@ impl Controller {
                     ep_rings[ep_desc.dci()] = Some(tring);
                 }
                 _ => {
-                    println!("Ignoring {:?}", ep_desc);
+                    error!("Ignoring unimplemented ep type {:?}", ep_desc);
                 }
             }
         }

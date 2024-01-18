@@ -9,7 +9,6 @@ use crate::graphics::Bitmap;
 use crate::hpet;
 use crate::memory_map_holder;
 use crate::pci::Pci;
-use crate::println;
 use crate::serial::SerialPort;
 use crate::serial::SerialPortIndex;
 use crate::text_area;
@@ -75,7 +74,6 @@ impl EfiServices {
             if file_info.is_dir() {
                 continue;
             }
-            println!("FILE: {}", file_info);
             let buf = efi::alloc_byte_slice(self.efi_system_table, file_info.file_size())?;
             let file = root_file.open(&file_info.file_name);
             file.read_into_slice(buf)
@@ -152,7 +150,6 @@ pub fn init_with_boot_services(
         panic!("Failed to allocate kernel stack");
     }
     let kernel_stack = unsafe { slice::from_raw_parts_mut(kernel_stack, KERNEL_STACK_SIZE) };
-    println!("kernel_stack: {:#p}", kernel_stack);
     let efi_services = EfiServices::new(image_handle, efi_system_table);
     const FILE_NONE: Option<File> = None;
     let mut root_files = [FILE_NONE; 32];
@@ -294,6 +291,4 @@ pub fn init_pci() {
     Pci::take()
         .probe_devices()
         .expect("Failed to probe devices");
-    Pci::take().list_devices();
-    Pci::take().list_drivers();
 }

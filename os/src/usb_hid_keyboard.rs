@@ -94,11 +94,16 @@ impl KeyEvent {
 }
 
 fn usage_id_to_char(usage_id: u8) -> Result<KeyEvent> {
+    // https://bsakatu.net/doc/usb-hid-to-scancode/
     match usage_id {
         0 => Ok(KeyEvent::None),
         4..=29 => Ok(KeyEvent::Char((b'a' + usage_id - 4) as char)),
         30..=39 => Ok(KeyEvent::Char((b'0' + (usage_id + 1) % 10) as char)),
         40 => Ok(KeyEvent::Enter),
+        42 => Ok(KeyEvent::Char(0x08 as char)),
+        44 => Ok(KeyEvent::Char(' ')),
+        54 => Ok(KeyEvent::Char(',')),
+        55 => Ok(KeyEvent::Char('.')),
         _ => Err(Error::FailedString(format!(
             "Unhandled USB HID Keyboard Usage ID {usage_id:}"
         ))),
