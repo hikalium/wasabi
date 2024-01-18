@@ -32,7 +32,12 @@ QEMU_ARGS=\
 		-d int,cpu_reset \
 		-D log/qemu_debug.txt \
 		-device usb-kbd \
+		-device usb-tablet,usb_version=1 \
 		${MORE_QEMU_FLAGS}
+
+# > -device usb-tablet,usb_version=1
+# setting usb_version=1 here to avoid issues.
+# c.f. https://bugzilla.redhat.com/show_bug.cgi?id=929068#c2
 
 ifndef DISPLAY
 QEMU_ARGS+= -vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on

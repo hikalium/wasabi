@@ -115,6 +115,7 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
                 let py = [report[3], report[4]];
                 let px = u16::from_le_bytes(px);
                 let py = u16::from_le_bytes(py);
+                println!("{px}, {py}");
                 let px = px as f32 / 32768f32;
                 let py = py as f32 / 32768f32;
                 InputManager::take().push_cursor_input_absolute(px, py, b);
