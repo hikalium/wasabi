@@ -3,7 +3,7 @@ extern crate alloc;
 use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
-use crate::println;
+use crate::info;
 use crate::util::size_in_pages_from_bytes;
 use crate::util::PAGE_SIZE;
 use crate::x86_64::paging::with_current_page_table;
@@ -107,7 +107,7 @@ impl ContiguousPhysicalMemoryPages {
     }
     pub fn set_page_attr(&mut self, attr: PageAttr) -> Result<()> {
         let range = self.range();
-        println!("Setting page attr for {:?} to {:?}", range, attr);
+        info!("Setting page attr for {:?} to {:?}", range, attr);
         unsafe {
             with_current_page_table(|table| {
                 table

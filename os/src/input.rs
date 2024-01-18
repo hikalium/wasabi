@@ -4,6 +4,7 @@ use crate::boot_info::BootInfo;
 use crate::command;
 use crate::debug_exit;
 use crate::efi::fs::EfiFileName;
+use crate::error;
 use crate::error::Error;
 use crate::executor::yield_execution;
 use crate::executor::Executor;
@@ -11,11 +12,11 @@ use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::graphics::draw_rect;
 use crate::graphics::Bitmap;
+use crate::info;
 use crate::loader::Elf;
 use crate::mutex::Mutex;
 use crate::net::network_manager_thread;
 use crate::print;
-use crate::println;
 use crate::ps2::keyboard_task;
 use crate::serial::SerialPort;
 use alloc::collections::VecDeque;
@@ -76,8 +77,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         }
     };
     let console_task = async {
-        println!("INFO: console_task has started");
-
+        info!("console_task has started");
         let boot_info = BootInfo::take();
         let root_files = boot_info.root_files();
         let root_files: alloc::vec::Vec<&crate::boot_info::File> =
@@ -104,7 +104,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
             if let Some(c) = InputManager::take().pop_input() {
                 if c == '\r' || c == '\n' {
                     if let Err(e) = command::run(&s).await {
-                        println!("{e:?}");
+                        error!("{e:?}");
                     };
                     s.clear();
                 }

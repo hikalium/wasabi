@@ -2,10 +2,10 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
-use crate::println;
 use crate::usb::descriptor::EndpointDescriptor;
 use crate::usb::descriptor::InterfaceDescriptor;
 use crate::usb::descriptor::UsbDescriptor;
+use crate::warn;
 use crate::xhci::context::InputContext;
 use crate::xhci::controller::Controller;
 use crate::xhci::future::TransferEventFuture;
@@ -36,7 +36,7 @@ impl EventQueue {
     pub fn push(&mut self, data: Event) {
         if self.queue.len() > 16 {
             let discarded = self.queue.pop_front();
-            println!("EventQueue: Warning: No more capacity. Discarded: {discarded:?}");
+            warn!("EventQueue: No more capacity. Discarded: {discarded:?}");
         }
         self.queue.push_back(data);
     }

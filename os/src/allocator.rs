@@ -2,8 +2,8 @@ extern crate alloc;
 
 use crate::efi::EfiMemoryDescriptor;
 use crate::efi::EfiMemoryType;
+use crate::info;
 use crate::memory_map_holder::MemoryMapHolder;
-use crate::println;
 use crate::util::round_up_to_nearest_pow2;
 use alloc::alloc::GlobalAlloc;
 use alloc::alloc::Layout;
@@ -167,21 +167,16 @@ impl FirstFitAllocator {
         }
     }
     pub fn init_with_mmap(&self, memory_map: &MemoryMapHolder) {
-        println!("Memory map:");
-        for e in memory_map.iter() {
-            println!("{:?}", e);
-        }
-        println!("Available memory:");
         let mut total_pages = 0;
         for e in memory_map.iter() {
             if e.memory_type != EfiMemoryType::CONVENTIONAL_MEMORY {
                 continue;
             }
-            println!("{:?}", e);
+            info!("{:?}", e);
             self.add_free_from_descriptor(e);
             total_pages += e.number_of_pages;
         }
-        println!(
+        info!(
             "Allocator initialized. Total memory: {} MiB",
             total_pages * 4096 / 1024 / 1024
         );
@@ -221,7 +216,6 @@ fn malloc_iterate_free_and_alloc() {
 fn malloc_align() {
     let mut pointers = [null_mut::<u8>(); 100];
     for align in [1, 2, 4, 8, 16, 32, 4096] {
-        println!("trying align = {}", align);
         for e in pointers.iter_mut() {
             *e = ALLOCATOR.alloc_with_options(
                 Layout::from_size_align(1234, align).expect("Failed to create Layout"),
@@ -236,7 +230,6 @@ fn malloc_align() {
 fn malloc_align_random_order() {
     for align in [32, 4096, 8, 4, 16, 2, 1] {
         let mut pointers = [null_mut::<u8>(); 100];
-        println!("trying align = {}", align);
         for e in pointers.iter_mut() {
             *e = ALLOCATOR.alloc_with_options(
                 Layout::from_size_align(1234, align).expect("Failed to create Layout"),
@@ -288,13 +281,7 @@ fn allocated_objects_have_no_overlap() {
     let mut pointers = vec![null_mut::<u8>(); allocations.len()];
     for e in allocations.iter().zip(pointers.iter_mut()).enumerate() {
         let (i, (layout, pointer)) = e;
-        println!("alloc layout = {:?}", layout);
         *pointer = ALLOCATOR.alloc_with_options(*layout);
-        println!(
-            "allocated [{:#018X}, {:#018X})",
-            *pointer as usize,
-            *pointer as usize + layout.size()
-        );
         for k in 0..layout.size() {
             unsafe { *pointer.add(k) = i as u8 }
         }
@@ -333,13 +320,7 @@ fn allocated_objects_have_no_overlap() {
         .step_by(2)
     {
         let (i, (layout, pointer)) = e;
-        println!("alloc layout = {:?}", layout);
         *pointer = ALLOCATOR.alloc_with_options(*layout);
-        println!(
-            "allocated [{:#018X}, {:#018X})",
-            *pointer as usize,
-            *pointer as usize + layout.size()
-        );
         for k in 0..layout.size() {
             unsafe { *pointer.add(k) = i as u8 }
         }

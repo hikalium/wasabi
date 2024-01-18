@@ -1,21 +1,22 @@
 extern crate alloc;
 
 use crate::ax88179;
+use crate::error;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::dummy_waker;
 use crate::executor::yield_execution;
 use crate::executor::Task;
 use crate::executor::ROOT_EXECUTOR;
+use crate::info;
 use crate::pci::BusDeviceFunction;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
 use crate::pci::VendorDeviceId;
-use crate::print;
-use crate::println;
 use crate::usb::descriptor::UsbDescriptor;
 use crate::usb_hid_keyboard;
 use crate::usb_hid_tablet;
+use crate::warn;
 use crate::xhci::context::EndpointContext;
 use crate::xhci::context::InputContext;
 use crate::xhci::context::InputControlContext;
@@ -93,6 +94,8 @@ impl XhciDriverForPci {
         let descriptors = xhc
             .request_config_descriptor_and_rest(slot, &mut ctrl_ep_ring)
             .await?;
+        let device_vendor_id = device_descriptor.vendor_id;
+        let device_product_id = device_descriptor.product_id;
         if let Ok(e) = xhc
             .request_string_descriptor_zero(slot, &mut ctrl_ep_ring)
             .await
@@ -137,11 +140,12 @@ impl XhciDriverForPci {
             } else {
                 None
             };
-            println!("USB device detected: {vendor:?} {product:?} {serial:?}");
+            info!("USB device detected: vendor/product/serial =  {vendor:?}/{product:?}/{serial:?} (vid:pid = {device_vendor_id:#06X}:{device_product_id:#06X})");
+        } else {
+            info!(
+                "USB device detected: vid:pid = {device_vendor_id:#06X}:{device_product_id:#06X}",
+            );
         }
-        let device_vendor_id = device_descriptor.vendor_id;
-        let device_product_id = device_descriptor.product_id;
-        println!("USB device vid:pid: {device_vendor_id:#06X}:{device_product_id:#06X}",);
         let ddc =
             UsbDeviceDriverContext::new(port, slot, xhc, input_context, ctrl_ep_ring, descriptors)
                 .await?;
@@ -150,7 +154,7 @@ impl XhciDriverForPci {
         } else if device_vendor_id == 0x0bda
             && (device_product_id == 0x8153 || device_product_id == 0x8151)
         {
-            println!("rtl8153/8151 is not supported yet...");
+            error!("rtl8153/8151 is not supported yet...");
         } else if device_descriptor.device_class == 0 {
             // Device class is derived from Interface Descriptor
             for d in ddc.descriptors() {
@@ -164,7 +168,7 @@ impl XhciDriverForPci {
                             let f = usb_hid_keyboard::attach_usb_device(ddc);
                             return Ok(Box::pin(f));
                         }
-                        triple => println!("Skipping unknown interface triple: {triple:?}"),
+                        triple => warn!("Skipping unknown interface triple: {triple:?}"),
                     }
                 }
             }
@@ -265,28 +269,26 @@ impl XhciDriverForPci {
             },
         ) {
             if portsc.ccs() {
-                print!("Port {port}: Device attached: {portsc:?}: ");
+                info!("Port {port}: Device attached: {portsc:?}: ");
                 if portsc.state() == PortState::Disabled {
-                    println!("USB2");
                     match Self::enable_port(xhc.clone(), port).await {
                         Ok(f) => {
-                            println!("device future attached",);
                             xhc.device_futures().lock().push_back(f);
                         }
                         Err(e) => {
-                            println!(
+                            error!(
                                 "Failed to initialize an USB2 device on port {}: {:?}",
                                 port, e
                             );
                         }
                     }
                 } else if portsc.state() == PortState::Enabled {
-                    println!("USB3 (Skipping)");
+                    warn!("USB3 is not supported yet (Skipping)");
                 } else {
-                    println!("Unexpected state");
+                    error!("Unexpected state");
                 }
             } else {
-                println!("Port {}: Device detached: {:?}", port, portsc);
+                info!("Port {}: Device detached: {:?}", port, portsc);
             }
         }
         let waker = dummy_waker();

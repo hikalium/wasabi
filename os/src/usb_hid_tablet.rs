@@ -1,11 +1,11 @@
 extern crate alloc;
 
+use crate::error;
 use crate::error::Error;
 use crate::error::Result;
 use crate::input::InputManager;
 use crate::input::MouseButtonState;
 use crate::memory::Mmio;
-use crate::println;
 use crate::usb::descriptor::ConfigDescriptor;
 use crate::usb::descriptor::EndpointDescriptor;
 use crate::usb::descriptor::InterfaceDescriptor;
@@ -55,9 +55,6 @@ pub fn pick_config(
 pub async fn init_usb_hid_tablet(ddc: &mut UsbDeviceDriverContext) -> Result<()> {
     let descriptors = ddc.descriptors();
     let (config_desc, interface_desc, ep_desc_list) = pick_config(descriptors)?;
-    for ep_desc in &ep_desc_list {
-        println!("usb_hid_tablet: EP: {ep_desc:?}")
-    }
     ddc.set_config(config_desc.config_value()).await?;
     ddc.set_interface(&interface_desc).await?;
     ddc.set_protocol(&interface_desc, UsbHidProtocol::BootProtocol)
@@ -115,7 +112,6 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
                 let py = [report[3], report[4]];
                 let px = u16::from_le_bytes(px);
                 let py = u16::from_le_bytes(py);
-                println!("{px}, {py}");
                 let px = px as f32 / 32768f32;
                 let py = py as f32 / 32768f32;
                 InputManager::take().push_cursor_input_absolute(px, py, b);
@@ -124,7 +120,7 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
                 // Timed out. Do nothing.
             }
             Err(e) => {
-                println!("e: {:?}", e);
+                error!("e: {:?}", e);
             }
         }
         if !portsc.ccs() {

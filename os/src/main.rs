@@ -19,6 +19,7 @@ use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
 use os::graphics::Bitmap;
+use os::info;
 use os::init;
 use os::input::enqueue_input_tasks;
 use os::println;
@@ -120,8 +121,7 @@ fn run_tasks() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    println!("Booting WasabiOS...");
-    println!("Wasabi OS booted. efi_main = {:#p}", efi_main as *const ());
+    info!("Booting WasabiOS...");
     init::init_graphical_terminal();
     paint_wasabi_logo();
 
@@ -132,18 +132,19 @@ fn main() -> Result<()> {
     init::init_timer();
     init_syscall();
 
-    println!(
-        "Welcome to WasabiOS! efi_main = {:#018p}",
-        efi_main as *const ()
+    // Note: This log message is used by the e2etest to check if the OS is booted
+    // so please be careful!
+    info!(
+        "Welcome to WasabiOS! efi_main = {:#018p}, write_cr3 = {:#018p}",
+        efi_main as *const (), write_cr3 as *const ()
     );
-    println!("debug_info: write_cr3 = {:#018p}", write_cr3 as *const ());
     run_tasks()?;
     Ok(())
 }
 
 #[no_mangle]
 fn stack_switched() -> ! {
-    println!("rsp switched to: {:#018X}", read_rsp());
+    info!("rsp switched to: {:#018X}", read_rsp());
     // For normal boot
     #[cfg(not(test))]
     main().unwrap();

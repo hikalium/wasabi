@@ -1,11 +1,12 @@
 extern crate alloc;
 
 use crate::bitset::BitSet;
+use crate::error;
 use crate::error::Error;
 use crate::error::Result;
+use crate::info;
 use crate::input::InputManager;
 use crate::memory::Mmio;
-use crate::println;
 use crate::usb::descriptor::ConfigDescriptor;
 use crate::usb::descriptor::EndpointDescriptor;
 use crate::usb::descriptor::InterfaceDescriptor;
@@ -55,9 +56,6 @@ pub fn pick_config(
 pub async fn init_usb_hid_keyboard(ddc: &mut UsbDeviceDriverContext) -> Result<()> {
     let descriptors = ddc.descriptors();
     let (config_desc, interface_desc, ep_desc_list) = pick_config(descriptors)?;
-    for ep_desc in &ep_desc_list {
-        println!("usb_hid_kbd: EP: {ep_desc:?}")
-    }
     ddc.set_config(config_desc.config_value()).await?;
     ddc.set_interface(&interface_desc).await?;
     ddc.set_protocol(&interface_desc, UsbHidProtocol::BootProtocol)
@@ -115,7 +113,7 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
     let xhci = ddc.xhci();
     let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut prev_pressed_keys = BitSet::<32>::new();
-    println!("INFO: usb_hid_keyboard is ready");
+    info!("usb_hid_keyboard is ready");
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
@@ -154,7 +152,7 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
                             }
                         }
                     } else {
-                        println!("{c:?}");
+                        error!("{c:?}");
                     }
                 }
                 prev_pressed_keys = next_pressed_keys;
@@ -163,7 +161,7 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
                 // Timed out. Do nothing.
             }
             Err(e) => {
-                println!("e: {:?}", e);
+                error!("e: {:?}", e);
             }
         }
         if !portsc.ccs() {

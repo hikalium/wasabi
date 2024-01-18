@@ -4,7 +4,7 @@ use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
 use crate::mutex::Mutex;
-use crate::println;
+use crate::warn;
 use crate::x86_64::paging::disable_cache;
 use crate::x86_64::paging::IoBox;
 use crate::xhci::trb::GenericTrbEntry;
@@ -353,7 +353,7 @@ impl EventRing {
                 .ok_or("Expected VecDeque but not found")?;
             if q.len() > 10 {
                 let e = q.pop_front();
-                println!("Warning: Too many entries. popped the oldest one: {e:?}");
+                warn!("EventRing: Too many entries. popped the oldest one: {e:?}");
             }
             q.push_back(e);
         }
@@ -376,7 +376,7 @@ impl EventRing {
                 return Ok(Some(e));
             }
             if let Some(e) = self.events_per_trb.get(&trb_addr) {
-                println!("Warning: pop_for_trb: losing {e:?}");
+                warn!("EventRing: pop_for_trb: losing {e:?}");
             }
             self.events_per_trb.insert(trb_addr, e);
         }

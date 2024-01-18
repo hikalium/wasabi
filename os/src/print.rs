@@ -41,6 +41,19 @@ macro_rules! println {
             ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
+#[macro_export]
+macro_rules! info {
+            ($($arg:tt)*) => ($crate::print!("[ INFO]: {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
+}
+#[macro_export]
+macro_rules! warn {
+            ($($arg:tt)*) => ($crate::print!("[ WARN]: {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
+}
+#[macro_export]
+macro_rules! error {
+            ($($arg:tt)*) => ($crate::print!("[ERROR]: {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
+}
+
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     let mut writer = SerialPort::default();
