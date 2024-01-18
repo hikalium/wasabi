@@ -18,6 +18,10 @@ pub fn noop() -> u64 {
     0
 }
 
+pub fn read_key() -> u64 {
+    unimplemented!()
+}
+
 #[macro_export]
 macro_rules! entry_point {
     ($path:path) => {

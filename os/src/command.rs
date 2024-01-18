@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 use core::arch::asm;
 use core::str::FromStr;
 
-fn run_app(name: &str) -> Result<i64> {
+async fn run_app(name: &str) -> Result<i64> {
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();
     let root_files: alloc::vec::Vec<&crate::boot_info::File> =
@@ -26,7 +26,7 @@ fn run_app(name: &str) -> Result<i64> {
     if let Some(elf) = elf {
         let elf = Elf::parse(elf)?;
         let app = elf.load()?;
-        let result = app.exec()?;
+        let result = app.exec().await?;
         #[cfg(test)]
         if result == 0 {
             debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
@@ -36,11 +36,11 @@ fn run_app(name: &str) -> Result<i64> {
         #[cfg(not(test))]
         Ok(result)
     } else {
-        Err(Error::Failed("Init app file not found"))
+        Err(Error::Failed("comand::run_app: No such file or app"))
     }
 }
 
-pub fn run(cmdline: &str) -> Result<()> {
+pub async fn run(cmdline: &str) -> Result<()> {
     let network = Network::take();
     let args = cmdline.trim();
     let args: Vec<&str> = args.split(' ').collect();
@@ -71,7 +71,7 @@ pub fn run(cmdline: &str) -> Result<()> {
                 println!("{:?}", network.arp_table_cloned())
             }
             app_name => {
-                let result = run_app(app_name);
+                let result = run_app(app_name).await;
                 println!("{result:?}");
             }
         }

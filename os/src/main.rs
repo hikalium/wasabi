@@ -8,14 +8,9 @@
 
 extern crate alloc;
 
-use alloc::string::String;
 use core::pin::Pin;
-use core::str::FromStr;
 use os::boot_info::BootInfo;
-use os::debug_exit;
-use os::efi::fs::EfiFileName;
 use os::efi::types::EfiHandle;
-use os::error::Error;
 use os::error::Result;
 use os::executor::spawn_global;
 use os::executor::yield_execution;
@@ -26,7 +21,6 @@ use os::graphics::draw_line;
 use os::graphics::Bitmap;
 use os::init;
 use os::input::enqueue_input_tasks;
-use os::loader::Elf;
 use os::println;
 use os::x86_64;
 use os::x86_64::paging::write_cr3;
@@ -143,28 +137,6 @@ fn main() -> Result<()> {
         efi_main as *const ()
     );
     println!("debug_info: write_cr3 = {:#018p}", write_cr3 as *const ());
-
-    let boot_info = BootInfo::take();
-    let root_files = boot_info.root_files();
-    let root_files: alloc::vec::Vec<&os::boot_info::File> =
-        root_files.iter().filter_map(|e| e.as_ref()).collect();
-    let init_app = EfiFileName::from_str("init.txt")?;
-    let init_app = root_files.iter().find(|&e| e.name() == &init_app);
-    if let Some(init_app) = init_app {
-        let init_app = String::from_utf8_lossy(init_app.data());
-        let init_app = init_app.trim();
-        let init_app = EfiFileName::from_str(init_app)?;
-        let elf = root_files.iter().find(|&e| e.name() == &init_app);
-        if let Some(elf) = elf {
-            let elf = Elf::parse(elf)?;
-            let app = elf.load()?;
-            app.exec()?;
-            debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
-        } else {
-            return Err(Error::Failed("Init app file not found"));
-        }
-    }
-
     run_tasks()?;
     Ok(())
 }

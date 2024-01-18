@@ -157,3 +157,6 @@ pub fn draw_point(x: i64, y: i64, c: u32) -> u64 {
 pub fn noop() -> u64 {
     syscall_0(3)
 }
+pub fn read_key() -> u64 {
+    syscall_0(4)
+}

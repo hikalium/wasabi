@@ -1,5 +1,6 @@
 use crate::boot_info::BootInfo;
 use crate::graphics::draw_point;
+use crate::input::InputManager;
 use crate::print;
 use crate::println;
 use crate::x86_64::ExecutionContext;
@@ -18,7 +19,20 @@ fn write_return_value(retv: u64) {
     }
 }
 
-fn return_to_os() -> ! {
+fn write_exit_reason(retv: u64) {
+    let ctx = {
+        let ctx = CONTEXT_OS.lock();
+        *ctx
+    };
+    if ctx.is_null() {
+        panic!("context is invalid");
+    }
+    unsafe {
+        (*ctx).cpu.r8 = retv;
+    }
+}
+
+fn return_to_os() {
     let ctx = {
         let ctx = CONTEXT_OS.lock();
         *ctx
@@ -34,10 +48,21 @@ fn return_to_os() -> ! {
     }
 }
 
-fn sys_exit(regs: &[u64; 7]) -> ! {
-    let retv = regs[1];
+fn exit_to_os(retv: u64) -> ! {
+    write_exit_reason(0);
     write_return_value(retv);
-    return_to_os()
+    return_to_os();
+    unreachable!("Somehow returned from the OS unexpectedly...");
+}
+
+fn yield_to_os(retv: u64) {
+    write_exit_reason(1);
+    write_return_value(retv);
+    return_to_os();
+}
+
+fn sys_exit(regs: &[u64; 7]) -> ! {
+    exit_to_os(regs[1]);
 }
 
 fn sys_print(args: &[u64; 7]) -> u64 {
@@ -67,6 +92,15 @@ fn sys_draw_point(args: &[u64; 7]) -> u64 {
     }
 }
 
+fn sys_read_key(_args: &[u64; 7]) -> u64 {
+    (loop {
+        if let Some(c) = InputManager::take().pop_input() {
+            break c;
+        }
+        yield_to_os(1);
+    }) as u64
+}
+
 #[no_mangle]
 pub extern "sysv64" fn syscall_handler(regs: &mut [u64; 16]) {
     let args = {
@@ -80,6 +114,7 @@ pub extern "sysv64" fn syscall_handler(regs: &mut [u64; 16]) {
         1 => sys_print(&args),
         2 => sys_draw_point(&args),
         3 => sys_noop(&args),
+        4 => sys_read_key(&args),
         op => {
             println!("syscall: unimplemented syscall: {}", op);
             1

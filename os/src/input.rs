@@ -2,12 +2,16 @@ extern crate alloc;
 
 use crate::boot_info::BootInfo;
 use crate::command;
+use crate::debug_exit;
+use crate::efi::fs::EfiFileName;
+use crate::error::Error;
 use crate::executor::yield_execution;
 use crate::executor::Executor;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::graphics::draw_rect;
 use crate::graphics::Bitmap;
+use crate::loader::Elf;
 use crate::mutex::Mutex;
 use crate::net::network_manager_thread;
 use crate::print;
@@ -17,6 +21,7 @@ use crate::serial::SerialPort;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
+use core::str::FromStr;
 
 pub struct MouseButtonState {
     pub l: bool,
@@ -72,11 +77,33 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
     };
     let console_task = async {
         println!("INFO: console_task has started");
+
+        let boot_info = BootInfo::take();
+        let root_files = boot_info.root_files();
+        let root_files: alloc::vec::Vec<&crate::boot_info::File> =
+            root_files.iter().filter_map(|e| e.as_ref()).collect();
+        let init_app = EfiFileName::from_str("init.txt")?;
+        let init_app = root_files.iter().find(|&e| e.name() == &init_app);
+        if let Some(init_app) = init_app {
+            let init_app = String::from_utf8_lossy(init_app.data());
+            let init_app = init_app.trim();
+            let init_app = EfiFileName::from_str(init_app)?;
+            let elf = root_files.iter().find(|&e| e.name() == &init_app);
+            if let Some(elf) = elf {
+                let elf = Elf::parse(elf)?;
+                let app = elf.load()?;
+                app.exec().await?;
+                debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
+            } else {
+                return Err(Error::Failed("Init app file not found"));
+            }
+        }
+
         let mut s = String::new();
         loop {
             if let Some(c) = InputManager::take().pop_input() {
                 if c == '\r' || c == '\n' {
-                    if let Err(e) = command::run(&s) {
+                    if let Err(e) = command::run(&s).await {
                         println!("{e:?}");
                     };
                     s.clear();

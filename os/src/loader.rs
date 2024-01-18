@@ -6,6 +6,7 @@ use crate::elf::SectionHeader;
 use crate::elf::SegmentHeader;
 use crate::error::Error;
 use crate::error::Result;
+use crate::executor::yield_execution;
 use crate::memory::AddressRange;
 use crate::memory::ContiguousPhysicalMemoryPages;
 use crate::println;
@@ -42,7 +43,7 @@ impl<'a> LoadedElf<'a> {
         }
         Err(Error::Failed("vaddr not found"))
     }
-    pub fn exec(self) -> Result<i64> {
+    pub async fn exec(self) -> Result<i64> {
         let stack_size = 8 * 1024;
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
         let stack_range = stack.range();
@@ -54,95 +55,105 @@ impl<'a> LoadedElf<'a> {
             let mut ctx = CONTEXT_OS.lock();
             *ctx = os_ctx;
         }
-        let retcode: i64;
-        unsafe {
-            asm!(
-                // Save current execution state in os_ctx
-                // General registers
-                "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop
-                "push rsi", // ExecutionContext.rsp
-                "push r15",
-                "push r14",
-                "push r13",
-                "push r12",
-                "push r11",
-                "push r10",
-                "push r9",
-                "push r8",
-                "push rdi",
-                "push rsi",
-                "push rbp",
-                "push rbx",
-                "push rdx",
-                "push rcx",
-                "push rax",
-                "pushfq", // ExecutionContext.rflags
-                "lea r8, [rip+0f]", // ExecutionContext.rip
-                "push r8", // ExecutionContext.rip
-                "sub rsp, 512",
-                "fxsave64[rsp]",
-                "xchg rsp,rsi", // recover the original rsp
+        let mut retcode: i64;
+        let mut exit_reason: i64;
+        loop {
+            unsafe {
+                asm!(
+                    // Save current execution state in os_ctx
+                    // General registers
+                    "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop
+                    "push rsi", // ExecutionContext.rsp
+                    "push r15",
+                    "push r14",
+                    "push r13",
+                    "push r12",
+                    "push r11",
+                    "push r10",
+                    "push r9",
+                    "push r8",
+                    "push rdi",
+                    "push rsi",
+                    "push rbp",
+                    "push rbx",
+                    "push rdx",
+                    "push rcx",
+                    "push rax",
+                    "pushfq", // ExecutionContext.rflags
+                    "lea r8, [rip+0f]", // ExecutionContext.rip
+                    "push r8", // ExecutionContext.rip
+                    "sub rsp, 512",
+                    "fxsave64[rsp]",
+                    "xchg rsp,rsi", // recover the original rsp
 
-                // Set data segments to USER_DS
-                "mov es, dx", // SS = crate::x86_64::USER_DS
-                "mov ds, dx", // SS = crate::
-                "mov fs, dx",
-                "mov gs, dx",
-                // Use iretq to switch to user mode
-                "push rdx", // SS = crate::x86_64::USER_DS
-                "push rax", // RSP = stack_range.end()
-                "mov eax, 2",
-                "push rax", // RFLAGS = 2
-                "push rcx", // CS = crate::x86_64::USER64_CS
-                "push rdi", // RIP = entry_point
-                // *(rip as *const InterruptContext) == {
-                //   rip: u64,
-                //   cs: u64,
-                //   rflags: u64,
-                //   rsp: u64,
-                //   ss: u64,
-                // }
-                // far-jmp to app using ireq
-                "iretq",
+                    // Set data segments to USER_DS
+                    "mov es, dx", // SS = crate::x86_64::USER_DS
+                    "mov ds, dx", // SS = crate::
+                    "mov fs, dx",
+                    "mov gs, dx",
+                    // Use iretq to switch to user mode
+                    "push rdx", // SS = crate::x86_64::USER_DS
+                    "push rax", // RSP = stack_range.end()
+                    "mov eax, 2",
+                    "push rax", // RFLAGS = 2
+                    "push rcx", // CS = crate::x86_64::USER64_CS
+                    "push rdi", // RIP = entry_point
+                    // *(rip as *const InterruptContext) == {
+                    //   rip: u64,
+                    //   cs: u64,
+                    //   rflags: u64,
+                    //   rsp: u64,
+                    //   ss: u64,
+                    // }
+                    // far-jmp to app using ireq
+                    "iretq",
 
-                // **** exit from app ****
-                "0:",
-                // rdi (first arg in systemv abi) should be a pointer of ExecutionContext
-                // See crate::syscall::sys_exit
-                "mov rsp, rdi",
-                "mov di,ss",
-                "mov ds,di",
-                "mov es,di",
-                "mov fs,di",
-                "mov gs,di",
-                "fxrstor64[rsp]",
-                "add rsp, 512",
-                "pop rax", // drop ExecutionContext.rip
-                "pop rax", // drop ExecutionContext.rflags
-                "pop rax",
-                "pop rcx",
-                "pop rdx",
-                "pop rbx",
-                "pop rbp",
-                "pop rsi",
-                "pop rdi",
-                "pop r8",
-                "pop r9",
-                "pop r10",
-                "pop r11",
-                "pop r12",
-                "pop r13",
-                "pop r14",
-                "pop r15",
-                "pop rsp", // ExecutionContext.rsp
-                in("rax") stack_range.end(), // stack grows toward 0, so empty stack pointer will be the end addr
-                in("rcx") crate::x86_64::USER64_CS,
-                in("rdx") crate::x86_64::USER_DS,
-                // rbx is used for LLVM internally
-                in("rsi") (os_ctx as *mut u8).add(size_of::<ExecutionContext>()),
-                in("rdi") entry_point,
-                lateout("rax") retcode,
-            );
+                    // **** exit from app ****
+                    "0:",
+                    // rdi (first arg in systemv abi) should be a pointer of ExecutionContext
+                    // See crate::syscall::sys_exit
+                    "mov rsp, rdi",
+                    "mov di,ss",
+                    "mov ds,di",
+                    "mov es,di",
+                    "mov fs,di",
+                    "mov gs,di",
+                    "fxrstor64[rsp]",
+                    "add rsp, 512",
+                    "pop rax", // drop ExecutionContext.rip
+                    "pop rax", // drop ExecutionContext.rflags
+                    "pop rax",
+                    "pop rcx",
+                    "pop rdx",
+                    "pop rbx",
+                    "pop rbp",
+                    "pop rsi",
+                    "pop rdi",
+                    "pop r8",
+                    "pop r9",
+                    "pop r10",
+                    "pop r11",
+                    "pop r12",
+                    "pop r13",
+                    "pop r14",
+                    "pop r15",
+                    "pop rsp", // ExecutionContext.rsp
+                    in("rax") stack_range.end(), // stack grows toward 0, so empty stack pointer will be the end addr
+                    in("rcx") crate::x86_64::USER64_CS,
+                    in("rdx") crate::x86_64::USER_DS,
+                    // rbx is used for LLVM internally
+                    in("rsi") (os_ctx as *mut u8).add(size_of::<ExecutionContext>()),
+                    in("rdi") entry_point,
+                    lateout("rax") retcode,
+                    lateout("r8") exit_reason,
+                );
+                println!("exit_reason: {exit_reason}");
+                if exit_reason == 0 {
+                    // return to os
+                    break;
+                }
+                yield_execution().await;
+            }
         }
         Ok(retcode)
     }
