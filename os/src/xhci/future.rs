@@ -1,7 +1,6 @@
 use crate::error::Result;
 use crate::hpet::Hpet;
 use crate::mutex::Mutex;
-use crate::println;
 use crate::xhci::ring::EventRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::TrbType;
@@ -41,7 +40,7 @@ impl<'a, const E: TrbType> EventFuture<'a, E> {
         slot: u8,
         wait_ms: u64,
     ) -> Self {
-        Self::new_with_timeout(event_ring, 100, EventFutureWaitType::Slot(slot))
+        Self::new_with_timeout(event_ring, wait_ms, EventFutureWaitType::Slot(slot))
     }
     pub fn new_on_slot(event_ring: &'a Mutex<EventRing>, slot: u8) -> Self {
         Self::new_on_slot_with_timeout(event_ring, slot, 100)
@@ -69,17 +68,17 @@ impl<'a, const E: TrbType> Future for EventFuture<'a, E> {
             EventFutureWaitType::Slot(slot) => {
                 let event = mut_self.event_ring.lock().pop_for_slot(slot);
                 if let Ok(Some(_)) = event {
-                    return Poll::Ready(event);
+                    Poll::Ready(event)
                 } else {
-                    return Poll::Pending;
+                    Poll::Pending
                 }
             }
             EventFutureWaitType::TrbAddr(trb_addr) => {
                 let event = mut_self.event_ring.lock().pop_for_trb(trb_addr);
                 if let Ok(Some(_)) = event {
-                    return Poll::Ready(event);
+                    Poll::Ready(event)
                 } else {
-                    return Poll::Pending;
+                    Poll::Pending
                 }
             }
         }
