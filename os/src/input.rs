@@ -17,12 +17,28 @@ use crate::loader::Elf;
 use crate::mutex::Mutex;
 use crate::net::network_manager_thread;
 use crate::print;
-use crate::ps2::keyboard_task;
 use crate::serial::SerialPort;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
 use core::str::FromStr;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum KeyEvent {
+    None,
+    Char(char),
+    Enter,
+}
+
+impl KeyEvent {
+    pub fn to_char(&self) -> Option<char> {
+        match self {
+            KeyEvent::Char(c) => Some(*c),
+            KeyEvent::Enter => Some('\n'),
+            _ => None,
+        }
+    }
+}
 
 pub struct MouseButtonState {
     pub l: bool,
@@ -147,7 +163,6 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
             yield_execution().await;
         }
     };
-    executor.spawn(Task::new(async { keyboard_task().await }));
     executor.spawn(Task::new(serial_task));
     executor.spawn(Task::new(console_task));
     executor.spawn(Task::new(mouse_cursor_task));

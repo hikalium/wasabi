@@ -147,7 +147,6 @@ impl<'a> LoadedElf<'a> {
                     lateout("rax") retcode,
                     lateout("r8") exit_reason,
                 );
-                println!("exit_reason: {exit_reason}");
                 if exit_reason == 0 {
                     // return to os
                     break;
