@@ -124,11 +124,8 @@ impl<'a> LoadedElf<'a> {
                     "mov gs,di",
                     "pop rdi",  // Recover rdi value
 
-
-
-                    // rdi (first arg in systemv abi) should be a pointer of CONTEXT_OS
-                    // See crate::syscall::sys_exit
-                    "mov rsp, rdi",
+                    // Load the cpu state from CONTEXT_OS
+                    "xchg rsp, rdi", // swap rsp and rdi to utilize push / pop
                     "fxrstor64[rsp]",
                     "add rsp, 512",
                     "pop rax", // drop ExecutionContext.rip
@@ -149,6 +146,9 @@ impl<'a> LoadedElf<'a> {
                     "pop r14",
                     "pop r15",
                     "pop rsp", // ExecutionContext.rsp
+                    // At this point, the CPU state is same as the CONTEXT_OS except for RIP.
+                    // Returning to the Rust code and continue the execution.
+
                     in("rax") stack_range.end(), // stack grows toward 0, so empty stack pointer will be the end addr
                     in("rcx") crate::x86_64::USER64_CS,
                     in("rdx") crate::x86_64::USER_DS,
