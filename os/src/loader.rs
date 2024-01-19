@@ -114,9 +114,10 @@ impl<'a> LoadedElf<'a> {
                     // **** return from app ****
                     "0:",
                     // At this point:
-                    // - rdi (first arg in systemv abi): addr of CONTEXT_OS
-                    // - rsi (second arg in systemv abi): addr of CONTEXT_APP
-                    // -
+                    // - context: CONTEXT_APP + handling syscall
+                    //   - so it's in the kernel mode
+                    // - rdi: addr of CONTEXT_OS
+                    // - rsi: addr of CONTEXT_APP
 
                     // Recover the segment registers
                     "push rdi", // Use rdi as TMP
