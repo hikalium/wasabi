@@ -128,8 +128,8 @@ impl<'a> LoadedElf<'a> {
                     "xchg rsp, rdi", // swap rsp and rdi to utilize push / pop
                     "fxrstor64[rsp]",
                     "add rsp, 512",
-                    "pop rax", // drop ExecutionContext.rip
-                    "pop rax", // drop ExecutionContext.rflags
+                    "pop rax", // Skip RIP
+                    "popfq", // Restore RFLAGS
                     "pop rax",
                     "pop rcx",
                     "pop rdx",
