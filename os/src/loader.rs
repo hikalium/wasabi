@@ -92,22 +92,13 @@ impl<'a> LoadedElf<'a> {
                     "mov fs, dx",
                     "mov gs, dx",
 
-                    // Prepare the stack to Use iretq to switch to user mode
-                    "push rdx", // SS = crate::x86_64::USER_DS
-                    "push rax", // RSP = stack_range.end()
-                    "mov eax, 2",
-                    "push rax", // RFLAGS = 2
-                    "push rcx", // CS = crate::x86_64::USER64_CS
-                    "push rdi", // RIP = entry_point
-                    // *(rip as *const InterruptContext) == {
-                    //   rip: u64,
-                    //   cs: u64,
-                    //   rflags: u64,
-                    //   rsp: u64,
-                    //   ss: u64,
-                    // }
-                    // far-jmp to app using ireq
-                    "iretq",
+                    // Prepare the stack to use iretq to switch to user mode
+                    "mov rcx, rdi", // RCX = RIP to resume
+                    "mov r11, 2", // R11 = RFLAGS to resume
+                    "mov rsp, rax", // RSP = stack_range.end()
+
+                    // Start (or resume) the app execution
+                    "sysretq",
 
                     // ---- no one will pass through here ----
 
