@@ -16,6 +16,7 @@ use crate::util::read_le_u64;
 use crate::util::write_le_u64;
 use crate::x86_64::paging::PageAttr;
 use crate::x86_64::ExecutionContext;
+use crate::x86_64::CONTEXT_APP;
 use crate::x86_64::CONTEXT_OS;
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -55,8 +56,9 @@ impl<'a> LoadedElf<'a> {
         loop {
             unsafe {
                 let os_ctx = CONTEXT_OS.lock().as_mut_ptr();
+                let app_ctx = CONTEXT_APP.lock().as_mut_ptr();
                 asm!(
-                    // Save current execution state in os_ctx
+                    // Save current execution state into CONTEXT_OS(rsi)
                     // General registers
                     "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop
                     "push rsi", // ExecutionContext.rsp
@@ -104,16 +106,48 @@ impl<'a> LoadedElf<'a> {
                     // far-jmp to app using ireq
                     "iretq",
 
-                    // **** exit from app ****
+                    // ---- no one will pass through here ----
+
+                    // **** return from app ****
                     "0:",
-                    // rdi (first arg in systemv abi) should be a pointer of ExecutionContext
-                    // See crate::syscall::sys_exit
-                    "mov rsp, rdi",
+                    // At this point:
+                    // - rdi (first arg in systemv abi) should be a pointer of CONTEXT_OS
+                    // - rsi (second arg in systemv abi) should be a pointer of CONTEXT_APP
+
+                    // Recover the segment registers
                     "mov di,ss",
                     "mov ds,di",
                     "mov es,di",
                     "mov fs,di",
                     "mov gs,di",
+
+                    // Save the app context
+                    "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop
+
+                    "push rsi", // CONTEXT_APP.rsp
+                    "push r15",
+                    "push r14",
+                    "push r13",
+                    "push r12",
+                    "push r11",
+                    "push r10",
+                    "push r9",
+                    "push r8",
+                    "push rdi",
+                    "push rsi",
+                    "push rbp",
+                    "push rbx",
+                    "push rdx",
+                    "push rcx",
+                    "push rax",
+                    "pushfq", // ExecutionContext.rflags
+                    "lea r8, [rip+0f]", // ExecutionContext.rip
+                    "push r8", // ExecutionContext.rip
+
+
+                    // rdi (first arg in systemv abi) should be a pointer of CONTEXT_OS
+                    // See crate::syscall::sys_exit
+                    "mov rsp, rdi",
                     "fxrstor64[rsp]",
                     "add rsp, 512",
                     "pop rax", // drop ExecutionContext.rip
@@ -139,6 +173,7 @@ impl<'a> LoadedElf<'a> {
                     in("rdx") crate::x86_64::USER_DS,
                     // rbx is used for LLVM internally
                     in("rsi") (os_ctx as *mut u8).add(size_of::<ExecutionContext>()),
+                    in("r9") (app_ctx as *mut u8).add(size_of::<ExecutionContext>()),
                     in("rdi") entry_point,
                     lateout("rax") retcode,
                     lateout("r8") exit_reason,

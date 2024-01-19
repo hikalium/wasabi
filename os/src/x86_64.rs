@@ -91,6 +91,8 @@ pub const MSR_KERNEL_GS_BASE: u32 = 0xC0000102;
 
 pub static CONTEXT_OS: Mutex<ExecutionContext> =
     Mutex::new(ExecutionContext::default(), "CONTEXT_OS");
+pub static CONTEXT_APP: Mutex<ExecutionContext> =
+    Mutex::new(ExecutionContext::default(), "CONTEXT_APP");
 
 #[repr(C)]
 #[derive(Clone, Debug)]
@@ -107,7 +109,7 @@ impl ExecutionContext {
     }
     // We implement this outside of trait since Default trait is not const yet.
     // c.f. https://github.com/rust-lang/rust/issues/67792
-    const fn default() -> Self {
+    pub const fn default() -> Self {
         Self {
             fpu: FpuContext { data: [0u8; 512] },
             cpu: CpuContext::default(),
@@ -131,6 +133,7 @@ const _: () = assert!(size_of::<FpuContext>() == 512);
 pub struct CpuContext {
     pub rip: u64,
     pub rflags: u64,
+    //
     pub rax: u64,
     pub rcx: u64,
     pub rdx: u64,
