@@ -83,13 +83,16 @@ impl<'a> LoadedElf<'a> {
                     "sub rsp, 512",
                     "fxsave64[rsp]",
                     "xchg rsp,rsi", // recover the original rsp
+                    // At this point, the current CPU state is saved to CONTEXT_OS
 
                     // Set data segments to USER_DS
-                    "mov es, dx", // SS = crate::x86_64::USER_DS
-                    "mov ds, dx", // SS = crate::
+                    // rdx is passed from the Rust code (see the last part of this asm block).
+                    "mov es, dx",
+                    "mov ds, dx",
                     "mov fs, dx",
                     "mov gs, dx",
-                    // Use iretq to switch to user mode
+
+                    // Prepare the stack to Use iretq to switch to user mode
                     "push rdx", // SS = crate::x86_64::USER_DS
                     "push rax", // RSP = stack_range.end()
                     "mov eax, 2",
@@ -145,7 +148,7 @@ impl<'a> LoadedElf<'a> {
                     "pop r13",
                     "pop r14",
                     "pop r15",
-                    "pop rsp", // ExecutionContext.rsp
+                    "pop rsp",
                     // At this point, the CPU state is same as the CONTEXT_OS except for RIP.
                     // Returning to the Rust code and continue the execution.
 
