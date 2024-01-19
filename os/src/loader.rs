@@ -111,38 +111,19 @@ impl<'a> LoadedElf<'a> {
                     // **** return from app ****
                     "0:",
                     // At this point:
-                    // - rdi (first arg in systemv abi) should be a pointer of CONTEXT_OS
-                    // - rsi (second arg in systemv abi) should be a pointer of CONTEXT_APP
+                    // - rdi (first arg in systemv abi): addr of CONTEXT_OS
+                    // - rsi (second arg in systemv abi): addr of CONTEXT_APP
+                    // -
 
                     // Recover the segment registers
+                    "push rdi", // Use rdi as TMP
                     "mov di,ss",
                     "mov ds,di",
                     "mov es,di",
                     "mov fs,di",
                     "mov gs,di",
+                    "pop rdi",  // Recover rdi value
 
-                    // Save the app context
-                    "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop
-
-                    "push rsi", // CONTEXT_APP.rsp
-                    "push r15",
-                    "push r14",
-                    "push r13",
-                    "push r12",
-                    "push r11",
-                    "push r10",
-                    "push r9",
-                    "push r8",
-                    "push rdi",
-                    "push rsi",
-                    "push rbp",
-                    "push rbx",
-                    "push rdx",
-                    "push rcx",
-                    "push rax",
-                    "pushfq", // ExecutionContext.rflags
-                    "lea r8, [rip+0f]", // ExecutionContext.rip
-                    "push r8", // ExecutionContext.rip
 
 
                     // rdi (first arg in systemv abi) should be a pointer of CONTEXT_OS
