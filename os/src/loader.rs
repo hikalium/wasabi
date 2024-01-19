@@ -50,15 +50,11 @@ impl<'a> LoadedElf<'a> {
         stack.fill_with_bytes(0);
         stack.set_page_attr(PageAttr::ReadWriteUser)?;
         let entry_point = self.resolve_vaddr(self.elf.entry_vaddr as usize)?;
-        let os_ctx = ExecutionContext::allocate();
-        {
-            let mut ctx = CONTEXT_OS.lock();
-            *ctx = os_ctx;
-        }
         let mut retcode: i64;
         let mut exit_reason: i64;
         loop {
             unsafe {
+                let os_ctx = CONTEXT_OS.lock().as_mut_ptr();
                 asm!(
                     // Save current execution state in os_ctx
                     // General registers
