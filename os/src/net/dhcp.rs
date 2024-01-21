@@ -61,8 +61,16 @@ impl DhcpPacket {
     pub fn op(&self) -> u8 {
         self.op
     }
+    pub fn is_boot_reply(&self) -> bool {
+        self.op == DHCP_OP_BOOTREPLY
+    }
+    /// Your Ip ADDRess
     pub fn yiaddr(&self) -> IpV4Addr {
         self.yiaddr
+    }
+    /// Client's Hardware ADDRess
+    pub fn chaddr(&self) -> EthernetAddr {
+        self.chaddr
     }
     pub fn request(src_eth_addr: EthernetAddr) -> Self {
         let mut this = Self::default();

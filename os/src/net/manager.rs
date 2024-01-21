@@ -17,7 +17,6 @@ use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_OFFER;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_PADDING;
 use crate::net::dhcp::DHCP_OPT_NETMASK;
 use crate::net::dhcp::DHCP_OPT_ROUTER;
-use crate::net::dhcp::DHCP_OP_BOOTREPLY;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
 use crate::net::eth::EthernetType;
@@ -122,80 +121,85 @@ impl Network {
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
 
-fn handle_rx_udp(packet: &[u8]) -> Result<()> {
+fn handle_rx_dhcp_client(packet: &[u8]) -> Result<()> {
     let network = Network::take();
-    let udp = UdpPacket::from_slice(packet)?;
-    match (udp.src_port(), udp.dst_port()) {
-        (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => {
-            // TODO(hikalium): impl check for xid and cookie
-            let dhcp = DhcpPacket::from_slice(packet)?;
-            if dhcp.op() != DHCP_OP_BOOTREPLY {
-                // Not a reply, skip this message
-                return Ok(());
-            }
-            info!("net: rx: DHCP: SERVER -> CLIENT yiaddr = {}", dhcp.yiaddr());
-            network.set_self_ip(Some(dhcp.yiaddr()));
-            let options = &packet[size_of::<DhcpPacket>()..];
-            let mut it = options.iter();
-            while let Some(op) = it.next().cloned() {
-                if op == DHCP_OPT_MESSAGE_TYPE_PADDING {
-                    continue;
-                }
-                if op == DHCP_OPT_MESSAGE_TYPE_END {
-                    break;
-                }
-                if let Some(len) = it.next().cloned() {
-                    if len == 0 {
-                        break;
-                    }
-                    let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
-                    info!("op = {op}, data = {data:?}");
-                    match op {
-                        DHCP_OPT_MESSAGE_TYPE => match data[0] {
-                            DHCP_OPT_MESSAGE_TYPE_ACK => {
-                                info!("DHCPACK");
-                            }
-                            DHCP_OPT_MESSAGE_TYPE_OFFER => {
-                                info!("DHCPOFFER");
-                            }
-                            DHCP_OPT_MESSAGE_TYPE_DISCOVER => {
-                                info!("DHCPDISCOVER");
-                            }
-                            t => {
-                                info!("DHCP MESSAGE_TYPE = {t}");
-                            }
-                        },
-                        DHCP_OPT_NETMASK => {
-                            if let Ok(netmask) = IpV4Addr::from_slice(&data) {
-                                info!("netmask: {netmask}");
-                                network.set_netmask(Some(*netmask));
-                            }
-                        }
-                        DHCP_OPT_ROUTER => {
-                            if let Ok(router) = IpV4Addr::from_slice(&data) {
-                                info!("router: {router}");
-                                network.set_router(Some(*router));
-                            }
-                        }
-                        DHCP_OPT_DNS => {
-                            if let Ok(dns) = IpV4Addr::from_slice(&data) {
-                                info!("dns: {dns}");
-                                network.set_dns(Some(*dns));
-                            }
-                        }
-                        _ => {}
-                    }
-                    it.advance_by(len as usize)
-                        .or(Err(Error::Failed("Invalid op data len")))?;
-                }
-            }
+    // TODO(hikalium): impl check for xid and cookie
+    let dhcp = DhcpPacket::from_slice(packet)?;
+    if !dhcp.is_boot_reply() {
+        return Ok(());
+    }
+    info!(
+        "net: rx: DHCP: SERVER -> CLIENT yiaddr = {} chaddr = {}",
+        dhcp.yiaddr(),
+        dhcp.chaddr()
+    );
+    network.set_self_ip(Some(dhcp.yiaddr()));
+    let options = &packet[size_of::<DhcpPacket>()..];
+    let mut it = options.iter();
+    while let Some(op) = it.next().cloned() {
+        if op == DHCP_OPT_MESSAGE_TYPE_PADDING {
+            continue;
         }
-        (src, dst) => {
-            info!("net: rx: UDP :{src} -> :{dst}");
+        if op == DHCP_OPT_MESSAGE_TYPE_END {
+            break;
+        }
+        if let Some(len) = it.next().cloned() {
+            if len == 0 {
+                break;
+            }
+            let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
+            info!("op = {op}, data = {data:?}");
+            match op {
+                DHCP_OPT_MESSAGE_TYPE => match data[0] {
+                    DHCP_OPT_MESSAGE_TYPE_ACK => {
+                        info!("DHCPACK");
+                    }
+                    DHCP_OPT_MESSAGE_TYPE_OFFER => {
+                        info!("DHCPOFFER");
+                    }
+                    DHCP_OPT_MESSAGE_TYPE_DISCOVER => {
+                        info!("DHCPDISCOVER");
+                    }
+                    t => {
+                        info!("DHCP MESSAGE_TYPE = {t}");
+                    }
+                },
+                DHCP_OPT_NETMASK => {
+                    if let Ok(netmask) = IpV4Addr::from_slice(&data) {
+                        info!("netmask: {netmask}");
+                        network.set_netmask(Some(*netmask));
+                    }
+                }
+                DHCP_OPT_ROUTER => {
+                    if let Ok(router) = IpV4Addr::from_slice(&data) {
+                        info!("router: {router}");
+                        network.set_router(Some(*router));
+                    }
+                }
+                DHCP_OPT_DNS => {
+                    if let Ok(dns) = IpV4Addr::from_slice(&data) {
+                        info!("dns: {dns}");
+                        network.set_dns(Some(*dns));
+                    }
+                }
+                _ => {}
+            }
+            it.advance_by(len as usize)
+                .or(Err(Error::Failed("Invalid op data len")))?;
         }
     }
-
     Ok(())
+}
+
+fn handle_rx_udp(packet: &[u8]) -> Result<()> {
+    let udp = UdpPacket::from_slice(packet)?;
+    match (udp.src_port(), udp.dst_port()) {
+        (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => handle_rx_dhcp_client(packet),
+        (src, dst) => {
+            info!("net: rx: UDP :{src} -> :{dst}");
+            Ok(())
+        }
+    }
 }
 
 fn handle_rx_tcp(packet: &[u8]) -> Result<()> {

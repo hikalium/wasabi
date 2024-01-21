@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::fmt::Display;
 use core::mem::size_of;
 
 #[repr(packed)]
@@ -60,6 +61,11 @@ impl Debug for EthernetAddr {
             "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
             self.mac[0], self.mac[1], self.mac[2], self.mac[3], self.mac[4], self.mac[5],
         )
+    }
+}
+impl Display for EthernetAddr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        Debug::fmt(self, f)
     }
 }
 #[repr(packed)]
