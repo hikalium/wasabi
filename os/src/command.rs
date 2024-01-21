@@ -11,7 +11,7 @@ use crate::info;
 use crate::loader::Elf;
 use crate::net::icmp::IcmpPacket;
 use crate::net::ip::IpV4Addr;
-use crate::net::Network;
+use crate::net::manager::Network;
 use crate::println;
 use crate::util::Sliceable;
 use alloc::vec::Vec;

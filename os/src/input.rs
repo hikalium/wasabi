@@ -15,7 +15,7 @@ use crate::graphics::Bitmap;
 use crate::info;
 use crate::loader::Elf;
 use crate::mutex::Mutex;
-use crate::net::network_manager_thread;
+use crate::net::manager::network_manager_thread;
 use crate::print;
 use crate::ps2::keyboard_task;
 use crate::serial::SerialPort;

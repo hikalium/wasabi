@@ -3,7 +3,7 @@ extern crate alloc;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
 use crate::net::eth::EthernetType;
-use crate::net::IpV4Addr;
+use crate::net::ip::IpV4Addr;
 use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;

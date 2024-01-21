@@ -1,5 +1,5 @@
 use crate::net::checksum::InternetChecksum;
-use crate::net::IpV4Packet;
+use crate::net::ip::IpV4Packet;
 use crate::util::Sliceable;
 
 // https://datatracker.ietf.org/doc/html/rfc2131
