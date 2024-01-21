@@ -254,77 +254,91 @@ fn handle_receive(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()>
     }
 }
 
-pub async fn network_manager_thread() -> Result<()> {
-    info!("Network manager started running");
+fn probe_interfaces() -> Result<()> {
     let network = Network::take();
-
-    loop {
-        let interfaces = network.interfaces.lock();
-        if network
-            .interface_has_added
-            .compare_exchange_weak(true, false, Ordering::SeqCst, Ordering::Relaxed)
-            .is_ok()
-        {
-            info!("Network: network interfaces updated:");
-            for iface in &*interfaces {
-                if let Some(iface) = iface.upgrade() {
-                    info!("  {:?} {}", iface.ethernet_addr(), iface.name());
-                    let arp_req = ArpPacket::request(
-                        iface.ethernet_addr(),
-                        IpV4Addr::new([10, 0, 2, 15]),
-                        IpV4Addr::new([10, 0, 2, 2]),
-                    );
-                    iface.push_packet(arp_req.copy_into_slice())?;
-                    let dhcp_req = DhcpPacket::request(iface.ethernet_addr());
-                    iface.push_packet(dhcp_req.copy_into_slice())?;
-                }
-            }
-        }
-        if let Some(mut org_packet) = network.ip_tx_queue.lock().pop_front() {
-            if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
-                let dst_ip = ip_packet.dst();
-                if let (Some(src_ip), Some(mask)) =
-                    (*network.self_ip.lock(), *network.netmask.lock())
-                {
-                    let network_prefix = src_ip.network_prefix(mask);
-                    let next_hop_info = if network_prefix == dst_ip.network_prefix(mask) {
-                        network.arp_table.lock().get(&dst_ip).cloned()
-                    } else {
-                        network
-                            .router
-                            .lock()
-                            .and_then(|router_ip| network.arp_table.lock().get(&router_ip).cloned())
-                    };
-                    if let Some((next_hop, iface)) = next_hop_info {
-                        ip_packet.set_src(src_ip);
-                        if let Some(iface) = iface.upgrade() {
-                            ip_packet.eth = EthernetHeader::new(
-                                next_hop,
-                                iface.ethernet_addr(),
-                                EthernetType::ip_v4(),
-                            );
-                            ip_packet.clear_checksum();
-                            let csum = InternetChecksum::calc(
-                                &org_packet[size_of::<EthernetHeader>()..size_of::<IpV4Packet>()],
-                            );
-                            if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
-                                ip_packet.set_checksum(csum);
-                                iface.push_packet(org_packet)?;
-                            }
-                        }
-                    } else {
-                        warn!("No route to {dst_ip}. Dropping the packet.");
-                    }
-                }
-            }
-        }
+    let interfaces = network.interfaces.lock();
+    if network
+        .interface_has_added
+        .compare_exchange_weak(true, false, Ordering::SeqCst, Ordering::Relaxed)
+        .is_ok()
+    {
+        info!("Network: network interfaces updated:");
         for iface in &*interfaces {
             if let Some(iface) = iface.upgrade() {
-                if let Ok(packet) = iface.pop_packet() {
-                    handle_receive(&packet, &iface)?;
+                info!("  {:?} {}", iface.ethernet_addr(), iface.name());
+                let arp_req = ArpPacket::request(
+                    iface.ethernet_addr(),
+                    IpV4Addr::new([10, 0, 2, 15]),
+                    IpV4Addr::new([10, 0, 2, 2]),
+                );
+                iface.push_packet(arp_req.copy_into_slice())?;
+                let dhcp_req = DhcpPacket::request(iface.ethernet_addr());
+                iface.push_packet(dhcp_req.copy_into_slice())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn process_tx() -> Result<()> {
+    let network = Network::take();
+    if let Some(mut org_packet) = network.ip_tx_queue.lock().pop_front() {
+        if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
+            let dst_ip = ip_packet.dst();
+            if let (Some(src_ip), Some(mask)) = (*network.self_ip.lock(), *network.netmask.lock()) {
+                let network_prefix = src_ip.network_prefix(mask);
+                let next_hop_info = if network_prefix == dst_ip.network_prefix(mask) {
+                    network.arp_table.lock().get(&dst_ip).cloned()
+                } else {
+                    network
+                        .router
+                        .lock()
+                        .and_then(|router_ip| network.arp_table.lock().get(&router_ip).cloned())
+                };
+                if let Some((next_hop, iface)) = next_hop_info {
+                    ip_packet.set_src(src_ip);
+                    if let Some(iface) = iface.upgrade() {
+                        ip_packet.eth = EthernetHeader::new(
+                            next_hop,
+                            iface.ethernet_addr(),
+                            EthernetType::ip_v4(),
+                        );
+                        ip_packet.clear_checksum();
+                        let csum = InternetChecksum::calc(
+                            &org_packet[size_of::<EthernetHeader>()..size_of::<IpV4Packet>()],
+                        );
+                        if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
+                            ip_packet.set_checksum(csum);
+                            iface.push_packet(org_packet)?;
+                        }
+                    }
+                } else {
+                    warn!("No route to {dst_ip}. Dropping the packet.");
                 }
             }
         }
+    }
+    Ok(())
+}
+fn process_rx() -> Result<()> {
+    let network = Network::take();
+    let interfaces = network.interfaces.lock();
+    for iface in &*interfaces {
+        if let Some(iface) = iface.upgrade() {
+            if let Ok(packet) = iface.pop_packet() {
+                handle_receive(&packet, &iface)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn network_manager_thread() -> Result<()> {
+    info!("Network manager started running");
+    loop {
+        probe_interfaces()?;
+        process_tx()?;
+        process_rx()?;
         TimeoutFuture::new_ms(100).await;
     }
 }
