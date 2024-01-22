@@ -6,6 +6,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::info;
 use crate::input::InputManager;
+use crate::input::KeyEvent;
 use crate::memory::Mmio;
 use crate::usb::descriptor::ConfigDescriptor;
 use crate::usb::descriptor::EndpointDescriptor;
@@ -74,23 +75,6 @@ pub async fn init_usb_hid_keyboard(ddc: &mut UsbDeviceDriverContext) -> Result<(
         ddc.notify_ep(ep_desc)?;
     }
     Ok(())
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum KeyEvent {
-    None,
-    Char(char),
-    Enter,
-}
-
-impl KeyEvent {
-    fn to_char(&self) -> Option<char> {
-        match self {
-            KeyEvent::Char(c) => Some(*c),
-            KeyEvent::Enter => Some('\n'),
-            _ => None,
-        }
-    }
 }
 
 fn usage_id_to_char(usage_id: u8) -> Result<KeyEvent> {

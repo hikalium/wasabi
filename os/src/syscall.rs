@@ -4,47 +4,30 @@ use crate::input::InputManager;
 use crate::print;
 use crate::println;
 use crate::x86_64::ExecutionContext;
+use crate::x86_64::CONTEXT_APP;
 use crate::x86_64::CONTEXT_OS;
 
 fn write_return_value(retv: u64) {
-    let ctx = {
-        let ctx = CONTEXT_OS.lock();
-        *ctx
-    };
-    if ctx.is_null() {
-        panic!("context is invalid");
-    }
-    unsafe {
-        (*ctx).cpu.rax = retv;
-    }
+    CONTEXT_OS.lock().cpu.rax = retv;
 }
 
 fn write_exit_reason(retv: u64) {
-    let ctx = {
-        let ctx = CONTEXT_OS.lock();
-        *ctx
-    };
-    if ctx.is_null() {
-        panic!("context is invalid");
-    }
-    unsafe {
-        (*ctx).cpu.r8 = retv;
-    }
+    CONTEXT_OS.lock().cpu.r8 = retv;
 }
 
 fn return_to_os() {
-    let ctx = {
-        let ctx = CONTEXT_OS.lock();
-        *ctx
-    };
-    if ctx.is_null() {
-        panic!("context is invalid");
-    }
+    let return_to = CONTEXT_OS.lock().cpu.rip;
+    // SAFETY: This is safe as far as the CONTEXT_OS is valid so that
+    // we can return to the OS world correctly.
     unsafe {
+        let os_ctx = CONTEXT_OS.lock().as_mut_ptr();
+        let app_ctx = CONTEXT_APP.lock().as_mut_ptr();
         // c.f. https://rust-lang.github.io/unsafe-code-guidelines/layout/function-pointers.html
-        let f: extern "sysv64" fn(*const ExecutionContext) -> ! =
-            core::mem::transmute((*ctx).cpu.rip);
-        f(ctx)
+        let f: extern "sysv64" fn(
+            *mut ExecutionContext, /* rdi */
+            *mut ExecutionContext, /* rsi */
+        ) -> ! = core::mem::transmute(return_to);
+        f(os_ctx, app_ctx)
     }
 }
 

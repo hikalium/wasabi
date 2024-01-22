@@ -131,6 +131,7 @@ spellcheck :
 	@scripts/spellcheck.sh recieve receive
 	@scripts/spellcheck.sh faild failed
 	@scripts/spellcheck.sh mappng mapping
+	@scripts/spellcheck.sh priviledged privileged
 
 .PHONY : rustcheck
 rustcheck :

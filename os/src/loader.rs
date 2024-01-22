@@ -16,6 +16,7 @@ use crate::util::read_le_u64;
 use crate::util::write_le_u64;
 use crate::x86_64::paging::PageAttr;
 use crate::x86_64::ExecutionContext;
+use crate::x86_64::CONTEXT_APP;
 use crate::x86_64::CONTEXT_OS;
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -50,17 +51,19 @@ impl<'a> LoadedElf<'a> {
         stack.fill_with_bytes(0);
         stack.set_page_attr(PageAttr::ReadWriteUser)?;
         let entry_point = self.resolve_vaddr(self.elf.entry_vaddr as usize)?;
-        let os_ctx = ExecutionContext::allocate();
-        {
-            let mut ctx = CONTEXT_OS.lock();
-            *ctx = os_ctx;
-        }
         let mut retcode: i64;
         let mut exit_reason: i64;
+        {
+            let mut app_ctx = CONTEXT_APP.lock();
+            app_ctx.cpu.rip = entry_point as u64;
+            app_ctx.cpu.rflags = 2;
+        }
         loop {
             unsafe {
+                let os_ctx = CONTEXT_OS.lock().as_mut_ptr();
+                let app_ctx = CONTEXT_APP.lock().as_mut_ptr();
                 asm!(
-                    // Save current execution state in os_ctx
+                    // Save current execution state into CONTEXT_OS(rsi)
                     // General registers
                     "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop
                     "push rsi", // ExecutionContext.rsp
@@ -85,43 +88,48 @@ impl<'a> LoadedElf<'a> {
                     "sub rsp, 512",
                     "fxsave64[rsp]",
                     "xchg rsp,rsi", // recover the original rsp
+                    // At this point, the current CPU state is saved to CONTEXT_OS
 
                     // Set data segments to USER_DS
-                    "mov es, dx", // SS = crate::x86_64::USER_DS
-                    "mov ds, dx", // SS = crate::
+                    // rdx is passed from the Rust code (see the last part of this asm block).
+                    "mov es, dx",
+                    "mov ds, dx",
                     "mov fs, dx",
                     "mov gs, dx",
-                    // Use iretq to switch to user mode
-                    "push rdx", // SS = crate::x86_64::USER_DS
-                    "push rax", // RSP = stack_range.end()
-                    "mov eax, 2",
-                    "push rax", // RFLAGS = 2
-                    "push rcx", // CS = crate::x86_64::USER64_CS
-                    "push rdi", // RIP = entry_point
-                    // *(rip as *const InterruptContext) == {
-                    //   rip: u64,
-                    //   cs: u64,
-                    //   rflags: u64,
-                    //   rsp: u64,
-                    //   ss: u64,
-                    // }
-                    // far-jmp to app using ireq
-                    "iretq",
 
-                    // **** exit from app ****
+                    // Prepare the stack to use iretq to switch to user mode
+                    "mov rcx, rdi", // RCX = RIP to resume
+                    "mov r11, 2", // R11 = RFLAGS to resume
+                    "mov rsp, rax", // RSP = stack_range.end()
+
+                    // Start (or resume) the app execution
+                    "sysretq",
+
+                    // ---- no one will pass through here ----
+
+                    // **** return from app ****
                     "0:",
-                    // rdi (first arg in systemv abi) should be a pointer of ExecutionContext
-                    // See crate::syscall::sys_exit
-                    "mov rsp, rdi",
+                    // At this point:
+                    // - context: CONTEXT_APP + handling syscall
+                    //   - so it's in the kernel mode
+                    // - rdi: addr of CONTEXT_OS
+                    // - rsi: addr of CONTEXT_APP
+
+                    // Recover the segment registers
+                    "push rdi", // Use rdi as TMP
                     "mov di,ss",
                     "mov ds,di",
                     "mov es,di",
                     "mov fs,di",
                     "mov gs,di",
+                    "pop rdi",  // Recover rdi value
+
+                    // Load the cpu state from CONTEXT_OS
+                    "xchg rsp, rdi", // swap rsp and rdi to utilize push / pop
                     "fxrstor64[rsp]",
                     "add rsp, 512",
-                    "pop rax", // drop ExecutionContext.rip
-                    "pop rax", // drop ExecutionContext.rflags
+                    "pop rax", // Skip RIP
+                    "popfq", // Restore RFLAGS
                     "pop rax",
                     "pop rcx",
                     "pop rdx",
@@ -137,17 +145,20 @@ impl<'a> LoadedElf<'a> {
                     "pop r13",
                     "pop r14",
                     "pop r15",
-                    "pop rsp", // ExecutionContext.rsp
+                    "pop rsp",
+                    // At this point, the CPU state is same as the CONTEXT_OS except for RIP.
+                    // Returning to the Rust code and continue the execution.
+
                     in("rax") stack_range.end(), // stack grows toward 0, so empty stack pointer will be the end addr
                     in("rcx") crate::x86_64::USER64_CS,
                     in("rdx") crate::x86_64::USER_DS,
                     // rbx is used for LLVM internally
                     in("rsi") (os_ctx as *mut u8).add(size_of::<ExecutionContext>()),
+                    in("r9") (app_ctx as *mut u8).add(size_of::<ExecutionContext>()),
                     in("rdi") entry_point,
                     lateout("rax") retcode,
                     lateout("r8") exit_reason,
                 );
-                println!("exit_reason: {exit_reason}");
                 if exit_reason == 0 {
                     // return to os
                     break;
