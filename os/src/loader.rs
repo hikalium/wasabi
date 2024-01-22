@@ -53,6 +53,11 @@ impl<'a> LoadedElf<'a> {
         let entry_point = self.resolve_vaddr(self.elf.entry_vaddr as usize)?;
         let mut retcode: i64;
         let mut exit_reason: i64;
+        {
+            let mut app_ctx = CONTEXT_APP.lock();
+            app_ctx.cpu.rip = entry_point as u64;
+            app_ctx.cpu.rflags = 2;
+        }
         loop {
             unsafe {
                 let os_ctx = CONTEXT_OS.lock().as_mut_ptr();

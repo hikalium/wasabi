@@ -102,8 +102,13 @@ pub struct ExecutionContext {
     // CpuContext should be at the end to put rsp at bottom
 }
 impl ExecutionContext {
-    ///
-    /// # Safety:
+    /// # Safety
+    /// This function should only be used for passing the ptr
+    /// to the context-switching asm macro so that they can
+    /// access to the context without taking a lock.
+    /// The context-switching code does not modify the context
+    /// while the asm code is running, so the borrow rule for
+    /// the object will be maintained from the Rust's point of view.
     pub unsafe fn as_mut_ptr(&mut self) -> *mut Self {
         self as *mut Self
     }
