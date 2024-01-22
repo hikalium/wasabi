@@ -26,7 +26,7 @@ fn main() -> Result<()> {
                 line.clear();
             } else {
                 println!("\npush!");
-                line.push_str("h");
+                line.push('h');
             }
         }
     }
