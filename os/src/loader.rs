@@ -45,7 +45,7 @@ impl<'a> LoadedElf<'a> {
         Err(Error::Failed("vaddr not found"))
     }
     pub async fn exec(self) -> Result<i64> {
-        let stack_size = 8 * 1024;
+        let stack_size = 1024 * 1024;
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
         let stack_range = stack.range();
         stack.fill_with_bytes(0);
