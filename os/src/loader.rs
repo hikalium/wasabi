@@ -62,7 +62,7 @@ async fn exec_app_context() -> Result<i64> {
                 "push rcx",
                 "push rax",
                 "pushfq", // ExecutionContext.rflags
-                "lea r8, [rip+0f]", // ExecutionContext.rip
+                "lea r8, [rip+0f]", // ExecutionContext.rip, return address from app
                 "push r8", // ExecutionContext.rip
                 "sub rsp, 512",
                 "fxsave64[rsp]",
@@ -86,7 +86,8 @@ async fn exec_app_context() -> Result<i64> {
 
                 // ---- no one will pass through here ----
 
-                // **** return from app ****
+                // **** return from app via return_to_os() ****
+                // See also: os/src/syscall.rs
                 "0:",
                 // At this point:
                 // - context: CONTEXT_APP + handling syscall
@@ -94,9 +95,11 @@ async fn exec_app_context() -> Result<i64> {
                 // - rdi: addr of CONTEXT_OS
                 // - rsi: addr of CONTEXT_APP
 
-                // Recover the segment registers
+                // Recover the segment registers to OS
                 "push rdi", // Use rdi as TMP
-                "mov di,ss",
+                "mov di,ss", // SS is already pointing the OS data segment
+                             // (which is done by the CPU when entering syscall)
+                             // so copy it to other segment registers.
                 "mov ds,di",
                 "mov es,di",
                 "mov fs,di",
