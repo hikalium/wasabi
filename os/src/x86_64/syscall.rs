@@ -91,7 +91,8 @@ global_asm!(
     //
     ".global return_to_app",
     "return_to_app:",
-    //
+    // This block assumes:
+    // - RSP = User stack, with saved registers
     "pop rax",
     "pop rdx",
     "pop rsi",

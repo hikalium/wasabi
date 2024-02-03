@@ -77,12 +77,28 @@ async fn exec_app_context() -> Result<i64> {
                 "mov gs, dx",
 
                 // Prepare the stack to use iretq to switch to user mode
-                "mov rcx, rdi", // RCX = RIP to resume
-                "mov r11, 2", // R11 = RFLAGS to resume
-                "mov rsp, rax", // RSP = stack_range.end()
-
+                "mov rsp, rax", // RSP = stack for app
+                // Push values needed by `return_to_app`
+                "push rdi", // RIP to resume
+                "push 2", // RFLAGS to resume
+                //
+                "push rbx",
+                "push rbp",
+                "push r15",
+                "push r14",
+                "push r13",
+                "push r12",
+                //
+                "push r10",
+                "push r9",
+                "push r8",
+                "push rdi",
+                "push rsi",
+                "push rdx",
+                "push rax",
                 // Start (or resume) the app execution
-                "sysretq",
+                ".global return_to_app", // external symbol
+                "jmp return_to_app",
 
                 // ---- no one will pass through here ----
 
