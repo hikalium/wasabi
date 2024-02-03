@@ -95,9 +95,14 @@ app_unit_test:
 	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
 		xargs -I {} -n 1 -- bash -c 'make -C {} test'
 
+# Run app on WasabiOS and check if it exits succesfully
+.PHONY : run_app_test
+run_app_test:
+	make internal_run_app_test INIT="hello1"
+
 .PHONY : pre_upload_test
 pre_upload_test:
-	make internal_run_app_test INIT="hello1"
+	make run_app_test
 	make run_os_test
 	make run_os_lib_test
 	make app_unit_test

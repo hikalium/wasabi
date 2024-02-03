@@ -1,3 +1,32 @@
+//! # syscall context transitions
+//!
+//! ## Basic execution state
+//!
+//! In x86, we have following elements in the execution environment:
+//!
+//! ### u64 registers (in it's opcode encoding order):
+//! - RAX
+//! - RCX
+//! - RDX
+//! - RBX
+//! - RSP
+//! - RBP
+//! - RSI
+//! - RDI
+//! - R8-15
+//!
+//! ### segment registers (in it's opcode encoding order)
+//! - ES
+//! - CS
+//! - SS
+//! - DS
+//! - FS
+//! - GS
+//!
+//! ### other
+//! - RFLAGS
+//! - RIP
+
 use crate::x86_64::read_msr;
 use crate::x86_64::write_msr;
 use crate::x86_64::KERNEL_CS;
@@ -7,11 +36,14 @@ use crate::x86_64::MSR_LSTAR;
 use crate::x86_64::MSR_STAR;
 use crate::x86_64::USER32_CS;
 use core::arch::global_asm;
+
 // https://doc.rust-lang.org/reference/items/external-blocks.html#abi
 // https://doc.rust-lang.org/reference/inline-assembly.html
 // https://www.intel.com/content/dam/develop/public/us/en/documents/325383-sdm-vol-2abcd.pdf#page=1401
 global_asm!(
+    // **** Symbols from Rust code
     ".global syscall_handler",
+    // **** Implementations
     ".global asm_syscall_handler",
     "asm_syscall_handler:",
     // On syscall entry,
@@ -33,8 +65,8 @@ global_asm!(
     // }
 
     // Save all registers
-    "push rcx // Saved RIP",
-    "push r11 // Saved RFLAGS",
+    "push rcx", // RIP saved on syscall
+    "push r11", // RFLAGS saved on syscall,
     //
     "push rbx",
     "push rbp",
@@ -51,11 +83,14 @@ global_asm!(
     "push rdx",
     "push rax",
     //
-    "mov rbp, rsp",
-    "mov rdi, rsp",
-    "and rsp, -16",
+    "mov rbp, rsp", // Save rsp to restore later
+    "mov rdi, rsp", // First argument for syscall_handler (regs)
+    "and rsp, -16", // Align the stack (to satisfy sysv64 ABI)
     "call syscall_handler",
-    "mov rsp, rbp // Revert to user stack",
+    "mov rsp, rbp", // Recover original stack value
+    //
+    ".global return_to_app",
+    "return_to_app:",
     //
     "pop rax",
     "pop rdx",
@@ -72,8 +107,8 @@ global_asm!(
     "pop rbp",
     "pop rbx",
     //
-    "pop r11 // Saved RFLAGS",
-    "pop rcx // Saved RIP",
+    "pop r11", // RFLAGS saved on syscall,
+    "pop rcx", // RIP saved on syscall
     //
     "sysretq",
     // sysretq will do:
