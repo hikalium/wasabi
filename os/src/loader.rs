@@ -122,6 +122,8 @@ async fn exec_app_context() -> Result<i64> {
                 "mov gs,di",
                 "pop rdi",  // Recover rdi value
 
+                // Save the cpu state to CONTEXT_APP
+
                 // Load the cpu state from CONTEXT_OS
                 "xchg rsp, rdi", // swap rsp and rdi to utilize push / pop
                 "fxrstor64[rsp]",
