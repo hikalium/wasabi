@@ -19,6 +19,7 @@ use crate::vram;
 use crate::vram::VRAMBufferInfo;
 use crate::x86_64;
 use crate::x86_64::apic::IoApic;
+use crate::x86_64::block_interrupts;
 use crate::x86_64::gdt::Gdt;
 use crate::x86_64::idt::Idt;
 use crate::x86_64::idt::TaskStateSegment64;
@@ -224,6 +225,7 @@ pub struct InterruptConfiguration {
 }
 
 pub fn init_interrupts() -> Result<InterruptConfiguration> {
+    block_interrupts();
     let tss64 = TaskStateSegment64::new()?;
     let gdt = Gdt::new(&tss64)?;
     unsafe {

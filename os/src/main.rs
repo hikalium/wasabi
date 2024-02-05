@@ -125,7 +125,6 @@ fn main() -> Result<()> {
     init::init_graphical_terminal();
     paint_wasabi_logo();
 
-    unsafe { core::arch::asm!("cli") }
     let interrupt_config = init::init_interrupts()?;
     core::mem::forget(interrupt_config);
     init::init_paging()?;

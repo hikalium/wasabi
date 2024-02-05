@@ -88,5 +88,23 @@ else
 	exit 1
 fi
 
+set +e
+LIST=`git grep 'asm!' | cut -d ':' -f 1 | uniq | grep '^os/src/' | grep -v '^os/src/x86_64'`
+RESULT_STATUS=$?
+set -e
+if test $RESULT_STATUS -eq 0; then
+	echo "----"
+	echo "${LIST}"
+	echo "----"
+	echo "FAIL: asm! macro is prohibited outside of arch-specific implementation. Please remove them."
+	exit 1
+elif test $RESULT_STATUS -eq 1; then
+	echo "PASS: No asm! macro usage found in arch-independent part"
+else
+	echo "FAIL: something went wrong"
+	exit 1
+fi
+
+
 echo "PASS: rustcheck done"
 exit 0

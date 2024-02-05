@@ -14,8 +14,8 @@ use crate::net::ip::IpV4Addr;
 use crate::net::manager::Network;
 use crate::println;
 use crate::util::Sliceable;
+use crate::x86_64::trigger_debug_interrupt;
 use alloc::vec::Vec;
-use core::arch::asm;
 use core::str::FromStr;
 
 async fn run_app(name: &str) -> Result<i64> {
@@ -49,9 +49,9 @@ pub async fn run(cmdline: &str) -> Result<()> {
     println!("\n{args:?}");
     if let Some(&cmd) = args.first() {
         match cmd {
-            "panic" => unsafe {
-                asm!("int3");
-            },
+            "panic" => {
+                trigger_debug_interrupt();
+            }
             "ip" => {
                 println!("netmask: {:?}", network.netmask());
                 println!("router: {:?}", network.router());

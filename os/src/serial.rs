@@ -1,6 +1,6 @@
+use crate::x86_64::busy_loop_hint;
 use crate::x86_64::read_io_port_u8;
 use crate::x86_64::write_io_port_u8;
-use core::arch::asm;
 use core::convert::TryInto;
 use core::fmt;
 
@@ -34,7 +34,7 @@ impl SerialPort {
     }
     pub fn send_char(&self, c: char) {
         while (read_io_port_u8(self.base() + 5) & 0x20) == 0 {
-            unsafe { asm!("pause") }
+            busy_loop_hint();
         }
         write_io_port_u8(self.base(), c as u8)
     }

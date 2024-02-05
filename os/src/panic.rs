@@ -12,10 +12,7 @@ fn panic(info: &PanicInfo) -> ! {
     writeln!(serial_writer, "[PANIC] {:?}", info).unwrap();
     println!("[PANIC] {:?}", info);
     #[cfg(not(test))]
-    loop {
-        use core::arch::asm;
-        unsafe { asm!("hlt") }
-    }
+    crate::x86_64::rest_in_peace();
     #[cfg(test)]
     debug_exit::exit_qemu(debug_exit::QemuExitCode::Fail);
 }

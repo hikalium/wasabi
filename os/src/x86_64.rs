@@ -55,6 +55,7 @@ Comparison:
 */
 
 pub mod apic;
+pub mod context;
 pub mod gdt;
 pub mod idt;
 pub mod paging;
@@ -409,8 +410,20 @@ pub fn disable_legacy_pic() {
     write_io_port_u8(0x21, 0xff);
 }
 
+pub fn allow_interrupts() {
+    unsafe { asm!("sti") }
+}
+
+pub fn block_interrupts() {
+    unsafe { asm!("cli") }
+}
+
 pub fn hlt() {
     unsafe { asm!("hlt") }
+}
+
+pub fn trigger_debug_interrupt() {
+    unsafe { asm!("int3") }
 }
 
 pub fn stihlt() {
