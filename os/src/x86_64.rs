@@ -63,11 +63,8 @@ pub mod syscall;
 
 extern crate alloc;
 
-use crate::mutex::Mutex;
 use core::arch::asm;
 use core::fmt;
-use core::mem::size_of;
-use core::mem::MaybeUninit;
 
 // Due to the syscall instruction spec
 // GDT entries should be in this order:
@@ -89,84 +86,6 @@ pub const MSR_LSTAR: u32 = 0xC0000082;
 pub const MSR_FMASK: u32 = 0xC0000084;
 pub const MSR_FS_BASE: u32 = 0xC0000100;
 pub const MSR_KERNEL_GS_BASE: u32 = 0xC0000102;
-
-pub static CONTEXT_OS: Mutex<ExecutionContext> =
-    Mutex::new(ExecutionContext::default(), "CONTEXT_OS");
-pub static CONTEXT_APP: Mutex<ExecutionContext> =
-    Mutex::new(ExecutionContext::default(), "CONTEXT_APP");
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct ExecutionContext {
-    pub fpu: FpuContext,
-    pub cpu: CpuContext,
-    // CpuContext should be at the end to put rsp at bottom
-}
-impl ExecutionContext {
-    /// # Safety
-    /// This function should only be used for passing the ptr
-    /// to the context-switching asm macro so that they can
-    /// access to the context without taking a lock.
-    /// The context-switching code does not modify the context
-    /// while the asm code is running, so the borrow rule for
-    /// the object will be maintained from the Rust's point of view.
-    pub unsafe fn as_mut_ptr(&mut self) -> *mut Self {
-        self as *mut Self
-    }
-    // We implement this outside of trait since Default trait is not const yet.
-    // c.f. https://github.com/rust-lang/rust/issues/67792
-    pub const fn default() -> Self {
-        Self {
-            fpu: FpuContext { data: [0u8; 512] },
-            cpu: CpuContext::default(),
-        }
-    }
-}
-const _: () =
-    assert!(size_of::<ExecutionContext>() == size_of::<FpuContext>() + size_of::<CpuContext>());
-
-#[repr(C, align(16))]
-#[derive(Clone, Debug)]
-pub struct FpuContext {
-    // See manual for FXSAVE and FXRSTOR
-    // Should be aligned on 16-byte boundary
-    pub data: [u8; 512],
-}
-const _: () = assert!(size_of::<FpuContext>() == 512);
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct CpuContext {
-    pub rip: u64,
-    pub rflags: u64,
-    //
-    pub rax: u64,
-    pub rcx: u64,
-    pub rdx: u64,
-    pub rbx: u64,
-    pub rbp: u64,
-    pub rsi: u64,
-    pub rdi: u64,
-    pub r8: u64,
-    pub r9: u64,
-    pub r10: u64,
-    pub r11: u64,
-    pub r12: u64,
-    pub r13: u64,
-    pub r14: u64,
-    pub r15: u64,
-    pub rsp: u64, // rsp should be here to make load / store easy
-}
-impl CpuContext {
-    // We implement this outside of trait since Default trait is not const yet.
-    // c.f. https://github.com/rust-lang/rust/issues/67792
-    const fn default() -> Self {
-        // SAFETY: CpuContext only contains integers so zeroed out structure is completely valid as
-        // this type.
-        unsafe { MaybeUninit::zeroed().assume_init() }
-    }
-}
-const _: () = assert!(size_of::<CpuContext>() == 8 * 16 + 8 * 2);
 
 pub fn read_rsp() -> u64 {
     let mut value;
@@ -431,9 +350,7 @@ pub fn stihlt() {
 }
 
 pub fn rest_in_peace() -> ! {
-    unsafe {
-        loop {
-            core::arch::asm!("cli;hlt;")
-        }
+    loop {
+        unsafe { asm!("cli;hlt;") }
     }
 }

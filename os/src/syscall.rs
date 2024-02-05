@@ -3,9 +3,9 @@ use crate::graphics::draw_point;
 use crate::input::InputManager;
 use crate::print;
 use crate::println;
-use crate::x86_64::ExecutionContext;
-use crate::x86_64::CONTEXT_APP;
-use crate::x86_64::CONTEXT_OS;
+use crate::x86_64::context::ExecutionContext;
+use crate::x86_64::context::CONTEXT_APP;
+use crate::x86_64::context::CONTEXT_OS;
 
 fn write_return_value(retv: u64) {
     CONTEXT_OS.lock().cpu.rax = retv;
