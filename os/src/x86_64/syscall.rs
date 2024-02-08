@@ -67,24 +67,27 @@ global_asm!(
     //      DPL: 0
     // }
 
-    // Save all registers
-    "push rcx", // RIP saved on syscall
-    "push r11", // RFLAGS saved on syscall,
-    //
-    "push rbx",
-    "push rbp",
+    // Preserve registers after syscall
+    "sub rsp,64",
+    "push rsp",
     "push r15",
     "push r14",
     "push r13",
     "push r12",
-    //
+    "push 0", // r11 (destroyed)
     "push r10",
     "push r9",
     "push r8",
     "push rdi",
     "push rsi",
+    "push rbp",
+    "push rbx",
     "push rdx",
+    "push 0", // rcx (destroyed)
     "push rax",
+    "push r11",     // RFLAGS saved on syscall
+    "push rcx",     // RIP saved on syscall
+    "sub rsp, 512", // Pseudo-FpuContext
     //
     "mov rbp, rsp", // Save rsp to restore later
     "mov rdi, rsp", // First argument for syscall_handler (regs)
@@ -94,25 +97,29 @@ global_asm!(
     //
     ".global return_to_app",
     "return_to_app:",
+    // Restore registers to sysret
     // This block assumes:
     // - RSP = User stack, with saved registers
+    "add rsp, 512", // Pseudo-FpuContext
+    "pop rcx",      // RIP saved on syscall
+    "pop r11",      // RFLAGS saved on syscall
     "pop rax",
+    "add rsp, 8", // rcx (destroyed)
     "pop rdx",
+    "pop rbx",
+    "pop rbp",
     "pop rsi",
     "pop rdi",
     "pop r8",
     "pop r9",
     "pop r10",
-    //
+    "add rsp, 8", // r11 (destroyed)
     "pop r12",
     "pop r13",
     "pop r14",
     "pop r15",
-    "pop rbp",
-    "pop rbx",
-    //
-    "pop r11", // RFLAGS saved on syscall,
-    "pop rcx", // RIP saved on syscall
+    "add rsp,8", // rsp (skip)
+    "add rsp,64",
     //
     "sysretq",
     // sysretq will do:
@@ -176,13 +183,21 @@ pub fn return_to_os() {
 }
 
 #[no_mangle]
-pub extern "sysv64" fn arch_syscall_handler(regs: &mut [u64; 16]) {
-    let args = {
-        let mut args = [0u64; 6];
-        args.copy_from_slice(&regs[2..8]);
-        args
-    };
-    let op = regs[1];
+pub extern "sysv64" fn arch_syscall_handler(ctx: &mut ExecutionContext) {
+    //wasabi: WasabiOS syscall ABI
+    //    retv: rax
+    //    func: rdx
+    //    argN: rsi, rdi, r8, r9, r10
+    //    temp: rcx, r11                          // destroyed by the syscall instruction
+    //    keep: rbx, rsp, rbp, r12, r13, r14, r15
+    let args = [
+        ctx.cpu.rsi,
+        ctx.cpu.rdi,
+        ctx.cpu.r8,
+        ctx.cpu.r9,
+        ctx.cpu.r10,
+    ];
+    let op = ctx.cpu.rdx;
     let ret = crate::syscall::syscall_handler(op, &args);
-    regs[0] = ret;
+    ctx.cpu.rax = ret;
 }

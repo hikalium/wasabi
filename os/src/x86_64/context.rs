@@ -52,9 +52,8 @@ const _: () = assert!(size_of::<FpuContext>() == 512);
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct CpuContext {
-    pub rip: u64,
-    pub rflags: u64,
-    //
+    pub rip: u64,    // set by CPU
+    pub rflags: u64, // set by CPU
     pub rax: u64,
     pub rcx: u64,
     pub rdx: u64,
@@ -133,23 +132,26 @@ pub async fn exec_app_context() -> Result<i64> {
                 // Prepare the stack to use iretq to switch to user mode
                 "mov rsp, rax", // RSP = stack for app
                 // Push values needed by `return_to_app`
-                "push rdi", // RIP to resume
-                "push 2", // RFLAGS to resume
-                //
-                "push rbx",
-                "push rbp",
+                "sub rsp,64",
+                "push rsp",
                 "push r15",
                 "push r14",
                 "push r13",
                 "push r12",
-                //
+                "push r11",
                 "push r10",
                 "push r9",
                 "push r8",
                 "push rdi",
                 "push rsi",
+                "push rbp",
+                "push rbx",
                 "push rdx",
+                "push rcx",
                 "push rax",
+                "push 2",     // RFLAGS saved on syscall
+                "push rdi",     // RIP saved on syscall
+                "sub rsp, 512", // Pseudo-FpuContext
                 // Start (or resume) the app execution
                 ".global return_to_app", // external symbol
                 "jmp return_to_app",

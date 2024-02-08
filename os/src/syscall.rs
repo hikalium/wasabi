@@ -20,11 +20,11 @@ fn yield_to_os(retv: u64) {
     return_to_os();
 }
 
-fn sys_exit(args: &[u64; 6]) -> ! {
+fn sys_exit(args: &[u64; 5]) -> ! {
     exit_to_os(args[0]);
 }
 
-fn sys_print(args: &[u64; 6]) -> u64 {
+fn sys_print(args: &[u64; 5]) -> u64 {
     // TODO(hikalium): validate the buffer
     let s = args[0] as *const u8;
     let len = args[1] as usize;
@@ -34,11 +34,11 @@ fn sys_print(args: &[u64; 6]) -> u64 {
     0
 }
 
-fn sys_noop(_args: &[u64; 6]) -> u64 {
+fn sys_noop(_args: &[u64; 5]) -> u64 {
     0
 }
 
-fn sys_draw_point(args: &[u64; 6]) -> u64 {
+fn sys_draw_point(args: &[u64; 5]) -> u64 {
     let mut vram = BootInfo::take().vram();
     let x = args[0] as i64;
     let y = args[1] as i64;
@@ -51,7 +51,7 @@ fn sys_draw_point(args: &[u64; 6]) -> u64 {
     }
 }
 
-fn sys_read_key(_args: &[u64; 6]) -> u64 {
+fn sys_read_key(_args: &[u64; 5]) -> u64 {
     (loop {
         if let Some(c) = InputManager::take().pop_input() {
             break c;
@@ -60,7 +60,7 @@ fn sys_read_key(_args: &[u64; 6]) -> u64 {
     }) as u64
 }
 
-pub fn syscall_handler(op: u64, args: &[u64; 6]) -> u64 {
+pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
     match op {
         0 => sys_exit(args),
         1 => sys_print(args),
