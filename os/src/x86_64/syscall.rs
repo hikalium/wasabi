@@ -27,6 +27,9 @@
 //! - RFLAGS
 //! - RIP
 
+use crate::x86_64::context::ExecutionContext;
+use crate::x86_64::context::CONTEXT_APP;
+use crate::x86_64::context::CONTEXT_OS;
 use crate::x86_64::read_msr;
 use crate::x86_64::write_msr;
 use crate::x86_64::KERNEL_CS;
@@ -42,7 +45,7 @@ use core::arch::global_asm;
 // https://www.intel.com/content/dam/develop/public/us/en/documents/325383-sdm-vol-2abcd.pdf#page=1401
 global_asm!(
     // **** Symbols from Rust code
-    ".global syscall_handler",
+    ".global arch_syscall_handler",
     // **** Implementations
     ".global asm_syscall_handler",
     "asm_syscall_handler:",
@@ -86,7 +89,7 @@ global_asm!(
     "mov rbp, rsp", // Save rsp to restore later
     "mov rdi, rsp", // First argument for syscall_handler (regs)
     "and rsp, -16", // Align the stack (to satisfy sysv64 ABI)
-    "call syscall_handler",
+    "call arch_syscall_handler",
     "mov rsp, rbp", // Recover original stack value
     //
     ".global return_to_app",
@@ -146,4 +149,40 @@ pub fn init_syscall() {
         efer |= 1; // SCE: System Call Enable
         write_msr(MSR_EFER, efer);
     }
+}
+
+pub fn write_return_value(retv: u64) {
+    CONTEXT_OS.lock().cpu.rax = retv;
+}
+
+pub fn write_exit_reason(retv: u64) {
+    CONTEXT_OS.lock().cpu.r8 = retv;
+}
+
+pub fn return_to_os() {
+    let return_to = CONTEXT_OS.lock().cpu.rip;
+    // SAFETY: This is safe as far as the CONTEXT_OS is valid so that
+    // we can return to the OS world correctly.
+    unsafe {
+        let os_ctx = CONTEXT_OS.lock().as_mut_ptr();
+        let app_ctx = CONTEXT_APP.lock().as_mut_ptr();
+        // c.f. https://rust-lang.github.io/unsafe-code-guidelines/layout/function-pointers.html
+        let f: extern "sysv64" fn(
+            *mut ExecutionContext, /* rdi */
+            *mut ExecutionContext, /* rsi */
+        ) -> ! = core::mem::transmute(return_to);
+        f(os_ctx, app_ctx)
+    }
+}
+
+#[no_mangle]
+pub extern "sysv64" fn arch_syscall_handler(regs: &mut [u64; 16]) {
+    let args = {
+        let mut args = [0u64; 6];
+        args.copy_from_slice(&regs[2..8]);
+        args
+    };
+    let op = regs[1];
+    let ret = crate::syscall::syscall_handler(op, &args);
+    regs[0] = ret;
 }
