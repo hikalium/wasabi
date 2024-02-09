@@ -254,6 +254,9 @@ global_asm!(
     //      DPL: 0
     // }
 
+    // We are assuming that rsp is 16-byte aligned at this point, to make fxsave64 and fxrstor64
+    // works. This is userland's responsibility and failed to do so will lead to GP(0) fault.
+
     // Preserve registers after syscall
     "sub rsp,64",
     "push rsp",
