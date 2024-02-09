@@ -22,6 +22,7 @@
 #![feature(iter_advance_by)]
 #![feature(linked_list_cursors)]
 #![feature(offset_of)]
+#![feature(slice_from_ptr_range)]
 
 mod acpi;
 pub mod allocator;

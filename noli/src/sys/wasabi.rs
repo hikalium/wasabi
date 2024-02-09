@@ -84,58 +84,33 @@ unsafe impl GlobalAlloc for GlobalAllocatorWrapper {
 use core::arch::asm;
 
 fn syscall_0(func: u64) -> u64 {
-    let mut retv;
-    unsafe {
-        asm!(
-        "syscall",
-        out("rax") retv,
-        out("rcx") _, // destroyed by the syscall instruction
-        in("rdx") func,
-        out("r11") _, // destroyed by the syscall instruction
-        )
-    }
-    retv
+    syscall_5(func, 0, 0, 0, 0, 0)
 }
 fn syscall_1(func: u64, arg1: u64) -> u64 {
-    let mut retv;
-    unsafe {
-        asm!(
-        "syscall",
-        out("rax") retv,
-        out("rcx") _, // destroyed by the syscall instruction
-        in("rdx") func,
-        in("rsi") arg1,
-        out("r11") _, // destroyed by the syscall instruction
-        )
-    }
-    retv
+    syscall_5(func, arg1, 0, 0, 0, 0)
 }
 fn syscall_2(func: u64, arg1: u64, arg2: u64) -> u64 {
-    let mut retv;
-    unsafe {
-        asm!(
-        "syscall",
-        out("rax") retv,
-        out("rcx") _, // destroyed by the syscall instruction
-        in("rdx") func,
-        in("rsi") arg1,
-        in("rdi") arg2,
-        out("r11") _, // destroyed by the syscall instruction
-        )
-    }
-    retv
+    syscall_5(func, arg1, arg2, 0, 0, 0)
 }
 fn syscall_3(func: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
+    syscall_5(func, arg1, arg2, arg3, 0, 0)
+}
+fn syscall_5(func: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> u64 {
     let mut retv;
     unsafe {
         asm!(
+        "push rsp",
+        "and rsp, -16",
         "syscall",
+        "pop rsp",
         out("rax") retv,
         out("rcx") _, // destroyed by the syscall instruction
         in("rdx") func,
         in("rsi") arg1,
         in("rdi") arg2,
         in("r8") arg3,
+        in("r9") arg4,
+        in("r10") arg5,
         out("r11") _, // destroyed by the syscall instruction
         )
     }

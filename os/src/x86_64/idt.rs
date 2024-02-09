@@ -260,6 +260,11 @@ extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
         }
         13 => {
             error!("General Protection Fault");
+            let rip = info.ctx.rip;
+            error!("Bytes @ RIP({rip:#018X}):");
+            let rip = rip as *const u8;
+            let bytes = unsafe { core::slice::from_ptr_range(rip..(rip.offset(16))) };
+            error!("  = {bytes:02X?}");
         }
         14 => {
             error!("Page Fault");

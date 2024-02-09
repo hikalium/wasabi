@@ -152,7 +152,8 @@ pub async fn exec_app_context() -> Result<i64> {
                 "push rax",
                 "push 2",     // RFLAGS saved on syscall
                 "push rdi",     // RIP saved on syscall
-                "sub rsp, 512", // Pseudo-FpuContext
+                "sub rsp, 512", // FpuContext
+                "fxsave64[rsp]",
                 // Start (or resume) the app execution
                 ".global return_to_app", // external symbol
                 "jmp return_to_app",
@@ -273,7 +274,8 @@ global_asm!(
     "push rax",
     "push r11",     // RFLAGS saved on syscall
     "push rcx",     // RIP saved on syscall
-    "sub rsp, 512", // Pseudo-FpuContext
+    "sub rsp, 512", // FpuContext
+    "fxsave64[rsp]",
     //
     "mov rbp, rsp", // Save rsp to restore later
     "mov rdi, rsp", // First argument for syscall_handler (regs)
@@ -286,7 +288,8 @@ global_asm!(
     // Restore registers to sysret
     // This block assumes:
     // - RSP = User stack, with saved registers
-    "add rsp, 512", // Pseudo-FpuContext
+    "fxrstor64[rsp]",
+    "add rsp, 512", // FpuContext
     "pop rcx",      // RIP saved on syscall
     "pop r11",      // RFLAGS saved on syscall
     "pop rax",
