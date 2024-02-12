@@ -11,22 +11,20 @@ use noli::println;
 /// Reverses the input string on a row.
 /// Input q and enter to exit
 fn main() -> Result<()> {
-    println!("rev~");
     let mut line = String::new();
     loop {
         if let Some(c) = char::from_u32(noli::sys::read_key() as u32) {
             print!("{c}");
-            if c == 'q' {
-                break;
-            } else if c == '\n' {
-                println!("rev!!");
+            if c == '\n' {
+                if line == "q" {
+                    println!("bye!");
+                    break;
+                }
                 let reversed = line.chars().rev().collect::<String>();
-                println!(">>> '{line}'");
-                println!(">>> '{reversed}'");
+                println!("{reversed}");
                 line.clear();
             } else {
-                println!("\npush!");
-                line.push('h');
+                line.push(c);
             }
         }
     }
