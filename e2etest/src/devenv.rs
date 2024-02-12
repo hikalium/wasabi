@@ -88,4 +88,12 @@ impl DevEnv {
     fn build_wasabi() -> Result<()> {
         run_shell_cmd_at_nocapture("cargo build --release", "./os/")
     }
+    pub fn build_builtin_app(&self, name: &str) -> Result<String> {
+        let app_src_dir = format!("./app/{name}");
+        run_shell_cmd_at_nocapture("make", app_src_dir.as_str())?;
+        Ok(format!(
+            "{}/generated/bin/{name}",
+            self.wasabi_workspace_root_dir
+        ))
+    }
 }

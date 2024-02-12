@@ -34,6 +34,13 @@ impl RootFs {
             ".",
         )
     }
+    pub fn copy_file_from(&self, src_path: &str) -> Result<()> {
+        let rootfs = &self.path;
+        run_shell_cmd_at_nocapture(
+            &format!("mkdir -p {rootfs} && cp -r {src_path} {rootfs}/"),
+            ".",
+        )
+    }
 }
 
 pub struct QemuMonitor {
@@ -222,12 +229,20 @@ impl Qemu {
         self.proc = Some(proc);
         Ok(())
     }
-    pub fn launch_with_wasabi_os(&mut self, path_to_efi: &str) -> Result<RootFs> {
+    pub fn launch_with_wasabi_os_and_files(
+        &mut self,
+        path_to_efi: &str,
+        files: &[&str],
+    ) -> Result<RootFs> {
+        eprintln!("launch_with_wasabi_os: path_to_efi = {path_to_efi:?}, files = {files:?}",);
         if self.proc.is_some() {
             bail!("Already launched: {:?}", self.proc);
         }
         let root_fs = RootFs::new()?;
         root_fs.copy_boot_loader_from(path_to_efi)?;
+        for f in files {
+            root_fs.copy_file_from(f)?;
+        }
         let base_args = self.gen_base_args()?;
         let proc = spawn_shell_cmd_at_nocapture(
             &format!("{base_args} -drive format=raw,file=fat:rw:{}", root_fs.path),
@@ -236,6 +251,9 @@ impl Qemu {
         eprintln!("QEMU (with WasabiOS) spawned: id = {}", proc.id());
         self.proc = Some(proc);
         Ok(root_fs)
+    }
+    pub fn launch_with_wasabi_os(&mut self, path_to_efi: &str) -> Result<RootFs> {
+        self.launch_with_wasabi_os_and_files(path_to_efi, &[])
     }
     fn wait_to_be_killed(&mut self) -> Result<()> {
         let status: ExitStatus = retry(Fixed::from_millis(500).take(6), || {
