@@ -18,7 +18,7 @@ pub fn noop() -> u64 {
     0
 }
 
-pub fn read_key() -> u64 {
+pub fn read_key() -> Option<char> {
     unimplemented!()
 }
 

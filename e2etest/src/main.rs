@@ -72,10 +72,10 @@ mod test {
 
     #[tokio::test]
     async fn app_hello0_is_working() -> Result<()> {
-        const TEST_STRING: &str = "hello0";
+        const APP_NAME: &str = "hello0";
         const EXPECTED_OUTPUT: &str = "**** Hello from an app!";
         let dev_env = DevEnv::new()?;
-        let app_bin_path = dev_env.build_builtin_app("hello0")?;
+        let app_bin_path = dev_env.build_builtin_app(APP_NAME)?;
         let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         let _rootfs = qemu
             .launch_with_wasabi_os_and_files(dev_env.wasabi_efi_path(), &[app_bin_path.as_str()])?;
@@ -86,11 +86,45 @@ mod test {
         qemu.send_monitor_cmd("sendkey ret").await?;
         qemu.wait_until_serial_output_contains("Welcome to WasabiOS!")?;
         // OS is now booted. Let's type chars into the machine.
-        for c in TEST_STRING.chars() {
+        for c in APP_NAME.chars() {
             qemu.send_monitor_cmd(&format!("sendkey {c}")).await?;
         }
         qemu.send_monitor_cmd("sendkey ret").await?;
         // Now, verify if the TEST_STRING is in the serial output.
+        qemu.wait_until_serial_output_contains(EXPECTED_OUTPUT)?;
+        qemu.kill().await?;
+        Ok(())
+    }
+    #[tokio::test]
+    async fn app_rev_is_working() -> Result<()> {
+        const APP_NAME: &str = "rev";
+        const INPUT_STRING: &str = "wasabios";
+        const APP_READY_OUTPUT: &str = "Type q and hit Enter";
+        const EXPECTED_OUTPUT: &str = "soibasaw";
+        let dev_env = DevEnv::new()?;
+        let app_bin_path = dev_env.build_builtin_app(APP_NAME)?;
+        let mut qemu = Qemu::new(dev_env.ovmf_path())?;
+        let _rootfs = qemu
+            .launch_with_wasabi_os_and_files(dev_env.wasabi_efi_path(), &[app_bin_path.as_str()])?;
+        qemu.wait_until_serial_output_contains("usb_hid_keyboard is ready")?;
+        // Confirm that TEST_STRING is not typed into the machine yet.
+        let output = qemu.read_serial_output()?;
+        assert!(!output.contains(EXPECTED_OUTPUT));
+        qemu.send_monitor_cmd("sendkey ret").await?;
+        qemu.wait_until_serial_output_contains("Welcome to WasabiOS!")?;
+        // OS is now booted. Let's type chars into the machine.
+        for c in APP_NAME.chars() {
+            qemu.send_monitor_cmd(&format!("sendkey {c}")).await?;
+        }
+        qemu.send_monitor_cmd("sendkey ret").await?;
+        // Wait app to be ready
+        qemu.wait_until_serial_output_contains(APP_READY_OUTPUT)?;
+        // Send chars to the app
+        for c in INPUT_STRING.chars() {
+            qemu.send_monitor_cmd(&format!("sendkey {c}")).await?;
+        }
+        qemu.send_monitor_cmd("sendkey ret").await?;
+        // Now, verify if the EXPECTED_OUTPUT is in the serial output.
         qemu.wait_until_serial_output_contains(EXPECTED_OUTPUT)?;
         qemu.kill().await?;
         Ok(())

@@ -14,10 +14,12 @@ fn exit_to_os(retv: u64) -> ! {
     unreachable!("Somehow returned from the OS unexpectedly...");
 }
 
-fn yield_to_os(retv: u64) {
+// yield_to_os resumes app's execution directly so it will not come back to this code...
+fn yield_to_os(retv: u64) -> ! {
     write_exit_reason(1);
     write_return_value(retv);
     return_to_os();
+    unreachable!("Somehow returned from the OS unexpectedly...");
 }
 
 fn sys_exit(args: &[u64; 5]) -> ! {
@@ -52,12 +54,11 @@ fn sys_draw_point(args: &[u64; 5]) -> u64 {
 }
 
 fn sys_read_key(_args: &[u64; 5]) -> u64 {
-    (loop {
-        if let Some(c) = InputManager::take().pop_input() {
-            break c;
-        }
+    if let Some(c) = InputManager::take().pop_input() {
+        c as u64
+    } else {
         yield_to_os(1);
-    }) as u64
+    }
 }
 
 pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {

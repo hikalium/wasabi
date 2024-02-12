@@ -8,12 +8,12 @@ use noli::error::Result;
 use noli::print;
 use noli::println;
 
-/// Reverses the input string on a row.
-/// Input q and enter to exit
 fn main() -> Result<()> {
     let mut line = String::new();
+    println!("# Reverses the input string on a row.");
+    println!("# Type q and hit Enter to exit.");
     loop {
-        if let Some(c) = char::from_u32(noli::sys::read_key() as u32) {
+        if let Some(c) = noli::sys::read_key() {
             print!("{c}");
             if c == '\n' {
                 if line == "q" {

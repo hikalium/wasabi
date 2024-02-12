@@ -132,6 +132,14 @@ pub fn draw_point(x: i64, y: i64, c: u32) -> u64 {
 pub fn noop() -> u64 {
     syscall_0(3)
 }
-pub fn read_key() -> u64 {
-    syscall_0(4)
+
+/// Returns None if no key was in the queue
+/// This may yield the execution to the OS
+pub fn read_key() -> Option<char> {
+    let c = syscall_0(4);
+    if c == 0 {
+        None
+    } else {
+        char::from_u32(c as u32)
+    }
 }

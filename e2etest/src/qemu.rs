@@ -201,23 +201,31 @@ impl Qemu {
     pub fn wait_until_serial_output_contains(&mut self, s: &str) -> Result<()> {
         const INTERVAL_MS: u64 = 500;
         const TIMEOUT_MS: u64 = 60 * 1000;
-        eprint!("Waiting serial output `{s}`...");
+        eprintln!("\n>>>>> Waiting serial output `{s}`...");
         let mut duration = 0;
-        let mut last_output = "Not initialized".to_string();
+        let mut output = self.read_serial_output().unwrap_or_else(|_| {
+            eprint!("serial output was empty: using empty string for now");
+            String::new()
+        });
         while duration < TIMEOUT_MS {
-            let output = self.read_serial_output();
-            if let Ok(output) = &output {
+            let next_output = self.read_serial_output();
+            if let Ok(next_output) = &next_output {
+                let diff = &next_output[output.len()..];
+                eprint!(
+                    "{}",
+                    String::from_utf8_lossy(&strip_ansi_escapes::strip(diff.replace('\r', "")))
+                );
+                output += diff;
                 if output.contains(s) {
                     eprintln!("OK");
                     return Ok(());
                 }
-                last_output = output.clone();
             }
             sleep(Duration::from_millis(INTERVAL_MS));
             eprint!(".");
             duration += INTERVAL_MS;
         }
-        bail!("Expected a string `{s}` in the serial output within {TIMEOUT_MS} ms but not found. Output:\n{last_output}");
+        bail!("Expected a string `{s}` in the serial output within {TIMEOUT_MS} ms but not found. Output:\n{output}");
     }
     pub fn launch_without_os(&mut self) -> Result<()> {
         if self.proc.is_some() {
