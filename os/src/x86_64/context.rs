@@ -95,6 +95,13 @@ pub async fn exec_app_context() -> Result<i64> {
                 let mut app_ctx = CONTEXT_APP.lock();
                 (app_ctx.cpu.rsp, app_ctx.cpu.rip, app_ctx.as_mut_ptr())
             };
+            // Push the ExecutionContext for the app to be used by return_to_app
+            let app_rsp = app_rsp + size_of::<ExecutionContext>() as u64;
+            {
+                let app_ctx = CONTEXT_APP.lock();
+                let app_ctx_on_app_stack = app_rsp as *mut ExecutionContext;
+                *app_ctx_on_app_stack = app_ctx.clone();
+            }
             asm!(
                 // Save current execution state into CONTEXT_OS(rsi)
                 // General registers
@@ -123,37 +130,15 @@ pub async fn exec_app_context() -> Result<i64> {
                 "xchg rsp,rsi", // recover the original rsp
                 // At this point, the current CPU state is saved to CONTEXT_OS
 
+                // Prepare the stack to call return_to_app
+                "mov rsp, rax", // RSP = stack for app
+                // Values needed by `return_to_app` is already pushed by the Rust code.
                 // Set data segments to USER_DS
                 // rdx is passed from the Rust code (see the last part of this asm block).
                 "mov es, dx",
                 "mov ds, dx",
                 "mov fs, dx",
                 "mov gs, dx",
-
-                // Prepare the stack to use iretq to switch to user mode
-                "mov rsp, rax", // RSP = stack for app
-                // Push values needed by `return_to_app`
-                "sub rsp,64",
-                "push rsp",
-                "push r15",
-                "push r14",
-                "push r13",
-                "push r12",
-                "push r11",
-                "push r10",
-                "push r9",
-                "push r8",
-                "push rdi",
-                "push rsi",
-                "push rbp",
-                "push rbx",
-                "push rdx",
-                "push rcx",
-                "push rax",
-                "push 2",     // RFLAGS saved on syscall
-                "push rdi",     // RIP saved on syscall
-                "sub rsp, 512", // FpuContext
-                "fxsave64[rsp]",
                 // Start (or resume) the app execution
                 ".global return_to_app", // external symbol
                 "jmp return_to_app",
@@ -258,7 +243,6 @@ global_asm!(
     // works. This is userland's responsibility and failed to do so will lead to GP(0) fault.
 
     // Preserve registers after syscall
-    "sub rsp,64",
     "push rsp",
     "push r15",
     "push r14",
@@ -310,8 +294,7 @@ global_asm!(
     "pop r13",
     "pop r14",
     "pop r15",
-    "add rsp,8", // rsp (skip)
-    "add rsp,64",
+    "pop rsp", // rsp (skip)
     //
     "sysretq",
     // sysretq will do:

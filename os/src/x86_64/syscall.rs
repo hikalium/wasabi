@@ -91,6 +91,11 @@ pub extern "sysv64" fn arch_syscall_handler(ctx: &mut ExecutionContext) {
     //    argN: rsi, rdi, r8, r9, r10
     //    temp: rcx, r11                          // destroyed by the syscall instruction
     //    keep: rbx, rsp, rbp, r12, r13, r14, r15
+    {
+        // Save the app context
+        let mut app_ctx = CONTEXT_APP.lock();
+        *app_ctx = ctx.clone();
+    }
     let args = [
         ctx.cpu.rsi,
         ctx.cpu.rdi,
