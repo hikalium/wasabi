@@ -5,7 +5,6 @@ extern crate alloc;
 use alloc::string::String;
 use noli::entry_point;
 use noli::error::Result;
-use noli::graphics::*;
 use noli::print;
 use noli::println;
 
