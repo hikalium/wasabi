@@ -6,6 +6,7 @@ use crate::println;
 use crate::x86_64::syscall::return_to_os;
 use crate::x86_64::syscall::write_exit_reason;
 use crate::x86_64::syscall::write_return_value;
+use crate::x86_64::syscall::write_return_value_to_app;
 
 fn exit_to_os(retv: u64) -> ! {
     write_exit_reason(0);
@@ -57,6 +58,7 @@ fn sys_read_key(_args: &[u64; 5]) -> u64 {
     if let Some(c) = InputManager::take().pop_input() {
         c as u64
     } else {
+        write_return_value_to_app(0);
         yield_to_os(1);
     }
 }
