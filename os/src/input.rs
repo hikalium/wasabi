@@ -85,6 +85,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         loop {
             if let Some(c) = sp.try_read() {
                 if let Some(c) = char::from_u32(c as u32) {
+                    let c = if c == '\r' { '\n' } else { c };
                     InputManager::take().push_input(c);
                 }
             }
