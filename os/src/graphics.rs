@@ -47,14 +47,14 @@ pub enum GraphicsError {
     OutOfRange,
 }
 
-pub type GraphicsResult = core::result::Result<(), GraphicsError>;
+pub type GraphicsResult<T> = core::result::Result<T, GraphicsError>;
 
 unsafe fn unchecked_draw_point<T: Bitmap>(
     buf: &mut T,
     color: u32,
     x: i64,
     y: i64,
-) -> GraphicsResult {
+) -> GraphicsResult<()> {
     // Assumes the buffer uses ARGB format
     // which means that the components will be stored in [A, R, G, B] order.
     // This is true for little-endian machine but not on big endian.
@@ -64,7 +64,7 @@ unsafe fn unchecked_draw_point<T: Bitmap>(
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> GraphicsResult {
+pub fn draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> GraphicsResult<()> {
     if !buf.is_in_x_range(x) || !buf.is_in_x_range(x) {
         return Err(GraphicsError::OutOfRange);
     }
@@ -81,7 +81,7 @@ pub fn draw_line<T: Bitmap>(
     y0: i64,
     x1: i64,
     y1: i64,
-) -> GraphicsResult {
+) -> GraphicsResult<()> {
     if !buf.is_in_x_range(x0)
         || !buf.is_in_x_range(x1)
         || !buf.is_in_y_range(y0)
@@ -131,7 +131,7 @@ pub fn draw_rect<T: Bitmap>(
     py: i64,
     w: i64,
     h: i64,
-) -> GraphicsResult {
+) -> GraphicsResult<()> {
     if !buf.is_in_x_range(px)
         || !buf.is_in_y_range(py)
         || !buf.is_in_x_range(px + w - 1)
@@ -156,7 +156,7 @@ pub fn draw_char<T: Bitmap>(
     px: i64,
     py: i64,
     c: char,
-) -> GraphicsResult {
+) -> GraphicsResult<()> {
     if !buf.is_in_x_range(px)
         || !buf.is_in_y_range(py)
         || !buf.is_in_x_range(px + 8 - 1)
@@ -180,6 +180,83 @@ pub fn draw_char<T: Bitmap>(
     Ok(())
 }
 
+pub struct Rect {
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+}
+impl Rect {
+    pub fn new(x: i64, y: i64, w: i64, h: i64) -> GraphicsResult<Rect> {
+        if w < 0 {
+            return GraphicsResult::Err(GraphicsError::OutOfRange);
+        }
+        if h < 0 {
+            return GraphicsResult::Err(GraphicsError::OutOfRange);
+        }
+        GraphicsResult::Ok(Self { x, y, w, h })
+    }
+    pub fn x(&self) -> i64 {
+        self.x
+    }
+    pub fn y(&self) -> i64 {
+        self.y
+    }
+    pub fn w(&self) -> i64 {
+        self.w
+    }
+    pub fn h(&self) -> i64 {
+        self.h
+    }
+}
+
+#[cfg(test)]
+mod rect_tests {
+    use super::Rect;
+
+    #[test_case]
+    fn creates_rect() {
+        let r = Rect::new(0, 0, 0, 0).unwrap();
+        assert_eq!(r.x(), 0);
+        assert_eq!(r.y(), 0);
+        assert_eq!(r.w(), 0);
+        assert_eq!(r.h(), 0);
+
+        let r = Rect::new(1, 2, 3, 4).unwrap();
+        assert_eq!(r.x(), 1);
+        assert_eq!(r.y(), 2);
+        assert_eq!(r.w(), 3);
+        assert_eq!(r.h(), 4);
+
+        let r = Rect::new(-1, -2, 3, 4).unwrap();
+        assert_eq!(r.x(), -1);
+        assert_eq!(r.y(), -2);
+        assert_eq!(r.w(), 3);
+        assert_eq!(r.h(), 4);
+    }
+    #[test_case]
+    fn fails_to_create_negative_sized_rect() {
+        assert!(Rect::new(0, 0, -1, 0).is_err());
+        assert!(Rect::new(0, 0, 0, -1).is_err());
+        assert!(Rect::new(0, 0, -1, -1).is_err());
+    }
+}
+
+/// Transfers the pixels in a rect sized (w, h) at (sx, sy) in the src bitmap
+/// to (dx, dy) in the dst bitmap.
+#[allow(clippy::many_single_char_names)]
+pub fn draw_bmp_clipped<DstBitmap: Bitmap, SrcBitmap: Bitmap>(
+    dst: &mut DstBitmap,
+    src: &SrcBitmap,
+    dx: i64,
+    dy: i64,
+) -> GraphicsResult<()> {
+    let _dst_rect = Rect::new(0, 0, dst.width(), dst.height())?;
+    let _src_rect = Rect::new(dx, dy, src.width(), src.height())?;
+
+    unimplemented!("copy rect here...");
+}
+
 /// Transfers the pixels in a rect sized (w, h) from at (sx, sy) to (dx, dy).
 /// Both rects should be in the buffer coordinates.
 #[allow(clippy::many_single_char_names)]
@@ -191,7 +268,7 @@ pub fn transfer_rect<T: Bitmap>(
     sy: i64,
     w: i64,
     h: i64,
-) -> GraphicsResult {
+) -> GraphicsResult<()> {
     if !buf.is_in_x_range(sx)
         || !buf.is_in_y_range(sy)
         || !buf.is_in_x_range(sx + w - 1)
@@ -248,7 +325,6 @@ pub struct BitmapBuffer {
     height: i64,
     pixels_per_line: i64,
 }
-
 impl BitmapBuffer {
     pub fn new(width: i64, height: i64, pixels_per_line: i64) -> Self {
         assert!(width >= 0);
@@ -265,7 +341,6 @@ impl BitmapBuffer {
         buf
     }
 }
-
 impl Bitmap for BitmapBuffer {
     fn bytes_per_pixel(&self) -> i64 {
         4

@@ -10,8 +10,10 @@ use crate::executor::yield_execution;
 use crate::executor::Executor;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
+use crate::graphics::draw_point;
 use crate::graphics::draw_rect;
 use crate::graphics::Bitmap;
+use crate::graphics::BitmapBuffer;
 use crate::info;
 use crate::loader::Elf;
 use crate::mutex::Mutex;
@@ -144,7 +146,17 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         }
     };
     let mouse_cursor_task = async {
+        const CURSOR_SIZE: i64 = 8;
+        let mut cursor_bitmap = BitmapBuffer::new(CURSOR_SIZE, CURSOR_SIZE, CURSOR_SIZE);
+        for y in 0..CURSOR_SIZE {
+            for x in 0..(CURSOR_SIZE - y) {
+                draw_point(&mut cursor_bitmap, 0x00ff00, x, y).expect("Failed to paint cursor");
+            }
+        }
         let mut vram = BootInfo::take().vram();
+
+        // graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)?;
+
         let iw = vram.width();
         let ih = vram.height();
         let w = iw as f32;
