@@ -9,6 +9,7 @@
 extern crate alloc;
 
 use core::pin::Pin;
+use os::bitmap::Bitmap;
 use os::boot_info::BootInfo;
 use os::efi::types::EfiHandle;
 use os::error::Result;
@@ -18,7 +19,6 @@ use os::executor::Executor;
 use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::graphics::draw_line;
-use os::graphics::Bitmap;
 use os::info;
 use os::init;
 use os::input::enqueue_input_tasks;

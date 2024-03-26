@@ -1,11 +1,11 @@
 extern crate alloc;
 
 use crate::acpi::Acpi;
+use crate::bitmap::Bitmap;
 use crate::boot_info::BootInfo;
 use crate::boot_info::File;
 use crate::efi;
 use crate::error;
-use crate::graphics::Bitmap;
 use crate::hpet;
 use crate::memory_map_holder;
 use crate::pci::Pci;

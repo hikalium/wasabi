@@ -27,6 +27,7 @@
 mod acpi;
 pub mod allocator;
 mod ax88179;
+pub mod bitmap;
 pub mod bitset;
 pub mod boot_info;
 mod command;
@@ -47,6 +48,7 @@ pub mod net;
 mod panic;
 pub mod pci;
 pub mod print;
+pub mod rect;
 mod rtl8139;
 mod serial;
 mod syscall;

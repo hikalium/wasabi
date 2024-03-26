@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::bitmap::Bitmap;
 use crate::boot_info::BootInfo;
 use crate::command;
 use crate::debug_exit;
@@ -12,7 +13,6 @@ use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::graphics::draw_point;
 use crate::graphics::draw_rect;
-use crate::graphics::Bitmap;
 use crate::graphics::BitmapBuffer;
 use crate::info;
 use crate::loader::Elf;

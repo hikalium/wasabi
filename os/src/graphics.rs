@@ -1,5 +1,7 @@
 extern crate alloc;
 
+use crate::bitmap::Bitmap;
+use crate::rect::Rect;
 use alloc::vec::Vec;
 use core::cmp::max;
 use core::cmp::min;
@@ -7,60 +9,6 @@ use core::cmp::Ordering;
 use core::ops::Range;
 
 font::gen_embedded_font!();
-
-pub trait Bitmap {
-    fn bytes_per_pixel(&self) -> i64;
-    fn pixels_per_line(&self) -> i64;
-    fn width(&self) -> i64;
-    fn height(&self) -> i64;
-    fn buf(&self) -> *const u8;
-    fn buf_mut(&mut self) -> *mut u8;
-    fn pixel_at(&self, x: i64, y: i64) -> Option<&u32> {
-        if self.is_in_x_range(x) && self.is_in_y_range(y) {
-            // # Safety
-            // (x, y) is always validated by the checks above.
-            unsafe { Some(&*(self.unchecked_pixel_at(x, y))) }
-        } else {
-            None
-        }
-    }
-    fn pixel_at_mut(&mut self, x: i64, y: i64) -> Option<&mut u32> {
-        if self.is_in_x_range(x) && self.is_in_y_range(y) {
-            // # Safety
-            // (x, y) is always validated by the checks above.
-            unsafe { Some(&mut *(self.unchecked_pixel_at_mut(x, y))) }
-        } else {
-            None
-        }
-    }
-    /// # Safety
-    ///
-    /// Returned pointer is valid as long as the given coordinates are valid
-    /// which means that passing is_in_*_range tests.
-    unsafe fn unchecked_pixel_at_mut(&mut self, x: i64, y: i64) -> *mut u32 {
-        self.buf_mut()
-            .add(((y * self.pixels_per_line() + x) * self.bytes_per_pixel()) as usize)
-            as *mut u32
-    }
-    /// # Safety
-    ///
-    /// Returned pointer is valid as long as the given coordinates are valid
-    /// which means that passing is_in_*_range tests.
-    unsafe fn unchecked_pixel_at(&self, x: i64, y: i64) -> *const u32 {
-        self.buf()
-            .add(((y * self.pixels_per_line() + x) * self.bytes_per_pixel()) as usize)
-            as *const u32
-    }
-    fn flush(&self) {
-        // Do nothing
-    }
-    fn is_in_x_range(&self, px: i64) -> bool {
-        0 <= px && px < min(self.width(), self.pixels_per_line())
-    }
-    fn is_in_y_range(&self, py: i64) -> bool {
-        0 <= py && py < self.height()
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum GraphicsError {
@@ -257,90 +205,6 @@ mod scalar_range_tests {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
-pub struct Rect {
-    x: i64,
-    y: i64,
-    w: i64,
-    h: i64,
-}
-impl Rect {
-    pub fn new(x: i64, y: i64, w: i64, h: i64) -> Option<Rect> {
-        if w < 0 || h < 0 {
-            None
-        } else {
-            Some(Self { x, y, w, h })
-        }
-    }
-    pub fn x(&self) -> i64 {
-        self.x
-    }
-    pub fn y(&self) -> i64 {
-        self.y
-    }
-    pub fn w(&self) -> i64 {
-        self.w
-    }
-    pub fn h(&self) -> i64 {
-        self.h
-    }
-    pub fn frame_ranges(&self) -> (ScalarRange, ScalarRange) {
-        (
-            ScalarRange::new(self.x, self.x + self.w).unwrap(),
-            ScalarRange::new(self.y, self.y + self.h).unwrap(),
-        )
-    }
-    pub fn intersection(&self, another: &Self) -> Option<Rect> {
-        let (rx0, ry0) = self.frame_ranges();
-        let (rx1, ry1) = another.frame_ranges();
-        let rx = rx0.intersection(&rx1)?;
-        let ry = ry0.intersection(&ry1)?;
-        let x = rx.start();
-        let w = rx.end() - rx.start();
-        let y = ry.start();
-        let h = ry.end() - ry.start();
-        Some(Self { x, y, w, h })
-    }
-}
-
-#[cfg(test)]
-mod rect_tests {
-    use super::Rect;
-
-    #[test_case]
-    fn creates_rect() {
-        let r = Rect::new(0, 0, 0, 0).unwrap();
-        assert_eq!(r.x(), 0);
-        assert_eq!(r.y(), 0);
-        assert_eq!(r.w(), 0);
-        assert_eq!(r.h(), 0);
-
-        let r = Rect::new(1, 2, 3, 4).unwrap();
-        assert_eq!(r.x(), 1);
-        assert_eq!(r.y(), 2);
-        assert_eq!(r.w(), 3);
-        assert_eq!(r.h(), 4);
-
-        let r = Rect::new(-1, -2, 3, 4).unwrap();
-        assert_eq!(r.x(), -1);
-        assert_eq!(r.y(), -2);
-        assert_eq!(r.w(), 3);
-        assert_eq!(r.h(), 4);
-    }
-    #[test_case]
-    fn fails_to_create_negative_sized_rect() {
-        assert!(Rect::new(0, 0, -1, 0).is_none());
-        assert!(Rect::new(0, 0, 0, -1).is_none());
-        assert!(Rect::new(0, 0, -1, -1).is_none());
-    }
-    #[test_case]
-    fn calc_intersection() {
-        let r1 = Rect::new(0, 0, 1, 1).unwrap();
-        let self_intersect = r1.intersection(&r1).unwrap();
-        assert_eq!(self_intersect, r1);
-    }
-}
-
 /// Transfers the pixels in a rect sized (w, h) at (sx, sy) in the src bitmap
 /// to (dx, dy) in the dst bitmap.
 #[allow(clippy::many_single_char_names)]
@@ -512,7 +376,7 @@ mod tests {
         assert!(buf.pixel_at(w, h - 1).is_none());
         for y in 0..h {
             for x in 0..w {
-                assert!(buf.pixel_at(x, y) == Some(&mut 0))
+                assert!(buf.pixel_at(x, y) == Some(&0))
             }
         }
     }
@@ -525,7 +389,7 @@ mod tests {
         assert!(draw_rect(&mut buf, 0xff0000, 0, 0, w, h).is_ok());
         for y in 0..h {
             for x in 0..w {
-                assert!(buf.pixel_at(x, y) == Some(&mut 0xff0000))
+                assert!(buf.pixel_at(x, y) == Some(&0xff0000))
             }
         }
     }
