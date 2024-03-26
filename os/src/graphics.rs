@@ -353,9 +353,10 @@ pub fn draw_bmp_clipped<DstBitmap: Bitmap, SrcBitmap: Bitmap>(
     let dst_rect = Rect::new(0, 0, dst.width(), dst.height())?;
     let src_rect = Rect::new(dx, dy, src.width(), src.height())?;
     let copy_rect = dst_rect.intersection(&src_rect)?;
+    let (rx, ry) = copy_rect.frame_ranges();
 
-    for y in 0..copy_rect.h() {
-        for x in 0..copy_rect.w() {
+    for y in ry.range.clone() {
+        for x in rx.range.clone() {
             if let (Some(dstp), Some(srcp)) = (
                 dst.pixel_at_mut(x, y),
                 src.pixel_at(x - src_rect.x(), y - src_rect.y()),

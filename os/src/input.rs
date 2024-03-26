@@ -146,11 +146,13 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         }
     };
     let mouse_cursor_task = async {
-        const CURSOR_SIZE: i64 = 8;
+        const CURSOR_SIZE: i64 = 16;
         let mut cursor_bitmap = BitmapBuffer::new(CURSOR_SIZE, CURSOR_SIZE, CURSOR_SIZE);
         for y in 0..CURSOR_SIZE {
             for x in 0..(CURSOR_SIZE - y) {
-                draw_point(&mut cursor_bitmap, 0x00ff00, x, y).expect("Failed to paint cursor");
+                if x <= y {
+                    draw_point(&mut cursor_bitmap, 0x00ff00, x, y).expect("Failed to paint cursor");
+                }
             }
         }
         let mut vram = BootInfo::take().vram();
