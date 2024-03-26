@@ -1,7 +1,10 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::cmp::max;
+use core::cmp::min;
 use core::cmp::Ordering;
+use core::ops::Range;
 
 font::gen_embedded_font!();
 
@@ -12,11 +15,20 @@ pub trait Bitmap {
     fn height(&self) -> i64;
     fn buf(&self) -> *const u8;
     fn buf_mut(&mut self) -> *mut u8;
-    fn pixel_at(&mut self, x: i64, y: i64) -> Option<&mut u32> {
+    fn pixel_at(&self, x: i64, y: i64) -> Option<&u32> {
         if self.is_in_x_range(x) && self.is_in_y_range(y) {
             // # Safety
             // (x, y) is always validated by the checks above.
-            unsafe { Some(&mut *(self.unchecked_pixel_at(x, y))) }
+            unsafe { Some(&*(self.unchecked_pixel_at(x, y))) }
+        } else {
+            None
+        }
+    }
+    fn pixel_at_mut(&mut self, x: i64, y: i64) -> Option<&mut u32> {
+        if self.is_in_x_range(x) && self.is_in_y_range(y) {
+            // # Safety
+            // (x, y) is always validated by the checks above.
+            unsafe { Some(&mut *(self.unchecked_pixel_at_mut(x, y))) }
         } else {
             None
         }
@@ -25,16 +37,24 @@ pub trait Bitmap {
     ///
     /// Returned pointer is valid as long as the given coordinates are valid
     /// which means that passing is_in_*_range tests.
-    unsafe fn unchecked_pixel_at(&mut self, x: i64, y: i64) -> *mut u32 {
+    unsafe fn unchecked_pixel_at_mut(&mut self, x: i64, y: i64) -> *mut u32 {
         self.buf_mut()
             .add(((y * self.pixels_per_line() + x) * self.bytes_per_pixel()) as usize)
             as *mut u32
+    }
+    /// # Safety
+    ///
+    /// Returned pointer is valid as long as the given coordinates are valid
+    /// which means that passing is_in_*_range tests.
+    unsafe fn unchecked_pixel_at(&self, x: i64, y: i64) -> *const u32 {
+        self.buf()
+            .add(((y * self.pixels_per_line() + x) * self.bytes_per_pixel()) as usize)
+            as *const u32
     }
     fn flush(&self) {
         // Do nothing
     }
     fn is_in_x_range(&self, px: i64) -> bool {
-        use core::cmp::min;
         0 <= px && px < min(self.width(), self.pixels_per_line())
     }
     fn is_in_y_range(&self, py: i64) -> bool {
@@ -58,7 +78,7 @@ unsafe fn unchecked_draw_point<T: Bitmap>(
     // Assumes the buffer uses ARGB format
     // which means that the components will be stored in [A, R, G, B] order.
     // This is true for little-endian machine but not on big endian.
-    *buf.unchecked_pixel_at(x, y) = color;
+    *buf.unchecked_pixel_at_mut(x, y) = color;
 
     Ok(())
 }
@@ -180,6 +200,64 @@ pub fn draw_char<T: Bitmap>(
     Ok(())
 }
 
+/// A non-empty i64 scalar range, for graphics operations
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct ScalarRange {
+    range: Range<i64>,
+}
+impl ScalarRange {
+    pub fn new(start: i64, end: i64) -> Option<Self> {
+        let range = start..end;
+        if range.is_empty() {
+            None
+        } else {
+            Some(Self { range })
+        }
+    }
+    pub fn intersection(&self, another: &Self) -> Option<Self> {
+        let range =
+            max(self.range.start, another.range.start)..min(self.range.end, another.range.end);
+        Self::new(range.start, range.end)
+    }
+    pub fn start(&self) -> i64 {
+        self.range.start
+    }
+    pub fn end(&self) -> i64 {
+        self.range.end
+    }
+}
+#[cfg(test)]
+mod scalar_range_tests {
+    use super::ScalarRange;
+    #[test_case]
+    fn creates_range() {
+        let r = ScalarRange::new(0, 0);
+        assert!(r.is_none());
+        let r = ScalarRange::new(1, 0);
+        assert!(r.is_none());
+        let r = ScalarRange::new(0, 1).unwrap();
+        assert_eq!(r.start(), 0);
+        assert_eq!(r.end(), 1);
+    }
+    #[test_case]
+    fn intersections() {
+        let a = ScalarRange::new(2, 3).unwrap();
+        let b = ScalarRange::new(1, 2).unwrap();
+        let c = ScalarRange::new(3, 4).unwrap();
+        let d = ScalarRange::new(1, 4).unwrap();
+        let e = ScalarRange::new(0, 2).unwrap();
+        let f = ScalarRange::new(3, 5).unwrap();
+
+        assert!(a.intersection(&a).unwrap() == a);
+        assert!(a.intersection(&b).is_none());
+        assert!(a.intersection(&c).is_none());
+        assert!(a.intersection(&d).unwrap() == a);
+        assert!(a.intersection(&e).is_none());
+        assert!(a.intersection(&f).is_none());
+    }
+}
+
+#[derive(PartialEq, Eq, Debug)]
 pub struct Rect {
     x: i64,
     y: i64,
@@ -187,14 +265,12 @@ pub struct Rect {
     h: i64,
 }
 impl Rect {
-    pub fn new(x: i64, y: i64, w: i64, h: i64) -> GraphicsResult<Rect> {
-        if w < 0 {
-            return GraphicsResult::Err(GraphicsError::OutOfRange);
+    pub fn new(x: i64, y: i64, w: i64, h: i64) -> Option<Rect> {
+        if w < 0 || h < 0 {
+            None
+        } else {
+            Some(Self { x, y, w, h })
         }
-        if h < 0 {
-            return GraphicsResult::Err(GraphicsError::OutOfRange);
-        }
-        GraphicsResult::Ok(Self { x, y, w, h })
     }
     pub fn x(&self) -> i64 {
         self.x
@@ -207,6 +283,23 @@ impl Rect {
     }
     pub fn h(&self) -> i64 {
         self.h
+    }
+    pub fn frame_ranges(&self) -> (ScalarRange, ScalarRange) {
+        (
+            ScalarRange::new(self.x, self.x + self.w).unwrap(),
+            ScalarRange::new(self.y, self.y + self.h).unwrap(),
+        )
+    }
+    pub fn intersection(&self, another: &Self) -> Option<Rect> {
+        let (rx0, ry0) = self.frame_ranges();
+        let (rx1, ry1) = another.frame_ranges();
+        let rx = rx0.intersection(&rx1)?;
+        let ry = ry0.intersection(&ry1)?;
+        let x = rx.start();
+        let w = rx.end() - rx.start();
+        let y = ry.start();
+        let h = ry.end() - ry.start();
+        Some(Self { x, y, w, h })
     }
 }
 
@@ -236,9 +329,15 @@ mod rect_tests {
     }
     #[test_case]
     fn fails_to_create_negative_sized_rect() {
-        assert!(Rect::new(0, 0, -1, 0).is_err());
-        assert!(Rect::new(0, 0, 0, -1).is_err());
-        assert!(Rect::new(0, 0, -1, -1).is_err());
+        assert!(Rect::new(0, 0, -1, 0).is_none());
+        assert!(Rect::new(0, 0, 0, -1).is_none());
+        assert!(Rect::new(0, 0, -1, -1).is_none());
+    }
+    #[test_case]
+    fn calc_intersection() {
+        let r1 = Rect::new(0, 0, 1, 1).unwrap();
+        let self_intersect = r1.intersection(&r1).unwrap();
+        assert_eq!(self_intersect, r1);
     }
 }
 
@@ -250,11 +349,43 @@ pub fn draw_bmp_clipped<DstBitmap: Bitmap, SrcBitmap: Bitmap>(
     src: &SrcBitmap,
     dx: i64,
     dy: i64,
-) -> GraphicsResult<()> {
-    let _dst_rect = Rect::new(0, 0, dst.width(), dst.height())?;
-    let _src_rect = Rect::new(dx, dy, src.width(), src.height())?;
+) -> Option<()> {
+    let dst_rect = Rect::new(0, 0, dst.width(), dst.height())?;
+    let src_rect = Rect::new(dx, dy, src.width(), src.height())?;
+    let copy_rect = dst_rect.intersection(&src_rect)?;
 
-    unimplemented!("copy rect here...");
+    for y in 0..copy_rect.h() {
+        for x in 0..copy_rect.w() {
+            if let (Some(dstp), Some(srcp)) = (
+                dst.pixel_at_mut(x, y),
+                src.pixel_at(x - src_rect.x(), y - src_rect.y()),
+            ) {
+                *dstp = *srcp;
+            }
+        }
+    }
+    Some(())
+}
+
+#[cfg(test)]
+mod draw_bmp_clipped_tests {
+    use super::draw_bmp_clipped;
+    use super::draw_rect;
+    use super::Bitmap;
+    use super::BitmapBuffer;
+
+    #[test_case]
+    fn just_copy() {
+        let mut bmp0 = BitmapBuffer::new(2, 2, 2);
+        let mut bmp1 = BitmapBuffer::new(2, 2, 2);
+        draw_rect(&mut bmp0, 0, 0, 0, 2, 2).unwrap();
+        draw_rect(&mut bmp1, 1, 0, 0, 2, 2).unwrap();
+        assert_eq!(*bmp0.pixel_at(0, 0).unwrap(), 0);
+        assert_eq!(*bmp1.pixel_at(0, 0).unwrap(), 1);
+        draw_bmp_clipped(&mut bmp0, &bmp1, 0, 0).unwrap();
+        assert_eq!(*bmp0.pixel_at(0, 0).unwrap(), 1);
+        assert_eq!(*bmp1.pixel_at(0, 0).unwrap(), 1);
+    }
 }
 
 /// Transfers the pixels in a rect sized (w, h) from at (sx, sy) to (dx, dy).
@@ -373,7 +504,7 @@ mod tests {
         let h = 13_i64;
         let w = 17_i64;
         let pixels_per_line = 19_i64;
-        let mut buf = BitmapBuffer::new(w, h, pixels_per_line);
+        let buf = BitmapBuffer::new(w, h, pixels_per_line);
         assert!(buf.pixel_at(-1, 0).is_none());
         assert!(buf.pixel_at(0, -1).is_none());
         assert!(buf.pixel_at(w - 1, h).is_none());
@@ -454,7 +585,7 @@ mod tests {
                 for y in 0..H {
                     for x in 0..W {
                         unsafe {
-                            *buf.unchecked_pixel_at(x, y) = INIT[y as usize][x as usize];
+                            *buf.unchecked_pixel_at_mut(x, y) = INIT[y as usize][x as usize];
                         }
                     }
                 }

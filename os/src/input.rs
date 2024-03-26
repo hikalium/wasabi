@@ -155,7 +155,8 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         }
         let mut vram = BootInfo::take().vram();
 
-        // graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)?;
+        crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)
+            .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
 
         let iw = vram.width();
         let ih = vram.height();
@@ -171,6 +172,8 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
                 let color = !color;
 
                 draw_rect(&mut vram, color, px, py, 1, 1)?;
+                crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, px, py)
+                    .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
             }
             TimeoutFuture::new_ms(15).await;
             yield_execution().await;
