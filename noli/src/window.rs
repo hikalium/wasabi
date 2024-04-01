@@ -6,6 +6,13 @@ use crate::graphics;
 use alloc::string::String;
 use core::cmp::max;
 use core::cmp::min;
+use embedded_graphics::draw_target::DrawTarget;
+use embedded_graphics::geometry::Dimensions;
+use embedded_graphics::geometry::Point;
+use embedded_graphics::geometry::Size;
+use embedded_graphics::prelude::RgbColor;
+use embedded_graphics::primitives::rectangle::Rectangle;
+use embedded_graphics::Pixel;
 
 static WHITE: u32 = 0xffffff;
 static DARKBLUE: u32 = 0x00008b;
@@ -35,7 +42,37 @@ pub struct Window {
     y: i64,
     width: i64,
     height: i64,
+    rect: Rectangle,
     _active: bool,
+}
+
+/// https://docs.rs/embedded-graphics/latest/embedded_graphics/geometry/trait.Dimensions.html
+impl Dimensions for Window {
+    fn bounding_box(&self) -> Rectangle {
+        self.rect.clone()
+    }
+}
+
+/// https://docs.rs/embedded-graphics/latest/embedded_graphics/draw_target/trait.DrawTarget.html
+impl DrawTarget for Window {
+    type Color = embedded_graphics::pixelcolor::Rgb565;
+    type Error = Error;
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<()>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for Pixel(point, color) in pixels {
+            if point.x >= self.width as i32 || point.y >= self.height as i32 {
+                // Ignore a point outside the window.
+                continue;
+            }
+
+            let c = ((color.r() as u32) << 16) + ((color.g() as u32) << 8) + (color.b() as u32);
+            graphics::draw_point(c, point.x as i64, point.y as i64)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Window {
@@ -49,6 +86,10 @@ impl Window {
             y,
             width,
             height,
+            rect: Rectangle::new(
+                Point::new(x as i32, y as i32),
+                Size::new(width as u32, height as u32),
+            ),
             _active: true,
         };
 
