@@ -49,7 +49,7 @@ pub struct Window {
 /// https://docs.rs/embedded-graphics/latest/embedded_graphics/geometry/trait.Dimensions.html
 impl Dimensions for Window {
     fn bounding_box(&self) -> Rectangle {
-        return self.rect;
+        self.rect
     }
 }
 
