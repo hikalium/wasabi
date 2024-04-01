@@ -7,11 +7,9 @@ use alloc::string::String;
 use core::cmp::max;
 use core::cmp::min;
 use embedded_graphics::draw_target::DrawTarget;
-use embedded_graphics::geometry::Dimensions;
-use embedded_graphics::geometry::Point;
+use embedded_graphics::geometry::OriginDimensions;
 use embedded_graphics::geometry::Size;
 use embedded_graphics::prelude::RgbColor;
-use embedded_graphics::primitives::rectangle::Rectangle;
 use embedded_graphics::Pixel;
 
 static WHITE: u32 = 0xffffff;
@@ -42,14 +40,13 @@ pub struct Window {
     y: i64,
     width: i64,
     height: i64,
-    rect: Rectangle,
     _active: bool,
 }
 
-/// https://docs.rs/embedded-graphics/latest/embedded_graphics/geometry/trait.Dimensions.html
-impl Dimensions for Window {
-    fn bounding_box(&self) -> Rectangle {
-        self.rect
+/// https://docs.rs/embedded-graphics/latest/embedded_graphics/geometry/trait.OriginDimensions.html
+impl OriginDimensions for Window {
+    fn size(&self) -> Size {
+        Size::new(self.width as u32, self.height as u32)
     }
 }
 
@@ -86,10 +83,6 @@ impl Window {
             y,
             width,
             height,
-            rect: Rectangle::new(
-                Point::new(x as i32, y as i32),
-                Size::new(width as u32, height as u32),
-            ),
             _active: true,
         };
 
