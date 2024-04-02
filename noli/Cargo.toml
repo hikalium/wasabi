@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 font = { path = "../font", version = "0.1.0" }
+embedded-graphics = "0.8.1"
