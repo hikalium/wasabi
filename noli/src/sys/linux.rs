@@ -22,6 +22,10 @@ pub fn read_key() -> Option<char> {
     unimplemented!()
 }
 
+pub fn get_mouse_cursor_info() -> bool {
+    unimplemented!()
+}
+
 #[macro_export]
 macro_rules! entry_point {
     ($path:path) => {
