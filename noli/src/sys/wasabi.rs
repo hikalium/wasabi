@@ -143,3 +143,9 @@ pub fn read_key() -> Option<char> {
         char::from_u32(c as u32)
     }
 }
+
+/// Returns true if there is an update
+/// This may yield the execution to the OS
+pub fn get_mouse_cursor_info() -> bool {
+    syscall_0(5) == 0
+}

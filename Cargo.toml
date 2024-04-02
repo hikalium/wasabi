@@ -5,6 +5,7 @@ members = [
     "app/hello1",
     "app/httpget",
     "app/loop",
+    "app/paint",
     "app/rev",
     "app/uname",
     "app/window0",
