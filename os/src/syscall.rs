@@ -63,6 +63,15 @@ fn sys_read_key(_args: &[u64; 5]) -> u64 {
     }
 }
 
+fn sys_get_mouse_cursor_position(_args: &[u64; 5]) -> u64 {
+    if let Some((_x, _y, _buttons)) = InputManager::take().pop_cursor_input_absolute() {
+        0
+    } else {
+        write_return_value_to_app(1);
+        yield_to_os(1);
+    }
+}
+
 pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
     match op {
         0 => sys_exit(args),
@@ -70,6 +79,7 @@ pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
         2 => sys_draw_point(args),
         3 => sys_noop(args),
         4 => sys_read_key(args),
+        5 => sys_get_mouse_cursor_position(args),
         op => {
             println!("syscall: unimplemented syscall: {}", op);
             1
