@@ -71,7 +71,7 @@ clippy:
 	cd os && cargo clippy --all-features --all-targets -- ${CLIPPY_OPTIONS}
 	# Run clippy on all apps under app dir
 	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
-		xargs -I {} -n 1 -- bash -c 'make -C {} clippy || exit 255'
+		xargs -P`nproc` -I {} -n 1 -- bash -c 'make -C {} clippy || exit 255'
 
 .PHONY : dump_config
 dump_config:
@@ -172,7 +172,7 @@ app :
 	-rm -r generated/bin
 	# build all apps under app/ dir for dev
 	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
-		xargs -I {} -n 1 -- bash -c 'make -C {} build || exit 255'
+		xargs -P`nproc` -I {} -n 1 -- bash -c 'make -C {} build || exit 255'
 
 .PHONY : run_deps
 run_deps : app
