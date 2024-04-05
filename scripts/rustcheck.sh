@@ -37,7 +37,7 @@ else
 fi
 
 set +e
-RESULT=`git grep -E '^use' | grep '\*'`
+RESULT=`git grep -E '^use' | grep '\*' | grep -v -E '^[^:]+:use .*::prelude::\*;$'`
 RESULT_STATUS=$?
 set -e
 if test $RESULT_STATUS -eq 0; then
@@ -47,7 +47,7 @@ if test $RESULT_STATUS -eq 0; then
 	echo "FAIL: Please remove glob (wildcard) 'use' listed above:"
 	exit 1
 elif test $RESULT_STATUS -eq 1; then
-	echo "PASS: No glob (wildcard) 'use' usage found"
+	echo "PASS: No glob (wildcard) 'use' usage found (except for noli prelude)"
 else
 	echo "FAIL: something went wrong"
 	exit 1

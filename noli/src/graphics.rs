@@ -1,6 +1,7 @@
 use crate::error::Error;
 use crate::error::Result;
 use crate::font::BITMAP_FONT;
+use crate::prelude::*;
 
 /// Draws string in one line. New lines are ignored.
 pub fn draw_string_3x(color: u32, x: i64, y: i64, s: &str) -> Result<()> {
@@ -316,7 +317,7 @@ pub fn draw_line(color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<()> {
 }
 
 pub fn draw_point(c: u32, x: i64, y: i64) -> Result<()> {
-    let result = crate::sys::draw_point(x, y, c);
+    let result = Api::draw_point(x, y, c);
     if result == 0 {
         Ok(())
     } else {

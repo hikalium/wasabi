@@ -3,17 +3,14 @@
 
 extern crate alloc;
 use alloc::string::String;
-use noli::entry_point;
-use noli::error::Result;
-use noli::print;
-use noli::println;
+use noli::prelude::*;
 
 fn main() -> Result<()> {
     let mut line = String::new();
     println!("# Reverses the input string on a row.");
     println!("# Type q and hit Enter to exit.");
     loop {
-        if let Some(c) = noli::sys::read_key() {
+        if let Some(c) = Api::read_key() {
             print!("{c}");
             if c == '\n' {
                 if line == "q" {

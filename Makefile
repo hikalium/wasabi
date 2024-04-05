@@ -93,7 +93,7 @@ check:
 .PHONY : app_unit_test
 app_unit_test:
 	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
-		xargs -I {} -n 1 -- bash -c 'make -C {} test'
+		xargs -P`nproc` -I {} -n 1 -- bash -c 'make -C {} test'
 
 # Run app on WasabiOS and check if it exits succesfully
 .PHONY : run_app_test

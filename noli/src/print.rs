@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use core::fmt;
 
 #[macro_export]
@@ -17,7 +18,7 @@ pub struct StdIoWriter {}
 impl StdIoWriter {}
 impl fmt::Write for StdIoWriter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        crate::sys::write_string(s);
+        Api::write_string(s);
         Ok(())
     }
 }

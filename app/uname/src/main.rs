@@ -1,10 +1,9 @@
 #![no_std]
 #![cfg_attr(not(target_os = "linux"), no_main)]
 
-use noli::entry_point;
-use noli::sys::write_string;
+use noli::prelude::*;
 
 fn main() {
-    write_string("Hello hikalium! This is wasabi app!\n");
+    Api::write_string("Hello hikalium! This is wasabi app!\n");
 }
 entry_point!(main);

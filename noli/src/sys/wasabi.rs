@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 use core::alloc::GlobalAlloc;
 use core::alloc::Layout;
 use core::ptr::null_mut;
@@ -6,7 +8,7 @@ use core::ptr::null_mut;
 fn panic(info: &core::panic::PanicInfo) -> ! {
     crate::println!("PANIC!!!");
     crate::println!("{}", info);
-    exit(1)
+    Api::exit(1)
 }
 
 #[macro_export]
@@ -17,9 +19,9 @@ macro_rules! entry_point {
         pub unsafe extern "C" fn entry() -> ! {
             // Using this trait to accept multiple return types.
             // c.f. https://github.com/rust-lang/rfcs/issues/1176#issuecomment-115058364
-            use $crate::error::MainReturn;
+            use $crate::prelude::*;
             let ret = $path().into_error_code();
-            $crate::sys::exit(ret);
+            Api::exit(ret);
         }
     };
 }
@@ -117,35 +119,33 @@ fn syscall_5(func: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -
     retv
 }
 
-pub fn exit(code: u64) -> ! {
-    syscall_1(0, code);
-    unreachable!()
-}
-pub fn write_string(s: &str) -> u64 {
-    let len = s.len() as u64;
-    let s = s.as_ptr() as u64;
-    syscall_2(1, s, len)
-}
-pub fn draw_point(x: i64, y: i64, c: u32) -> u64 {
-    syscall_3(2, x as u64, y as u64, c as u64)
-}
-pub fn noop() -> u64 {
-    syscall_0(3)
-}
+pub struct Api;
 
-/// Returns None if no key was in the queue
-/// This may yield the execution to the OS
-pub fn read_key() -> Option<char> {
-    let c = syscall_0(4);
-    if c == 0 {
-        None
-    } else {
-        char::from_u32(c as u32)
+impl SystemApi for Api {
+    fn exit(code: u64) -> ! {
+        syscall_1(0, code);
+        unreachable!()
     }
-}
-
-/// Returns true if there is an update
-/// This may yield the execution to the OS
-pub fn get_mouse_cursor_info() -> bool {
-    syscall_0(5) == 0
+    fn write_string(s: &str) -> u64 {
+        let len = s.len() as u64;
+        let s = s.as_ptr() as u64;
+        syscall_2(1, s, len)
+    }
+    fn draw_point(x: i64, y: i64, c: u32) -> u64 {
+        syscall_3(2, x as u64, y as u64, c as u64)
+    }
+    fn noop() -> u64 {
+        syscall_0(3)
+    }
+    fn read_key() -> Option<char> {
+        let c = syscall_0(4);
+        if c == 0 {
+            None
+        } else {
+            char::from_u32(c as u32)
+        }
+    }
+    fn get_mouse_cursor_info() -> bool {
+        syscall_0(5) == 0
+    }
 }
