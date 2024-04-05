@@ -11,9 +11,8 @@ BIN_PATH_DEBUG=$(shell cargo metadata --format-version 1 | jq -r .target_directo
 
 .PHONY : build
 build :
-	rustup target add $(TARGET)
-	$(CARGO) build --target=$(TARGET)
-	$(CARGO) install --target=$(TARGET) --force --offline --root $(ROOT) --path .
+	echo 'Use `make app` in the root dir instead'
+	exit 1
 
 .PHONY : test
 test :

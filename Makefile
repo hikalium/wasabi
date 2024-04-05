@@ -52,6 +52,15 @@ endif
 # -netdev user,id=net0 -device usb-net,netdev=net0 \
 # -object filter-dump,id=f1,netdev=net0,file=log/dump_net0.dat \
 
+APP_RUSTFLAGS=\
+		  -C link-args=-e \
+		  -C link-args=entry \
+		  -C link-args=-z \
+		  -C link-args=execstack
+APP_TARGET=x86_64-unknown-none
+APP_CARGO=RUSTFLAGS='$(APP_RUSTFLAGS)' cargo
+APP_BUILD_ARG=-v --target $(APP_TARGET) --release
+
 .PHONY : default
 default: os
 
@@ -169,10 +178,12 @@ run_os_lib_test :
 
 .PHONY : app
 app :
-	-rm -r generated/bin
-	# build all apps under app/ dir for dev
-	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
-		xargs -P`nproc` -I {} -n 1 -- bash -c 'make -C {} build || exit 255'
+	rustup target add $(APP_TARGET)
+	[ -d generated/bin ] && rm -rf generated/bin ; true
+	rm -r `find target/x86_64-unknown-none/release -maxdepth 1 -executable -type f` 2>/dev/null ; true
+	$(APP_CARGO) build $(APP_BUILD_ARG) `find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | cut -d / -f 2 | sed -e 's/^/ -p /' | tr -d '\n'`
+	mkdir -p generated/bin
+	cp `find target/x86_64-unknown-none/release -maxdepth 1 -executable -type f` generated/bin/
 
 .PHONY : run_deps
 run_deps : app
