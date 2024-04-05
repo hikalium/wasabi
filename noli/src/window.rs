@@ -52,7 +52,7 @@ impl OriginDimensions for Window {
 
 /// https://docs.rs/embedded-graphics/latest/embedded_graphics/draw_target/trait.DrawTarget.html
 impl DrawTarget for Window {
-    type Color = embedded_graphics::pixelcolor::Rgb565;
+    type Color = embedded_graphics::pixelcolor::Rgb888;
     type Error = Error;
     fn draw_iter<I>(&mut self, pixels: I) -> Result<()>
     where
