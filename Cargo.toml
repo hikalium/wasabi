@@ -14,7 +14,7 @@ members = [
     "e2etest",
     "font",
     "noli",
-    "os",
+    "os", "sabi",
 ]
 default-members = [
     "dbgutil",

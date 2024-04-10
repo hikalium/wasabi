@@ -1,6 +1,5 @@
 extern crate alloc;
 
-use crate::bitmap::Bitmap;
 use crate::boot_info::BootInfo;
 use crate::command;
 use crate::debug_exit;
@@ -24,6 +23,8 @@ use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
 use core::str::FromStr;
+use sabi::MouseButtonState;
+use sabi::PointerPosition;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyEvent {
@@ -42,15 +43,9 @@ impl KeyEvent {
     }
 }
 
-pub struct MouseButtonState {
-    pub l: bool,
-    pub c: bool,
-    pub r: bool,
-}
-
 pub struct InputManager {
     input_queue: Mutex<VecDeque<char>>,
-    cursor_queue: Mutex<VecDeque<(f32, f32, MouseButtonState)>>,
+    cursor_queue: Mutex<VecDeque<(PointerPosition, MouseButtonState)>>,
 }
 impl InputManager {
     fn new() -> Self {
@@ -72,10 +67,10 @@ impl InputManager {
     }
 
     // x, y: 0f32..1f32, top left origin
-    pub fn push_cursor_input_absolute(&self, cx: f32, cy: f32, b: MouseButtonState) {
-        self.cursor_queue.lock().push_back((cx, cy, b))
+    pub fn push_cursor_input_absolute(&self, p: PointerPosition, b: MouseButtonState) {
+        self.cursor_queue.lock().push_back((p, b))
     }
-    pub fn pop_cursor_input_absolute(&self) -> Option<(f32, f32, MouseButtonState)> {
+    pub fn pop_cursor_input_absolute(&self) -> Option<(PointerPosition, MouseButtonState)> {
         self.cursor_queue.lock().pop_front()
     }
 }
@@ -160,21 +155,13 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)
             .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
 
-        let iw = vram.width();
-        let ih = vram.height();
-        let w = iw as f32;
-        let h = ih as f32;
         loop {
-            if let Some((px, py, b)) = InputManager::take().pop_cursor_input_absolute() {
-                let px = (px * w) as i64;
-                let py = (py * h) as i64;
-                let px = px.clamp(0, iw - 1);
-                let py = py.clamp(0, ih - 1);
-                let color = (b.l as u32) * 0xff0000;
+            if let Some((p, b)) = InputManager::take().pop_cursor_input_absolute() {
+                let color = (b.l() as u32) * 0xff0000;
                 let color = !color;
 
-                draw_rect(&mut vram, color, px, py, 1, 1)?;
-                crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, px, py)
+                draw_rect(&mut vram, color, p.x, p.y, 1, 1)?;
+                crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, p.x, p.y)
                     .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
             }
             TimeoutFuture::new_ms(15).await;

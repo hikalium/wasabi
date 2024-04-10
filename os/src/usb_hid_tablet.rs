@@ -1,10 +1,11 @@
 extern crate alloc;
 
+use crate::bitmap::Bitmap;
+use crate::boot_info::BootInfo;
 use crate::error;
 use crate::error::Error;
 use crate::error::Result;
 use crate::input::InputManager;
-use crate::input::MouseButtonState;
 use crate::memory::Mmio;
 use crate::usb::descriptor::ConfigDescriptor;
 use crate::usb::descriptor::EndpointDescriptor;
@@ -15,6 +16,8 @@ use crate::xhci::device::UsbHidProtocol;
 use crate::xhci::future::TransferEventFuture;
 use alloc::format;
 use alloc::vec::Vec;
+use sabi::MouseButtonState;
+use sabi::PointerPosition;
 
 pub fn pick_config(
     descriptors: &Vec<UsbDescriptor>,
@@ -82,6 +85,13 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
     let slot = ddc.slot();
     let xhci = ddc.xhci();
     let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
+
+    let vram = BootInfo::take().vram();
+    let w = vram.width() as f64;
+    let h = vram.height() as f64;
+    let max_x = w - 1.0;
+    let max_y = h - 1.0;
+
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
@@ -105,16 +115,22 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
                 let l = b & 1 != 0;
                 let r = b & 2 != 0;
                 let c = b & 4 != 0;
-                let b = MouseButtonState { l, c, r };
+                let b = MouseButtonState::from_lcr(l, c, r);
 
                 // 0~32767, top left origin (on QEMU)
                 let px = [report[1], report[2]];
                 let py = [report[3], report[4]];
                 let px = u16::from_le_bytes(px);
                 let py = u16::from_le_bytes(py);
-                let px = px as f32 / 32768f32;
-                let py = py as f32 / 32768f32;
-                InputManager::take().push_cursor_input_absolute(px, py, b);
+                let px = px as f64 / 32768f64;
+                let py = py as f64 / 32768f64;
+                // convert to the screen corrdinates
+                let px = px * w;
+                let py = py * h;
+                let px = unsafe { px.clamp(0.0, max_x).to_int_unchecked() };
+                let py = unsafe { py.clamp(0.0, max_y).to_int_unchecked() };
+                InputManager::take()
+                    .push_cursor_input_absolute(PointerPosition::from_xy(px, py), b);
             }
             Ok(None) => {
                 // Timed out. Do nothing.

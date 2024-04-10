@@ -64,7 +64,7 @@ fn sys_read_key(_args: &[u64; 5]) -> u64 {
 }
 
 fn sys_get_mouse_cursor_position(_args: &[u64; 5]) -> u64 {
-    if let Some((_x, _y, _buttons)) = InputManager::take().pop_cursor_input_absolute() {
+    if let Some((_pos, _buttons)) = InputManager::take().pop_cursor_input_absolute() {
         0
     } else {
         write_return_value_to_app(1);
