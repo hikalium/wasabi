@@ -11,6 +11,9 @@ RUNNER_TEST=$(shell readlink -f scripts/test_runner.sh)
 NOVNC_VERSION=1.4.0
 HOST_TARGET=`rustc -V -v | grep 'host:' | sed 's/host: //'`
 CLIPPY_OPTIONS=-D warnings
+APPS=$(shell ls $(PROJECT_ROOT)/app)
+APP_PACKAGES=$(addprefix  -p , $(APPS))
+BIN_DIR=$(PROJECT_ROOT)/generated/bin/
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
@@ -79,8 +82,7 @@ clippy:
 	cd dbgutil && cargo clippy -- ${CLIPPY_OPTIONS}
 	cd os && cargo clippy --all-features --all-targets -- ${CLIPPY_OPTIONS}
 	# Run clippy on all apps under app dir
-	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
-		xargs -P`nproc` -I {} -n 1 -- bash -c 'make -C {} clippy || exit 255'
+	cargo clippy $(APP_PACKAGES) -- ${CLIPPY_OPTIONS}
 
 .PHONY : dump_config
 dump_config:
@@ -101,8 +103,7 @@ check:
 
 .PHONY : app_unit_test
 app_unit_test:
-	find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | \
-		xargs -P`nproc` -I {} -n 1 -- bash -c 'make -C {} test'
+	cargo test $(APP_PACKAGES)
 
 # Run app on WasabiOS and check if it exits succesfully
 .PHONY : run_app_test
@@ -179,11 +180,11 @@ run_os_lib_test :
 .PHONY : app
 app :
 	rustup target add $(APP_TARGET)
-	[ -d generated/bin ] && rm -rf generated/bin ; true
-	rm -r `find target/x86_64-unknown-none/release -maxdepth 1 -executable -type f` 2>/dev/null ; true
-	$(APP_CARGO) build $(APP_BUILD_ARG) `find app -mindepth 1 -maxdepth 1 -not -path '*/.*' | cut -d / -f 2 | sed -e 's/^/ -p /' | tr -d '\n'`
-	mkdir -p generated/bin
-	cp `find target/x86_64-unknown-none/release -maxdepth 1 -executable -type f` generated/bin/
+	[ -d $(BIN_DIR) ] && rm -rf $(BIN_DIR) ; true
+	$(APP_CARGO) build $(APP_BUILD_ARG) $(APP_PACKAGES)
+	mkdir -p $(BIN_DIR)
+	@echo "Installing apps to ${BIN_DIR}"
+	cd target/x86_64-unknown-none/release && cp $(APPS) $(BIN_DIR)
 
 .PHONY : run_deps
 run_deps : app
