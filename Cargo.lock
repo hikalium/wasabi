@@ -619,6 +619,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "font",
+ "sabi",
 ]
 
 [[package]]
@@ -662,6 +663,7 @@ name = "paint"
 version = "0.1.0"
 dependencies = [
  "noli",
+ "sabi",
 ]
 
 [[package]]

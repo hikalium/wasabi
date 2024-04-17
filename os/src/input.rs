@@ -23,8 +23,7 @@ use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
 use core::str::FromStr;
-use sabi::MouseButtonState;
-use sabi::PointerPosition;
+use sabi::MouseEvent;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyEvent {
@@ -45,7 +44,7 @@ impl KeyEvent {
 
 pub struct InputManager {
     input_queue: Mutex<VecDeque<char>>,
-    cursor_queue: Mutex<VecDeque<(PointerPosition, MouseButtonState)>>,
+    cursor_queue: Mutex<VecDeque<MouseEvent>>,
 }
 impl InputManager {
     fn new() -> Self {
@@ -67,10 +66,10 @@ impl InputManager {
     }
 
     // x, y: 0f32..1f32, top left origin
-    pub fn push_cursor_input_absolute(&self, p: PointerPosition, b: MouseButtonState) {
-        self.cursor_queue.lock().push_back((p, b))
+    pub fn push_cursor_input_absolute(&self, e: MouseEvent) {
+        self.cursor_queue.lock().push_back(e)
     }
-    pub fn pop_cursor_input_absolute(&self) -> Option<(PointerPosition, MouseButtonState)> {
+    pub fn pop_cursor_input_absolute(&self) -> Option<MouseEvent> {
         self.cursor_queue.lock().pop_front()
     }
 }
@@ -156,13 +155,19 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
             .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
 
         loop {
-            if let Some((p, b)) = InputManager::take().pop_cursor_input_absolute() {
+            if let Some(MouseEvent {
+                position: p,
+                button: b,
+            }) = InputManager::take().pop_cursor_input_absolute()
+            {
                 let color = (b.l() as u32) * 0xff0000;
                 let color = !color;
 
                 draw_rect(&mut vram, color, p.x, p.y, 1, 1)?;
+                /*
                 crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, p.x, p.y)
                     .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
+                */
             }
             TimeoutFuture::new_ms(15).await;
             yield_execution().await;

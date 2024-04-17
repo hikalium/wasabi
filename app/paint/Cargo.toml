@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 noli = { path = "../../noli", version = "0.1.0" }
+sabi = { path = "../../sabi", version = "0.1.0" }

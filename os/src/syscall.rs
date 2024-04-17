@@ -7,6 +7,8 @@ use crate::x86_64::syscall::return_to_os;
 use crate::x86_64::syscall::write_exit_reason;
 use crate::x86_64::syscall::write_return_value;
 use crate::x86_64::syscall::write_return_value_to_app;
+use core::ptr::write_volatile;
+use sabi::MouseEvent;
 
 fn exit_to_os(retv: u64) -> ! {
     write_exit_reason(0);
@@ -63,8 +65,9 @@ fn sys_read_key(_args: &[u64; 5]) -> u64 {
     }
 }
 
-fn sys_get_mouse_cursor_position(_args: &[u64; 5]) -> u64 {
-    if let Some((_pos, _buttons)) = InputManager::take().pop_cursor_input_absolute() {
+fn sys_get_mouse_cursor_position(args: &[u64; 5]) -> u64 {
+    if let Some(e) = InputManager::take().pop_cursor_input_absolute() {
+        unsafe { write_volatile(args[0] as *mut MouseEvent, e) }
         0
     } else {
         write_return_value_to_app(1);

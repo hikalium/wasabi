@@ -17,6 +17,7 @@ use crate::xhci::future::TransferEventFuture;
 use alloc::format;
 use alloc::vec::Vec;
 use sabi::MouseButtonState;
+use sabi::MouseEvent;
 use sabi::PointerPosition;
 
 pub fn pick_config(
@@ -115,7 +116,7 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
                 let l = b & 1 != 0;
                 let r = b & 2 != 0;
                 let c = b & 4 != 0;
-                let b = MouseButtonState::from_lcr(l, c, r);
+                let button = MouseButtonState::from_lcr(l, c, r);
 
                 // 0~32767, top left origin (on QEMU)
                 let px = [report[1], report[2]];
@@ -129,8 +130,9 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
                 let py = py * h;
                 let px = unsafe { px.clamp(0.0, max_x).to_int_unchecked() };
                 let py = unsafe { py.clamp(0.0, max_y).to_int_unchecked() };
-                InputManager::take()
-                    .push_cursor_input_absolute(PointerPosition::from_xy(px, py), b);
+                let position = PointerPosition::from_xy(px, py);
+
+                InputManager::take().push_cursor_input_absolute(MouseEvent { button, position });
             }
             Ok(None) => {
                 // Timed out. Do nothing.

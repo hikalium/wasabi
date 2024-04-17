@@ -7,6 +7,7 @@
 #![no_std]
 
 #[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct MouseButtonState(u64);
 pub const MOUSE_BUTTON_L: u64 = 1 << 0;
 pub const MOUSE_BUTTON_C: u64 = 1 << 1;
@@ -31,6 +32,7 @@ impl MouseButtonState {
 // Origin (0, 0) is at top-left of the virtual 2D screen.
 // Moving right or down increases the value on each axis.
 #[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct PointerPosition {
     pub x: i64,
     pub y: i64,
@@ -39,4 +41,11 @@ impl PointerPosition {
     pub fn from_xy(x: i64, y: i64) -> Self {
         Self { x, y }
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct MouseEvent {
+    pub button: MouseButtonState,
+    pub position: PointerPosition,
 }

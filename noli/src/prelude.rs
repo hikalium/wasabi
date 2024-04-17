@@ -20,4 +20,6 @@ pub use crate::error::MainReturn;
 #[allow(unused)]
 pub use crate::error::Result;
 #[allow(unused)]
+pub use sys::api::MouseEvent;
+#[allow(unused)]
 pub use sys::os::Api;

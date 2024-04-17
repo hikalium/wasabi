@@ -83,6 +83,7 @@ clippy:
 	cd os && cargo clippy --all-features --all-targets -- ${CLIPPY_OPTIONS}
 	# Run clippy on all apps under app dir
 	cargo clippy $(APP_PACKAGES) -- ${CLIPPY_OPTIONS}
+	cargo clippy --target=x86_64-unknown-none $(APP_PACKAGES) -- ${CLIPPY_OPTIONS}
 
 .PHONY : dump_config
 dump_config:

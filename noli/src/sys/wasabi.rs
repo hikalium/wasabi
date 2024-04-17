@@ -3,6 +3,7 @@ use crate::prelude::*;
 use core::alloc::GlobalAlloc;
 use core::alloc::Layout;
 use core::ptr::null_mut;
+use sabi::MouseEvent;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -145,7 +146,13 @@ impl SystemApi for Api {
             char::from_u32(c as u32)
         }
     }
-    fn get_mouse_cursor_info() -> bool {
-        syscall_0(5) == 0
+    fn get_mouse_cursor_info() -> Option<MouseEvent> {
+        let mut e: MouseEvent = MouseEvent::default();
+        let ep = &mut e as *mut MouseEvent as u64;
+        if syscall_1(5, ep) == 0 {
+            Some(e)
+        } else {
+            None
+        }
     }
 }
