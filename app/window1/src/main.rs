@@ -11,9 +11,11 @@ use noli::window;
 fn main() {
     println!("window 1");
 
-    window::Window::new("first window!".to_string(), 0xffffff, 0, 0, 200, 100).unwrap();
+    window::Window::new("first window!".to_string(), 0xffffff, 30, 30, 200, 100).unwrap();
     let window2 =
-        window::Window::new("second window!!".to_string(), 0xff00ff, 30, 70, 200, 100).unwrap();
+        window::Window::new("second window!!".to_string(), 0xff00ff, 60, 100, 200, 100).unwrap();
+    let window3 =
+        window::Window::new("third window!!".to_string(), 0x0000ff, 90, 170, 200, 100).unwrap();
 
     window2.fill_rect(0xff0000, 0, 0, 50, 50).unwrap();
     window2
@@ -26,6 +28,10 @@ fn main() {
             /*underline*/ false,
         )
         .unwrap();
+
+    assert_eq!(window3.fill_rect(0xff0000, 50, 50, 50, 26).is_ok(), true);
+    // try to fill a bigger rect than the size of the window.
+    assert_eq!(window3.fill_rect(0xff0000, 100, 50, 50, 27).is_err(), true);
 }
 
 entry_point!(main);

@@ -59,7 +59,9 @@ impl DrawTarget for Window {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(point, color) in pixels {
-            if point.x >= self.width as i32 || point.y + TITLE_BAR_HEIGHT >= self.height as i32 {
+            if point.x >= self.width as i32
+                || point.y + TITLE_BAR_HEIGHT as i32 >= self.height as i32
+            {
                 // Ignore a point outside the window.
                 continue;
             }
