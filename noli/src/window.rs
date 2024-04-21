@@ -59,7 +59,7 @@ impl DrawTarget for Window {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(point, color) in pixels {
-            if point.x >= self.width as i32 || point.y >= self.height as i32 {
+            if point.x >= self.width as i32 || point.y + TITLE_BAR_HEIGHT >= self.height as i32 {
                 // Ignore a point outside the window.
                 continue;
             }
@@ -160,7 +160,11 @@ impl Window {
     pub fn flush(&self) {}
 
     pub fn fill_rect(&self, color: u32, px: i64, py: i64, width: i64, height: i64) -> Result<()> {
-        if px < 0 || px + width > self.width || py < 0 || py + height > self.height {
+        if px < 0
+            || px + width > self.width
+            || py < 0
+            || py + height + TITLE_BAR_HEIGHT > self.height
+        {
             return Err(Error::Failed("fill_rect: out of range"));
         }
 
@@ -178,7 +182,7 @@ impl Window {
         if min(x0, x1) < 0
             || min(y0, y1) < 0
             || max(x0, x1) > self.width
-            || max(y0, y1) > self.height
+            || max(y0, y1) + TITLE_BAR_HEIGHT > self.height
         {
             return Err(Error::Failed("out of range"));
         }
@@ -202,7 +206,7 @@ impl Window {
         size: StringSize,
         underline: bool,
     ) -> Result<()> {
-        if x < 0 || x > self.width || y < 0 || y > self.height {
+        if x < 0 || x > self.width || y < 0 || (y + TITLE_BAR_HEIGHT) > self.height {
             return Err(Error::Failed("draw_string: out of range"));
         }
 
@@ -232,7 +236,7 @@ impl Window {
     }
 
     pub fn draw_point(&self, color: u32, x: i64, y: i64) -> Result<()> {
-        if x < 0 || x > self.width || y < 0 || y > self.height {
+        if x < 0 || x > self.width || y < 0 || (y + TITLE_BAR_HEIGHT) > self.height {
             return Err(Error::Failed("draw_point: out of range"));
         }
 
