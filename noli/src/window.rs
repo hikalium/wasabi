@@ -65,7 +65,7 @@ impl DrawTarget for Window {
             }
 
             let c = ((color.r() as u32) << 16) + ((color.g() as u32) << 8) + (color.b() as u32);
-            graphics::draw_point(c, point.x as i64, point.y as i64)?;
+            self.draw_point(c, point.x as i64, point.y as i64)?;
         }
 
         Ok(())
@@ -228,6 +228,15 @@ impl Window {
                 graphics::draw_string_3x(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT, s)?;
             }
         }
+        Ok(())
+    }
+
+    pub fn draw_point(&self, color: u32, x: i64, y: i64) -> Result<()> {
+        if x < 0 || x > self.width || y < 0 || y > self.height {
+            return Err(Error::Failed("draw_point: out of range"));
+        }
+
+        graphics::draw_point(color, self.x + x, self.y + y + TITLE_BAR_HEIGHT)?;
         Ok(())
     }
 }
