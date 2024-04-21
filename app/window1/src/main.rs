@@ -29,9 +29,9 @@ fn main() {
         )
         .unwrap();
 
-    assert_eq!(window3.fill_rect(0xff0000, 50, 50, 50, 26).is_ok(), true);
+    assert!(window3.fill_rect(0xff0000, 50, 50, 50, 26).is_ok());
     // try to fill a bigger rect than the size of the window.
-    assert_eq!(window3.fill_rect(0xff0000, 100, 50, 50, 27).is_err(), true);
+    assert!(window3.fill_rect(0xff0000, 100, 50, 50, 27).is_err());
 }
 
 entry_point!(main);
