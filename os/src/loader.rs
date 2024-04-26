@@ -41,7 +41,8 @@ impl<'a> LoadedElf<'a> {
         }
         Err(Error::Failed("vaddr not found"))
     }
-    pub async fn exec(self) -> Result<i64> {
+    pub async fn exec(self, args: &[&str]) -> Result<i64> {
+        let _ = serialize_args(args);
         let stack_size = 1024 * 1024;
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
         let stack_range = stack.range();
@@ -321,5 +322,75 @@ impl<'a> fmt::Debug for Elf<'a> {
             &self.file.name(),
             self.file.data().as_ptr()
         )
+    }
+}
+
+/// Serialize the arguments into bytes.
+/// Format:
+/// - total_size: u64
+/// - num_args: u64
+/// - ofs_and_len: (ofs: u64, len: u64) * num_args
+/// - data
+/// Each arg data is null-terminated, but "len" of an arg
+/// does not count the null terminator.
+/// For example, args ["zero", "one", "two"] will be serialized as:
+/// - total_size = 77
+/// - num_args = 3
+/// - ofs_and_len:
+///   [0]: (ofs = 64, len = 4)
+///   [1]: (ofs = 69, len = 3)
+///   [2]: (ofs = 73, len = 3)
+/// - data = "zero\0one\0two\0"
+fn serialize_args(args: &[&str]) -> Vec<u8> {
+    let args: Vec<&[u8]> = args.iter().map(|e| e.as_bytes()).collect();
+    let data_base_ofs: u64 = (args.len() as u64 + 1) * 16;
+    let mut ofs_and_len: Vec<(u64, u64)> = Vec::new();
+    let mut data: Vec<u8> = Vec::new();
+    for e in &args {
+        ofs_and_len.push((data_base_ofs + data.len() as u64, e.len() as u64));
+        data.extend_from_slice(e);
+        data.push(0);
+    }
+    let total_size = data_base_ofs + data.len() as u64;
+    let num_args = args.len() as u64;
+    let mut serialized: Vec<u8> = Vec::new();
+    serialized.extend_from_slice(&total_size.to_le_bytes());
+    serialized.extend_from_slice(&num_args.to_le_bytes());
+    for e in ofs_and_len {
+        serialized.extend_from_slice(&e.0.to_le_bytes());
+        serialized.extend_from_slice(&e.1.to_le_bytes());
+    }
+    serialized.extend_from_slice(&data);
+    serialized
+}
+
+#[cfg(test)]
+mod tests {
+    use super::alloc::vec::Vec;
+    use super::serialize_args;
+
+    #[test_case]
+    fn example_serialize_args() {
+        // For example, args ["zero", "one", "two"] will be
+        // serialized as follows:
+        // - total_size = 77
+        // - num_args = 3
+        // - ofs_and_len:
+        //   [0]: (ofs = 64, len = 4)
+        //   [1]: (ofs = 69, len = 3)
+        //   [2]: (ofs = 73, len = 3)
+        // - data = "zero\0one\0two\0"
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&77u64.to_le_bytes());
+        expected.extend_from_slice(&3u64.to_le_bytes());
+        expected.extend_from_slice(&64u64.to_le_bytes());
+        expected.extend_from_slice(&4u64.to_le_bytes());
+        expected.extend_from_slice(&69u64.to_le_bytes());
+        expected.extend_from_slice(&3u64.to_le_bytes());
+        expected.extend_from_slice(&73u64.to_le_bytes());
+        expected.extend_from_slice(&3u64.to_le_bytes());
+        expected.extend_from_slice("zero\0one\0two\0".as_bytes());
+        let actual = serialize_args(&["zero", "one", "two"]);
+        assert_eq!(actual, expected);
     }
 }

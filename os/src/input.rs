@@ -105,7 +105,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
             if let Some(elf) = elf {
                 let elf = Elf::parse(elf)?;
                 let app = elf.load()?;
-                app.exec().await?;
+                app.exec(&[]).await?;
                 debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
             } else {
                 return Err(Error::Failed("Init app file not found"));

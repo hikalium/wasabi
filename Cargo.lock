@@ -290,6 +290,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dig"
+version = "0.1.0"
+dependencies = [
+ "noli",
+]
+
+[[package]]
 name = "e2etest"
 version = "0.1.0"
 dependencies = [

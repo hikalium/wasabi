@@ -18,7 +18,7 @@ use crate::x86_64::trigger_debug_interrupt;
 use alloc::vec::Vec;
 use core::str::FromStr;
 
-async fn run_app(name: &str) -> Result<i64> {
+async fn run_app(name: &str, args: &[&str]) -> Result<i64> {
     let boot_info = BootInfo::take();
     let root_files = boot_info.root_files();
     let root_files: alloc::vec::Vec<&crate::boot_info::File> =
@@ -28,7 +28,7 @@ async fn run_app(name: &str) -> Result<i64> {
     if let Some(elf) = elf {
         let elf = Elf::parse(elf)?;
         let app = elf.load()?;
-        let result = app.exec().await?;
+        let result = app.exec(args).await?;
         #[cfg(test)]
         if result == 0 {
             debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
@@ -73,7 +73,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 println!("{:?}", network.arp_table_cloned())
             }
             app_name => {
-                let result = run_app(app_name).await;
+                let result = run_app(app_name, &args).await;
                 if result.is_ok() {
                     info!("{result:?}");
                 } else {
