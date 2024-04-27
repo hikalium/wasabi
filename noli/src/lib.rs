@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 
+pub mod bitmap;
 pub mod error;
 pub mod font;
 pub mod graphics;

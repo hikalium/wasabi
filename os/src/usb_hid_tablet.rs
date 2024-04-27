@@ -1,6 +1,5 @@
 extern crate alloc;
 
-use crate::bitmap::Bitmap;
 use crate::boot_info::BootInfo;
 use crate::error;
 use crate::error::Error;
@@ -16,6 +15,7 @@ use crate::xhci::device::UsbHidProtocol;
 use crate::xhci::future::TransferEventFuture;
 use alloc::format;
 use alloc::vec::Vec;
+use noli::bitmap::Bitmap;
 use sabi::MouseButtonState;
 use sabi::MouseEvent;
 use sabi::PointerPosition;

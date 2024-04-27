@@ -1,4 +1,3 @@
-use crate::bitmap::Bitmap;
 use crate::graphics::draw_char;
 use crate::graphics::draw_line;
 use crate::graphics::draw_rect;
@@ -6,6 +5,7 @@ use crate::graphics::transfer_rect;
 use crate::graphics::GraphicsResult;
 use core::cmp::max;
 use core::fmt;
+use noli::bitmap::Bitmap;
 
 pub enum TextAreaMode {
     Scroll,

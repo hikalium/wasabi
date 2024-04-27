@@ -1,8 +1,8 @@
-use crate::bitmap::Bitmap;
 use crate::efi::locate_graphic_protocol;
 use crate::efi::EfiSystemTable;
 use crate::error::Result;
 use core::pin::Pin;
+use noli::bitmap::Bitmap;
 
 #[derive(Clone, Copy)]
 pub struct VRAMBufferInfo {

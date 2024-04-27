@@ -27,7 +27,6 @@
 mod acpi;
 pub mod allocator;
 mod ax88179;
-pub mod bitmap;
 pub mod bitset;
 pub mod boot_info;
 mod command;

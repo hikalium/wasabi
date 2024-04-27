@@ -1,12 +1,12 @@
 extern crate alloc;
 
-use crate::bitmap::Bitmap;
 use crate::rect::Rect;
 use alloc::vec::Vec;
 use core::cmp::max;
 use core::cmp::min;
 use core::cmp::Ordering;
 use core::ops::Range;
+use noli::bitmap::Bitmap;
 
 font::gen_embedded_font!();
 

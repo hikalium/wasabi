@@ -1,7 +1,6 @@
 extern crate alloc;
 
 use crate::acpi::Acpi;
-use crate::bitmap::Bitmap;
 use crate::boot_info::BootInfo;
 use crate::boot_info::File;
 use crate::efi;
@@ -38,6 +37,7 @@ use efi::EfiMemoryType::LOADER_CODE;
 use efi::EfiMemoryType::LOADER_DATA;
 use error::Result;
 use hpet::Hpet;
+use noli::bitmap::Bitmap;
 use util::PAGE_SIZE;
 
 pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;

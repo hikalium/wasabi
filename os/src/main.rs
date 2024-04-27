@@ -9,7 +9,7 @@
 extern crate alloc;
 
 use core::pin::Pin;
-use os::bitmap::Bitmap;
+use noli::bitmap::Bitmap;
 use os::boot_info::BootInfo;
 use os::efi::types::EfiHandle;
 use os::error::Result;
