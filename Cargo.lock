@@ -662,6 +662,7 @@ name = "os"
 version = "0.0.0"
 dependencies = [
  "font",
+ "noli",
  "sabi",
 ]
 
