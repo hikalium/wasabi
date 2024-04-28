@@ -1,11 +1,11 @@
 use crate::println;
 use crate::serial::SerialPort;
-use crate::text_area::TextArea;
 use crate::vram::VRAMBufferInfo;
 use core::cell::RefCell;
 use core::fmt;
 use core::mem::size_of;
 use core::slice;
+use noli::text_area::TextArea;
 
 pub struct GlobalPrinter {
     text_area: RefCell<Option<TextArea<VRAMBufferInfo>>>,

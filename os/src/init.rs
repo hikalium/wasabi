@@ -10,8 +10,6 @@ use crate::memory_map_holder;
 use crate::pci::Pci;
 use crate::serial::SerialPort;
 use crate::serial::SerialPortIndex;
-use crate::text_area;
-use crate::text_area::TextArea;
 use crate::util;
 use crate::util::size_in_pages_from_bytes;
 use crate::vram;
@@ -38,6 +36,8 @@ use efi::EfiMemoryType::LOADER_DATA;
 use error::Result;
 use hpet::Hpet;
 use noli::bitmap::Bitmap;
+use noli::text_area;
+use noli::text_area::TextArea;
 use util::PAGE_SIZE;
 
 pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;

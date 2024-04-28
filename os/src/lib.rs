@@ -51,7 +51,6 @@ mod rtl8139;
 mod serial;
 mod syscall;
 pub mod test_runner;
-mod text_area;
 mod usb;
 mod usb_hid_keyboard;
 mod usb_hid_tablet;
