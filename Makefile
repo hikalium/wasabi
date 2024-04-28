@@ -113,11 +113,11 @@ run_app_test:
 
 .PHONY : pre_upload_test
 pre_upload_test:
+	cargo test --package noli
 	make run_app_test
 	make run_os_test
 	make run_os_lib_test
 	make app_unit_test
-	cargo test --package noli
 
 .PHONY : post_upload_test
 post_upload_test:
