@@ -1,9 +1,9 @@
 extern crate alloc;
 
 use crate::efi::types::EfiStatus;
-use crate::graphics::GraphicsError;
 use alloc::string::String;
 use core::num::TryFromIntError;
+use noli::graphics::GraphicsError;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Error {

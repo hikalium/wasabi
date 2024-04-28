@@ -1,11 +1,11 @@
-use crate::graphics::draw_char;
-use crate::graphics::draw_line;
-use crate::graphics::draw_rect;
-use crate::graphics::transfer_rect;
-use crate::graphics::GraphicsResult;
 use core::cmp::max;
 use core::fmt;
+use noli::bitmap::bitmap_draw_char;
+use noli::bitmap::bitmap_draw_line;
+use noli::bitmap::bitmap_draw_rect;
+use noli::bitmap::transfer_rect;
 use noli::bitmap::Bitmap;
+use noli::graphics::GraphicsResult;
 
 pub enum TextAreaMode {
     Scroll,
@@ -41,7 +41,7 @@ impl<T: Bitmap> TextArea<T> {
         text_area
     }
     fn clear_screen(&mut self) -> GraphicsResult<()> {
-        draw_rect(&mut self.buf, 0x000000, self.x, self.y, self.w, self.h)
+        bitmap_draw_rect(&mut self.buf, 0x000000, self.x, self.y, self.w, self.h)
     }
     pub fn set_mode(&mut self, mode: TextAreaMode) {
         self.mode = mode;
@@ -64,7 +64,7 @@ impl<T: Bitmap> TextArea<T> {
                     self.w,
                     self.cy * 16,
                 )?;
-                draw_rect(
+                bitmap_draw_rect(
                     &mut self.buf,
                     0x000000,
                     self.x,
@@ -74,7 +74,7 @@ impl<T: Bitmap> TextArea<T> {
                 )?;
             }
             TextAreaMode::Ring => {
-                draw_line(
+                bitmap_draw_line(
                     &mut self.buf,
                     0xff << ((self.ring_count % 3) * 8),
                     self.x,
@@ -87,7 +87,7 @@ impl<T: Bitmap> TextArea<T> {
                     self.cy = 0;
                     self.ring_count += 1;
                 }
-                draw_rect(
+                bitmap_draw_rect(
                     &mut self.buf,
                     0x000000,
                     self.x,
@@ -114,7 +114,7 @@ impl<T: Bitmap> TextArea<T> {
         match c {
             '\n' => self.new_line(),
             '\x08' | '\x7f' => self.move_cursor_prev(),
-            _ => draw_char(
+            _ => bitmap_draw_char(
                 &mut self.buf,
                 fg,
                 bg,

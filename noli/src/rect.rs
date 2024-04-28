@@ -50,7 +50,7 @@ impl Rect {
 mod rect_tests {
     use super::Rect;
 
-    #[test_case]
+    #[test]
     fn creates_rect() {
         let r = Rect::new(0, 0, 0, 0).unwrap();
         assert_eq!(r.x(), 0);
@@ -70,13 +70,13 @@ mod rect_tests {
         assert_eq!(r.w(), 3);
         assert_eq!(r.h(), 4);
     }
-    #[test_case]
+    #[test]
     fn fails_to_create_negative_sized_rect() {
         assert!(Rect::new(0, 0, -1, 0).is_none());
         assert!(Rect::new(0, 0, 0, -1).is_none());
         assert!(Rect::new(0, 0, -1, -1).is_none());
     }
-    #[test_case]
+    #[test]
     fn calc_intersection() {
         let r1 = Rect::new(0, 0, 1, 1).unwrap();
         let self_intersect = r1.intersection(&r1).unwrap();

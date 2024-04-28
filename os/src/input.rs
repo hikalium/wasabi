@@ -10,9 +10,6 @@ use crate::executor::yield_execution;
 use crate::executor::Executor;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
-use crate::graphics::draw_point;
-use crate::graphics::draw_rect;
-use crate::graphics::BitmapBuffer;
 use crate::info;
 use crate::loader::Elf;
 use crate::mutex::Mutex;
@@ -23,6 +20,9 @@ use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
 use core::str::FromStr;
+use noli::bitmap::bitmap_draw_point;
+use noli::bitmap::bitmap_draw_rect;
+use noli::bitmap::BitmapBuffer;
 use sabi::MouseEvent;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -145,13 +145,14 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         for y in 0..CURSOR_SIZE {
             for x in 0..(CURSOR_SIZE - y) {
                 if x <= y {
-                    draw_point(&mut cursor_bitmap, 0x00ff00, x, y).expect("Failed to paint cursor");
+                    bitmap_draw_point(&mut cursor_bitmap, 0x00ff00, x, y)
+                        .expect("Failed to paint cursor");
                 }
             }
         }
         let mut vram = BootInfo::take().vram();
 
-        crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)
+        noli::bitmap::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)
             .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
 
         loop {
@@ -163,7 +164,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
                 let color = (b.l() as u32) * 0xff0000;
                 let color = !color;
 
-                draw_rect(&mut vram, color, p.x, p.y, 1, 1)?;
+                bitmap_draw_rect(&mut vram, color, p.x, p.y, 1, 1)?;
                 /*
                 crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, p.x, p.y)
                     .ok_or(Error::Failed("Failed to draw mouse cursor"))?;

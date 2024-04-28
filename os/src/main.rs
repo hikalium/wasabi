@@ -9,6 +9,7 @@
 extern crate alloc;
 
 use core::pin::Pin;
+use noli::bitmap::bitmap_draw_line;
 use noli::bitmap::Bitmap;
 use os::boot_info::BootInfo;
 use os::efi::types::EfiHandle;
@@ -18,7 +19,6 @@ use os::executor::yield_execution;
 use os::executor::Executor;
 use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
-use os::graphics::draw_line;
 use os::info;
 use os::init;
 use os::input::enqueue_input_tasks;
@@ -39,7 +39,7 @@ fn paint_wasabi_logo() {
 
     // Sabi (Ferris)
     for x in 0..SIZE {
-        draw_line(
+        bitmap_draw_line(
             &mut vram,
             COL_SABI,
             dx + SIZE,
@@ -51,10 +51,10 @@ fn paint_wasabi_logo() {
     }
     // Wasabi
     for x in 0..SIZE {
-        draw_line(&mut vram, COL_WASABI, dx, dy, dx + SIZE / 2 + x, dy + SIZE).unwrap();
+        bitmap_draw_line(&mut vram, COL_WASABI, dx, dy, dx + SIZE / 2 + x, dy + SIZE).unwrap();
     }
     for x in 0..SIZE {
-        draw_line(
+        bitmap_draw_line(
             &mut vram,
             COL_WASABI + 0x3d3d3d,
             dx + SIZE * 2,
@@ -76,7 +76,7 @@ fn run_tasks() -> Result<()> {
         let mut x = xbegin;
         let mut c = 0;
         loop {
-            draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
+            bitmap_draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
             x += 1;
             if x >= vram.width() {
                 x = xbegin;
@@ -95,7 +95,7 @@ fn run_tasks() -> Result<()> {
         let mut x = xbegin;
         let mut c = 0;
         loop {
-            draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
+            bitmap_draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
             x += 1;
             if x >= vram.width() {
                 x = xbegin;

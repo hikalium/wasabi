@@ -1,5 +1,4 @@
 use crate::boot_info::BootInfo;
-use crate::graphics::draw_point;
 use crate::input::InputManager;
 use crate::print;
 use crate::println;
@@ -8,6 +7,7 @@ use crate::x86_64::syscall::write_exit_reason;
 use crate::x86_64::syscall::write_return_value;
 use crate::x86_64::syscall::write_return_value_to_app;
 use core::ptr::write_volatile;
+use noli::bitmap::bitmap_draw_point;
 use sabi::MouseEvent;
 
 fn exit_to_os(retv: u64) -> ! {
@@ -48,7 +48,7 @@ fn sys_draw_point(args: &[u64; 5]) -> u64 {
     let x = args[0] as i64;
     let y = args[1] as i64;
     let c = args[2] as u32;
-    let result = draw_point(&mut vram, c, x, y);
+    let result = bitmap_draw_point(&mut vram, c, x, y);
     if result.is_err() {
         1
     } else {
