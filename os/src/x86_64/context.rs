@@ -1,9 +1,12 @@
 use crate::error::Result;
 use crate::executor::yield_execution;
 use crate::mutex::Mutex;
+use crate::process::ProcessContext;
+use crate::process::CURRENT_PROCESS;
 use core::arch::asm;
 use core::arch::global_asm;
 use core::mem::size_of;
+use core::mem::swap;
 use core::mem::MaybeUninit;
 
 pub static CONTEXT_OS: Mutex<ExecutionContext> =
@@ -85,6 +88,7 @@ const _: () = assert!(size_of::<CpuContext>() == 8 * 16 + 8 * 2);
 
 pub async fn exec_app_context() -> Result<i64> {
     let mut retcode: i64;
+    let mut proc_context = Some(ProcessContext::default());
     loop {
         let mut exit_reason: i64;
         unsafe {
@@ -101,6 +105,10 @@ pub async fn exec_app_context() -> Result<i64> {
                 let app_ctx = CONTEXT_APP.lock();
                 let app_ctx_on_app_stack = app_rsp as *mut ExecutionContext;
                 *app_ctx_on_app_stack = app_ctx.clone();
+            }
+            {
+                let mut current_process = CURRENT_PROCESS.lock();
+                swap(&mut proc_context, &mut current_process);
             }
             asm!(
                 // Save current execution state into CONTEXT_OS(rsi)
@@ -202,6 +210,14 @@ pub async fn exec_app_context() -> Result<i64> {
                 lateout("rax") retcode,
                 lateout("r8") exit_reason,
             );
+            {
+                let mut current_process = CURRENT_PROCESS.lock();
+                swap(&mut *current_process, &mut proc_context);
+            }
+        }
+        {
+            let mut current_process = CURRENT_PROCESS.lock();
+            *current_process = Some(ProcessContext::default());
         }
         if exit_reason == 0 {
             // return to os
