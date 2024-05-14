@@ -3,6 +3,7 @@ use crate::prelude::*;
 use core::alloc::GlobalAlloc;
 use core::alloc::Layout;
 use core::ptr::null_mut;
+use core::slice;
 use sabi::MouseEvent;
 
 #[panic_handler]
@@ -153,6 +154,20 @@ impl SystemApi for Api {
             Some(e)
         } else {
             None
+        }
+    }
+    fn get_args_region() -> Option<&'static [u8]> {
+        let addr = syscall_0(6);
+        if addr == 0 {
+            None
+        } else {
+            println!("addr = {addr:#X}");
+            let addr = addr as *const u8;
+            let mut size = [0u8; 8];
+            size.copy_from_slice(unsafe { slice::from_raw_parts(addr, 8) });
+            let size = usize::from_le_bytes(size);
+            println!("size = {size:#X}");
+            Some(unsafe { slice::from_raw_parts(addr, size) })
         }
     }
 }

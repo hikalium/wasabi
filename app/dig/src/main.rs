@@ -6,6 +6,8 @@ use alloc::string::String;
 use noli::prelude::*;
 
 fn main() -> Result<()> {
+    let args = Api::get_args_region();
+    println!("{args:?}");
     let mut line = String::new();
     println!("# Reverses the input string on a row.");
     println!("# Type q and hit Enter to exit.");

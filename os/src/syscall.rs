@@ -2,6 +2,7 @@ use crate::boot_info::BootInfo;
 use crate::input::InputManager;
 use crate::print;
 use crate::println;
+use crate::process::CURRENT_PROCESS;
 use crate::x86_64::syscall::return_to_os;
 use crate::x86_64::syscall::write_exit_reason;
 use crate::x86_64::syscall::write_return_value;
@@ -75,6 +76,14 @@ fn sys_get_mouse_cursor_position(args: &[u64; 5]) -> u64 {
     }
 }
 
+fn sys_get_args_region(_args: &[u64; 5]) -> u64 {
+    if let Some(proc) = CURRENT_PROCESS.lock().as_ref() {
+        proc.args_region_start_addr() as u64
+    } else {
+        0
+    }
+}
+
 pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
     match op {
         0 => sys_exit(args),
@@ -83,6 +92,7 @@ pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
         3 => sys_noop(args),
         4 => sys_read_key(args),
         5 => sys_get_mouse_cursor_position(args),
+        6 => sys_get_args_region(args),
         op => {
             println!("syscall: unimplemented syscall: {}", op);
             1

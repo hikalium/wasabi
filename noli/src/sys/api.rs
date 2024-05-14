@@ -26,4 +26,8 @@ pub trait SystemApi {
     fn get_mouse_cursor_info() -> Option<MouseEvent> {
         unimplemented!()
     }
+    /// Returns Some if there is an args region.
+    fn get_args_region() -> Option<&'static [u8]> {
+        unimplemented!()
+    }
 }

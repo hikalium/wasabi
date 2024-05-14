@@ -9,6 +9,7 @@ use crate::error::Result;
 use crate::memory::AddressRange;
 use crate::memory::ContiguousPhysicalMemoryPages;
 use crate::println;
+use crate::process::ProcessContext;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
 use crate::util::read_le_u64;
@@ -25,7 +26,6 @@ use core::cmp::max;
 use core::cmp::min;
 use core::fmt;
 use core::mem::size_of;
-use noli::args::serialize_args;
 
 pub struct LoadedElf<'a> {
     elf: &'a Elf<'a>,
@@ -43,7 +43,8 @@ impl<'a> LoadedElf<'a> {
         Err(Error::Failed("vaddr not found"))
     }
     pub async fn exec(self, args: &[&str]) -> Result<i64> {
-        let _ = serialize_args(args);
+        let proc_context = ProcessContext::new(args)?;
+
         let stack_size = 1024 * 1024;
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
         let stack_range = stack.range();
@@ -56,7 +57,7 @@ impl<'a> LoadedElf<'a> {
             app_ctx.cpu.rflags = 2;
             app_ctx.cpu.rsp = stack_range.end() as u64; // stack grows toward 0, so empty stack pointer will be the end addr
         }
-        exec_app_context().await
+        exec_app_context(proc_context).await
     }
     pub fn slice_of_vaddr_range(&self, range_on_vaddr: AddressRange) -> Result<&[u8]> {
         let range = range_on_vaddr.to_range_in(&self.app_vaddr_range)?;
