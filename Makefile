@@ -30,7 +30,7 @@ QEMU_ARGS=\
 		-serial chardev:char_com1 \
 		-serial chardev:char_com2 \
 		-rtc base=localtime \
-		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait \
+		-monitor telnet:0.0.0.0:$(PORT_MONITOR),server,nowait,logfile=log/qemu_monitor.txt \
 		--no-reboot \
 		-d int,cpu_reset \
 		-D log/qemu_debug.txt \
@@ -211,7 +211,7 @@ install : run_deps generated/bin/os.efi
 internal_launch_qemu : run_deps
 	@echo "Using ${PATH_TO_EFI}"
 	cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
-	$(QEMU) $(QEMU_ARGS)
+	$(QEMU) $(QEMU_ARGS) 2>log/qemu_stderr.txt
 
 .PHONY : internal_run_app_test
 internal_run_app_test : run_deps generated/bin/os.efi

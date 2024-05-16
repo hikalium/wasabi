@@ -225,22 +225,24 @@ impl Rtl8139 {
             // - 1 if physical address is received.
             let packet_len = unsafe { *(rx_desc_ptr.offset(2) as *const u16) } as usize;
             let packet = unsafe { slice::from_raw_parts(rx_desc_ptr.offset(4), packet_len) };
-            // crate::print::hexdump(packet);
+            info!("rtl8139: recv:");
+            crate::print::hexdump(packet);
             rx.pending_packets.push_back(packet.into());
 
             // Erase the packet for the next cycle
             unsafe { rx_desc_ptr.write_bytes(0, packet_len + 4) };
             self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());
             write_io_port_u16(self.io_base + 0x3E, 0x1);
-            rx.next_index += packet_len + 4;
+            rx.next_index += (packet_len + 4 + 3) & !3; // align to 4-byte boundary
             if rx.next_index >= 8192 {
                 rx.next_index %= 8192;
                 self.update_rx_buf_read_ptr(rx.next_index.try_into().unwrap());
                 write_io_port_u16(
                     self.io_base + 0x3E,
-                    0x11, /* RxOverflow + RxOk (written bits will be cleared) */
+                    0x11, /* Clear RxOverflow + RxOk (written bits will be cleared) */
                 );
             }
+            info!("rtl8139: recv: next_index = {}", rx.next_index);
             rx.packet_count += 1;
         }
         Ok(())

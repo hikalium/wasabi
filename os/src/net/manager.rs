@@ -28,6 +28,7 @@ use crate::net::tcp::TcpPacket;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
+use crate::print::hexdump;
 use crate::util::Sliceable;
 use crate::warn;
 use alloc::boxed::Box;
@@ -313,7 +314,9 @@ fn process_tx() -> Result<()> {
                         );
                         if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
                             ip_packet.set_checksum(csum);
-                            iface.push_packet(org_packet)?;
+                            iface.push_packet(org_packet.clone())?;
+                            info!("net: packet sent:");
+                            hexdump(&org_packet);
                         }
                     }
                 } else {
@@ -330,6 +333,8 @@ fn process_rx() -> Result<()> {
     for iface in &*interfaces {
         if let Some(iface) = iface.upgrade() {
             if let Ok(packet) = iface.pop_packet() {
+                info!("net: packet recv:");
+                hexdump(&packet);
                 handle_receive(&packet, &iface)?;
             }
         }
