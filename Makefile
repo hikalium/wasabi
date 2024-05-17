@@ -14,13 +14,14 @@ CLIPPY_OPTIONS=-D warnings
 APPS=$(shell ls $(PROJECT_ROOT)/app)
 APP_PACKAGES=$(addprefix  -p , $(APPS))
 BIN_DIR=$(PROJECT_ROOT)/generated/bin/
+TCP_FORWARD_PORT?=18080
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
 		-bios $(OVMF) \
 		-device qemu-xhci \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x01 \
-		-netdev user,id=net1,hostfwd=tcp::18080-:18080 \
+		-netdev user,id=net1,hostfwd=tcp::$(TCP_FORWARD_PORT)-:$(TCP_FORWARD_PORT) \
 		-device rtl8139,netdev=net1 \
 		-object filter-dump,id=f2,netdev=net1,file=log/dump_net1.pcap \
 		-m 1024M \
@@ -262,6 +263,14 @@ crash:
 	cargo run --bin=dbgutil crash \
 		--qemu-debug-log $$(readlink -f log/qemu_debug.txt) \
 		--serial-log $$(readlink -f log/com2.txt)
+
+.PHONY : tshark
+tshark:
+	tshark -V -o ip.check_checksum:TRUE -r log/dump_net1.pcap
+
+.PHONY : tcp_hello
+tcp_hello:
+	echo "hello" | nc localhost ${TCP_FORWARD_PORT}
 
 .PHONY : vnc
 vnc: generated/noVNC-$(NOVNC_VERSION)
