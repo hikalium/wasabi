@@ -204,18 +204,27 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
 }
 
 fn handle_rx_tcp(packet: &[u8]) -> Result<()> {
-    let header = TcpPacket::from_slice(packet)?;
+    let mut packet = Vec::from(packet);
+    let tcp = TcpPacket::from_slice(&packet)?;
     info!(
         "net: rx: TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b} ({})",
-        header.src_port(),
-        header.dst_port(),
-        header.seq_num(),
-        header.ack_num(),
-        header.flags(),
-        if header.is_syn() { "SYN" } else { "" },
+        tcp.src_port(),
+        tcp.dst_port(),
+        tcp.seq_num(),
+        tcp.ack_num(),
+        tcp.flags(),
+        if tcp.is_syn() { "SYN" } else { "" },
     );
-    let data = &packet[header.header_len()..];
+    let data = &packet[tcp.header_len()..];
     info!("net: rx: TCP: data: {data:X?}");
+
+    let tcp = TcpPacket::from_slice_mut(&mut packet)?;
+    let from = tcp.ip.src();
+    tcp.ip.set_src(tcp.ip.dst());
+    tcp.ip.set_dst(from);
+    tcp.set_ack();
+
+    Network::take().send_ip_packet(tcp.copy_into_slice());
     Ok(())
 }
 

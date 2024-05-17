@@ -118,6 +118,9 @@ impl IpV4Packet {
         this.set_data_length(data_length as u16);
         this
     }
+    pub fn set_dst(&mut self, dst: IpV4Addr) {
+        self.dst = dst;
+    }
     pub fn set_src(&mut self, src: IpV4Addr) {
         self.src = src;
     }

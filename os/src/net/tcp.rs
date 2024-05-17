@@ -39,8 +39,14 @@ impl TcpPacket {
     pub fn flags(&self) -> u32 {
         u32::from_be_bytes(self.ack_num) & 0x0777
     }
+    pub fn set_ack(&mut self) {
+        self.flags[0] |= 1;
+    }
     pub fn is_syn(&self) -> bool {
         self.flags() & 0b10 != 0
+    }
+    pub fn is_ack(&self) -> bool {
+        self.flags() & 0b1000 != 0
     }
     pub fn window(&self) -> u32 {
         u32::from_be_bytes(self.ack_num)
