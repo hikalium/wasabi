@@ -3,7 +3,7 @@
 
 
 echo "Installing dev tools..."
-sudo apt install -y build-essential qemu-system-x86
+sudo apt install -y build-essential qemu-system-x86 netcat-openbsd
 
 which rustup && echo "rustup is installed already" || {
     echo "Installing rustup..."
