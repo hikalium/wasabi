@@ -7,6 +7,7 @@ use crate::info;
 use crate::mutex::Mutex;
 use crate::net::arp::ArpPacket;
 use crate::net::checksum::InternetChecksum;
+use crate::net::checksum::InternetChecksumGenerator;
 use crate::net::dhcp::DhcpPacket;
 use crate::net::dhcp::DHCP_OPT_DNS;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE;
@@ -28,7 +29,6 @@ use crate::net::tcp::TcpPacket;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
-use crate::print::hexdump;
 use crate::util::Sliceable;
 use crate::warn;
 use alloc::boxed::Box;
@@ -203,28 +203,64 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
     }
 }
 
-fn handle_rx_tcp(packet: &[u8]) -> Result<()> {
-    let mut packet = Vec::from(packet);
-    let tcp = TcpPacket::from_slice(&packet)?;
-    info!(
-        "net: rx: TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b} ({})",
-        tcp.src_port(),
-        tcp.dst_port(),
-        tcp.seq_num(),
-        tcp.ack_num(),
-        tcp.flags(),
-        if tcp.is_syn() { "SYN" } else { "" },
-    );
-    let data = &packet[tcp.header_len()..];
-    info!("net: rx: TCP: data: {data:X?}");
+fn handle_rx_tcp(in_bytes: &[u8]) -> Result<()> {
+    let in_packet = Vec::from(in_bytes);
+    let in_tcp = TcpPacket::from_slice(&in_packet)?;
+    info!("net: rx: in : {in_tcp:?}",);
+    let data = &in_packet[(size_of::<IpV4Packet>() + in_tcp.header_len())..]
+        [..(in_tcp.ip.payload_size() - in_tcp.header_len())];
+    if !data.is_empty() {
+        info!("net: rx: TCP: data: {data:X?}");
+    }
+    {
+        let mut out_bytes = Vec::new();
+        {
+            let from_ip = in_tcp.ip.dst();
+            let to_ip = in_tcp.ip.src();
+            let from_port = in_tcp.dst_port();
+            let to_port = in_tcp.src_port();
 
-    let tcp = TcpPacket::from_slice_mut(&mut packet)?;
-    let from = tcp.ip.src();
-    tcp.ip.set_src(tcp.ip.dst());
-    tcp.ip.set_dst(from);
-    tcp.set_ack();
+            out_bytes.resize(size_of::<TcpPacket>(), 0);
+            let eth = EthernetHeader::new(
+                EthernetAddr::zero(),
+                EthernetAddr::zero(),
+                EthernetType::ip_v4(),
+            );
+            let ip_data_length = out_bytes.len() - size_of::<IpV4Packet>();
+            let ipv4_packet =
+                IpV4Packet::new(eth, to_ip, from_ip, IpV4Protocol::tcp(), ip_data_length);
+            let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
+            out_tcp.set_header_len_nibble(5);
+            out_tcp.ip = ipv4_packet;
 
-    Network::take().send_ip_packet(tcp.copy_into_slice());
+            out_tcp.ip.set_src(from_ip);
+            out_tcp.ip.set_dst(to_ip);
+
+            out_tcp.set_src_port(from_port);
+            out_tcp.set_dst_port(to_port);
+
+            out_tcp.set_seq_num(12345);
+            out_tcp.set_syn();
+            out_tcp.set_ack();
+            out_tcp.set_window(0xffff);
+            out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+
+            out_tcp.csum = InternetChecksum::default();
+        }
+        let mut csum = InternetChecksumGenerator::new();
+        csum.feed(&out_bytes[size_of::<IpV4Packet>()..]);
+        {
+            let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
+            csum.feed(out_tcp.ip.src().as_slice());
+            csum.feed(out_tcp.ip.dst().as_slice());
+            csum.feed(&[0x00, out_tcp.ip.protocol().0]);
+            csum.feed(&20u16.to_be_bytes()); // TCP Header + TCP Data size
+            out_tcp.csum = csum.checksum();
+            info!("net: rx: out: {out_tcp:?}",);
+            crate::print::hexdump(out_tcp.as_slice());
+        }
+        Network::take().send_ip_packet(out_bytes.into_boxed_slice());
+    }
     Ok(())
 }
 
@@ -324,8 +360,6 @@ fn process_tx() -> Result<()> {
                         if let Ok(ip_packet) = IpV4Packet::from_slice_mut(&mut org_packet) {
                             ip_packet.set_checksum(csum);
                             iface.push_packet(org_packet.clone())?;
-                            info!("net: packet sent:");
-                            hexdump(&org_packet);
                         }
                     }
                 } else {
@@ -342,8 +376,6 @@ fn process_rx() -> Result<()> {
     for iface in &*interfaces {
         if let Some(iface) = iface.upgrade() {
             if let Ok(packet) = iface.pop_packet() {
-                info!("net: packet recv:");
-                hexdump(&packet);
                 handle_receive(&packet, &iface)?;
             }
         }

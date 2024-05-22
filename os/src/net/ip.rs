@@ -14,7 +14,7 @@ use core::str::FromStr;
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
-pub struct IpV4Protocol(u8);
+pub struct IpV4Protocol(pub u8);
 impl IpV4Protocol {
     pub fn icmp() -> Self {
         Self(1)
@@ -82,7 +82,7 @@ pub struct IpV4Packet {
     pub eth: EthernetHeader,
     version_and_ihl: u8,
     dscp_and_ecn: u8,
-    length: [u8; 2],
+    length: [u8; 2], // byte size including IPv4 header
     ident: u16,
     flags: u16,
     ttl: u8,
@@ -131,6 +131,14 @@ impl IpV4Packet {
         size += (size_of::<Self>() - size_of::<EthernetHeader>()) as u16; // IP header size
         size = (size + 1) & !1; // make size odd
         self.length = size.to_be_bytes()
+    }
+    /// Number of bytes including IPv4 header and its payload
+    pub fn total_size(&self) -> usize {
+        u16::from_be_bytes(self.length) as usize
+    }
+    /// payload size
+    pub fn payload_size(&self) -> usize {
+        self.total_size() - 20
     }
     pub fn clear_checksum(&mut self) {
         self.csum = InternetChecksum::default();

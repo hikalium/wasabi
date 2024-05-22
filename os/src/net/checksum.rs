@@ -11,21 +11,21 @@ impl InternetChecksum {
 
 // https://tools.ietf.org/html/rfc1071
 #[derive(Copy, Clone, Default)]
-struct InternetChecksumGenerator {
+pub struct InternetChecksumGenerator {
     sum: u32,
 }
 impl InternetChecksumGenerator {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
-    fn feed(mut self, data: &[u8]) -> Self {
+    pub fn feed(&mut self, data: &[u8]) -> &mut Self {
         let iter = data.chunks(2);
         for w in iter {
             self.sum += ((w[0] as u32) << 8) | w.get(1).cloned().unwrap_or_default() as u32;
         }
         self
     }
-    fn checksum(mut self) -> InternetChecksum {
+    pub fn checksum(&mut self) -> InternetChecksum {
         while (self.sum >> 16) != 0 {
             self.sum = (self.sum & 0xffff) + (self.sum >> 16);
         }

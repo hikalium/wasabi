@@ -266,7 +266,15 @@ crash:
 
 .PHONY : tshark
 tshark:
-	tshark -V -o ip.check_checksum:TRUE -r log/dump_net1.pcap
+	@tshark -V -o ip.check_checksum:TRUE -o tcp.check_checksum:TRUE -r log/dump_net1.pcap
+
+.PHONY : tshark_json
+tshark_json:
+	@tshark -V -o ip.check_checksum:TRUE -T json -r log/dump_net1.pcap | jq .
+
+.PHONY : tshark_tcp
+tshark_tcp:
+	@tshark -V -o ip.check_checksum:TRUE -T json -Y tcp -r log/dump_net1.pcap | jq -c '.[]._source.layers | {src_ip: .ip."ip.src", dst_ip: .ip."ip.dst", src: .tcp."tcp.srcport", dst: .tcp."tcp.dstport", flags: .tcp."tcp.flags_tree"."tcp.flags.str", seq: .tcp."tcp.seq_raw", ack_raw: .tcp."tcp.ack_raw"}'
 
 .PHONY : tcp_hello
 tcp_hello:
