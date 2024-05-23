@@ -211,6 +211,9 @@ fn handle_rx_tcp(in_bytes: &[u8]) -> Result<()> {
         [..(in_tcp.ip.payload_size() - in_tcp.header_len())];
     if !data.is_empty() {
         info!("net: rx: TCP: data: {data:X?}");
+        if let Ok(s) = core::str::from_utf8(data) {
+            info!("net: rx: TCP: data(str): {s}");
+        }
     }
     {
         let mut out_bytes = Vec::new();
@@ -239,11 +242,26 @@ fn handle_rx_tcp(in_bytes: &[u8]) -> Result<()> {
             out_tcp.set_src_port(from_port);
             out_tcp.set_dst_port(to_port);
 
-            out_tcp.set_seq_num(12345);
-            out_tcp.set_syn();
+            if in_tcp.is_syn() {
+                out_tcp.set_syn();
+                out_tcp.set_ack();
+                out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+                out_tcp.set_seq_num(0);
+            } else if in_tcp.is_fin() {
+                out_tcp.set_fin();
+                out_tcp.set_ack();
+                out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+                out_tcp.set_seq_num(1);
+            } else if in_tcp.ack_num() == 1 {
+                out_tcp.set_ack();
+                out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(data.len() as u32));
+                out_tcp.set_seq_num(1);
+            } else if in_tcp.ack_num() == 2 {
+                info!("TCP connection closed");
+                return Ok(());
+            }
             out_tcp.set_ack();
             out_tcp.set_window(0xffff);
-            out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
 
             out_tcp.csum = InternetChecksum::default();
         }

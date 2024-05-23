@@ -58,6 +58,12 @@ impl TcpPacket {
     pub fn flags(&self) -> u16 {
         u16::from_be_bytes(self.flags) & 0x0777
     }
+    pub fn is_fin(&self) -> bool {
+        (self.flags[1] & (1 << 0)) != 0
+    }
+    pub fn set_fin(&mut self) {
+        self.flags[1] |= 1 << 0;
+    }
     pub fn is_syn(&self) -> bool {
         (self.flags[1] & (1 << 1)) != 0
     }
@@ -82,12 +88,13 @@ impl Debug for TcpPacket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b}{}{}",
+            "TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b}{}{}{}",
             self.src_port(),
             self.dst_port(),
             self.seq_num(),
             self.ack_num(),
             self.flags(),
+            if self.is_fin() { " FIN" } else { "" },
             if self.is_syn() { " SYN" } else { "" },
             if self.is_ack() { " ACK" } else { "" },
         )
