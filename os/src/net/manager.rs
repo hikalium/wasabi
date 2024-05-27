@@ -51,6 +51,7 @@ pub trait NetworkInterface {
 }
 
 pub type ArpTable = BTreeMap<IpV4Addr, (EthernetAddr, Weak<dyn NetworkInterface>)>;
+pub type TcpSocketTable = BTreeMap<u16, TcpSocket>;
 pub struct Network {
     interfaces: Mutex<Vec<Weak<dyn NetworkInterface>>>,
     interface_has_added: AtomicBool,
@@ -59,6 +60,7 @@ pub struct Network {
     dns: Mutex<Option<IpV4Addr>>,
     self_ip: Mutex<Option<IpV4Addr>>,
     ip_tx_queue: Mutex<VecDeque<Box<[u8]>>>,
+    tcp_socket_table: Mutex<TcpSocketTable>,
     arp_table: Mutex<ArpTable>,
 }
 impl Network {
@@ -71,18 +73,26 @@ impl Network {
             dns: Mutex::new(None, "Network.dns"),
             self_ip: Mutex::new(None, "Network.self_ip"),
             ip_tx_queue: Mutex::new(VecDeque::new(), "Network.ip_tx_queue"),
+            tcp_socket_table: Mutex::new(BTreeMap::new(), "Network.tcp_socket"),
             arp_table: Mutex::new(BTreeMap::new(), "Network.arp_table"),
         }
     }
     pub fn take() -> Rc<Network> {
         let mut network = NETWORK.lock();
-        let network = network.get_or_insert_with(|| Rc::new(Self::new()));
+        let network = network.get_or_insert_with(|| {
+            let network = Self::new();
+            network.register_tcp_socket(18080, TcpSocket::default());
+            Rc::new(network)
+        });
         network.clone()
     }
     pub fn register_interface(&self, iface: Weak<dyn NetworkInterface>) {
         let mut interfaces = self.interfaces.lock();
         interfaces.push(iface);
         self.interface_has_added.store(true, Ordering::SeqCst);
+    }
+    pub fn register_tcp_socket(&self, port: u16, s: TcpSocket) {
+        self.tcp_socket_table.lock().insert(port, s);
     }
     pub fn netmask(&self) -> Option<IpV4Addr> {
         *self.netmask.lock()
@@ -203,81 +213,105 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct TcpSocket {}
+impl TcpSocket {
+    pub fn handle_rx(&self, in_bytes: &[u8]) -> Result<()> {
+        let in_packet = Vec::from(in_bytes);
+        let in_tcp = TcpPacket::from_slice(&in_packet)?;
+        info!("net: rx: in : {in_tcp:?}",);
+        let data = &in_packet[(size_of::<IpV4Packet>() + in_tcp.header_len())..]
+            [..(in_tcp.ip.payload_size() - in_tcp.header_len())];
+        if !data.is_empty() {
+            info!("net: rx: TCP: data: {data:X?}");
+            if let Ok(s) = core::str::from_utf8(data) {
+                info!("net: rx: TCP: data(str): {s}");
+            }
+        }
+        {
+            let mut out_bytes = Vec::new();
+            {
+                let from_ip = in_tcp.ip.dst();
+                let to_ip = in_tcp.ip.src();
+                let from_port = in_tcp.dst_port();
+                let to_port = in_tcp.src_port();
+
+                out_bytes.resize(size_of::<TcpPacket>() + data.len(), 0);
+                out_bytes[size_of::<TcpPacket>()..].copy_from_slice(data);
+                let eth = EthernetHeader::new(
+                    EthernetAddr::zero(),
+                    EthernetAddr::zero(),
+                    EthernetType::ip_v4(),
+                );
+                let ip_data_length = out_bytes.len() - size_of::<IpV4Packet>();
+                let ipv4_packet =
+                    IpV4Packet::new(eth, to_ip, from_ip, IpV4Protocol::tcp(), ip_data_length);
+                let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
+                out_tcp.set_header_len_nibble(5);
+                out_tcp.ip = ipv4_packet;
+
+                out_tcp.ip.set_src(from_ip);
+                out_tcp.ip.set_dst(to_ip);
+
+                out_tcp.set_src_port(from_port);
+                out_tcp.set_dst_port(to_port);
+
+                if in_tcp.is_syn() {
+                    out_tcp.set_syn();
+                    out_tcp.set_ack();
+                    out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+                    out_tcp.set_seq_num(0);
+                } else if in_tcp.is_fin() {
+                    out_tcp.set_fin();
+                    out_tcp.set_ack();
+                    out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+                    out_tcp.set_seq_num(1);
+                } else if in_tcp.ack_num() == 1 {
+                    out_tcp.set_ack();
+                    out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(data.len() as u32));
+                    out_tcp.set_seq_num(1);
+                } else if in_tcp.ack_num() == 2 {
+                    info!("TCP connection closed");
+                    return Ok(());
+                }
+                out_tcp.set_ack();
+                out_tcp.set_window(0xffff);
+
+                out_tcp.csum = InternetChecksum::default();
+            }
+            let mut csum = InternetChecksumGenerator::new();
+            csum.feed(&out_bytes[size_of::<IpV4Packet>()..]);
+            {
+                let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
+                csum.feed(out_tcp.ip.src().as_slice());
+                csum.feed(out_tcp.ip.dst().as_slice());
+                csum.feed(&[0x00, out_tcp.ip.protocol().0]);
+                csum.feed(&20u16.to_be_bytes()); // TCP Header + TCP Data size
+                out_tcp.csum = csum.checksum();
+                info!("net: rx: out: {out_tcp:?}",);
+                crate::print::hexdump(out_tcp.as_slice());
+            }
+            Network::take().send_ip_packet(out_bytes.into_boxed_slice());
+        }
+        Ok(())
+    }
+}
+
 fn handle_rx_tcp(in_bytes: &[u8]) -> Result<()> {
     let in_packet = Vec::from(in_bytes);
     let in_tcp = TcpPacket::from_slice(&in_packet)?;
     info!("net: rx: in : {in_tcp:?}",);
-    let data = &in_packet[(size_of::<IpV4Packet>() + in_tcp.header_len())..]
-        [..(in_tcp.ip.payload_size() - in_tcp.header_len())];
-    if !data.is_empty() {
-        info!("net: rx: TCP: data: {data:X?}");
-        if let Ok(s) = core::str::from_utf8(data) {
-            info!("net: rx: TCP: data(str): {s}");
-        }
-    }
+    if let Some(sock) = Network::take()
+        .tcp_socket_table
+        .lock()
+        .get(&in_tcp.dst_port())
     {
-        let mut out_bytes = Vec::new();
-        {
-            let from_ip = in_tcp.ip.dst();
-            let to_ip = in_tcp.ip.src();
-            let from_port = in_tcp.dst_port();
-            let to_port = in_tcp.src_port();
-
-            out_bytes.resize(size_of::<TcpPacket>(), 0);
-            let eth = EthernetHeader::new(
-                EthernetAddr::zero(),
-                EthernetAddr::zero(),
-                EthernetType::ip_v4(),
-            );
-            let ip_data_length = out_bytes.len() - size_of::<IpV4Packet>();
-            let ipv4_packet =
-                IpV4Packet::new(eth, to_ip, from_ip, IpV4Protocol::tcp(), ip_data_length);
-            let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
-            out_tcp.set_header_len_nibble(5);
-            out_tcp.ip = ipv4_packet;
-
-            out_tcp.ip.set_src(from_ip);
-            out_tcp.ip.set_dst(to_ip);
-
-            out_tcp.set_src_port(from_port);
-            out_tcp.set_dst_port(to_port);
-
-            if in_tcp.is_syn() {
-                out_tcp.set_syn();
-                out_tcp.set_ack();
-                out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
-                out_tcp.set_seq_num(0);
-            } else if in_tcp.is_fin() {
-                out_tcp.set_fin();
-                out_tcp.set_ack();
-                out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
-                out_tcp.set_seq_num(1);
-            } else if in_tcp.ack_num() == 1 {
-                out_tcp.set_ack();
-                out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(data.len() as u32));
-                out_tcp.set_seq_num(1);
-            } else if in_tcp.ack_num() == 2 {
-                info!("TCP connection closed");
-                return Ok(());
-            }
-            out_tcp.set_ack();
-            out_tcp.set_window(0xffff);
-
-            out_tcp.csum = InternetChecksum::default();
-        }
-        let mut csum = InternetChecksumGenerator::new();
-        csum.feed(&out_bytes[size_of::<IpV4Packet>()..]);
-        {
-            let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
-            csum.feed(out_tcp.ip.src().as_slice());
-            csum.feed(out_tcp.ip.dst().as_slice());
-            csum.feed(&[0x00, out_tcp.ip.protocol().0]);
-            csum.feed(&20u16.to_be_bytes()); // TCP Header + TCP Data size
-            out_tcp.csum = csum.checksum();
-            info!("net: rx: out: {out_tcp:?}",);
-            crate::print::hexdump(out_tcp.as_slice());
-        }
-        Network::take().send_ip_packet(out_bytes.into_boxed_slice());
+        info!(
+            "net: rx: TCP :{} -> :{} sock {sock:?}",
+            in_tcp.src_port(),
+            in_tcp.dst_port()
+        );
+        sock.handle_rx(in_bytes)?;
     }
     Ok(())
 }
