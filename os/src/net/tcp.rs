@@ -113,7 +113,7 @@ impl Debug for TcpPacket {
 }
 
 // https://datatracker.ietf.org/doc/html/rfc9293#name-state-machine-overview
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TcpSocketState {
     Listen,
     SynSent,
@@ -148,12 +148,7 @@ impl TcpSocket {
         info!("net: rx: in : {in_tcp:?}",);
         let data = &in_packet[(size_of::<IpV4Packet>() + in_tcp.header_len())..]
             [..(in_tcp.ip.payload_size() - in_tcp.header_len())];
-        if !data.is_empty() {
-            info!("net: rx: TCP: data: {data:X?}");
-            if let Ok(s) = core::str::from_utf8(data) {
-                info!("net: rx: TCP: data(str): {s}");
-            }
-        }
+
         {
             let mut out_bytes = Vec::new();
             {
@@ -182,26 +177,52 @@ impl TcpSocket {
                 out_tcp.set_src_port(from_port);
                 out_tcp.set_dst_port(to_port);
 
-                if in_tcp.is_syn() {
-                    out_tcp.set_syn();
-                    out_tcp.set_ack();
-                    out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
-                    out_tcp.set_seq_num(0);
-                } else if in_tcp.is_fin() {
-                    out_tcp.set_fin();
-                    out_tcp.set_ack();
-                    out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
-                    out_tcp.set_seq_num(1);
-                } else if in_tcp.ack_num() == 1 {
+                out_tcp.set_window(0xffff);
+
+                let prev_state = *self.state.lock();
+                match prev_state {
+                    TcpSocketState::Listen => {
+                        out_tcp.set_syn();
+                        out_tcp.set_ack();
+                        out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+                        out_tcp.set_seq_num(0);
+                        *self.state.lock() = TcpSocketState::SynReceived;
+                    }
+                    TcpSocketState::SynReceived => {
+                        if in_tcp.ack_num() == 1 {
+                            *self.state.lock() = TcpSocketState::Established;
+                        }
+                    }
+                    TcpSocketState::Established => {
+                        if in_tcp.is_fin() {
+                            out_tcp.set_fin();
+                            out_tcp.set_ack();
+                            out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+                            out_tcp.set_seq_num(1);
+                            *self.state.lock() = TcpSocketState::LastAck;
+                        }
+                    }
+                    TcpSocketState::LastAck => {
+                        if in_tcp.is_ack() {
+                            info!("TCP connection closed");
+                            *self.state.lock() = TcpSocketState::Listen;
+                            return Ok(());
+                        }
+                    }
+                    _ => {
+                        unimplemented!()
+                    }
+                }
+
+                if *self.state.lock() == TcpSocketState::Established && !data.is_empty() {
+                    info!("net: rx: TCP: data: {data:X?}");
+                    if let Ok(s) = core::str::from_utf8(data) {
+                        info!("net: rx: TCP: data(str): {s}");
+                    }
                     out_tcp.set_ack();
                     out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(data.len() as u32));
                     out_tcp.set_seq_num(1);
-                } else if in_tcp.ack_num() == 2 {
-                    info!("TCP connection closed");
-                    return Ok(());
                 }
-                out_tcp.set_ack();
-                out_tcp.set_window(0xffff);
 
                 out_tcp.csum = InternetChecksum::default();
             }
