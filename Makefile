@@ -45,7 +45,8 @@ QEMU_ARGS=\
 
 ifndef DISPLAY
 QEMU_ARGS+= -vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on
-else ifeq($(HEADLESS),1)
+endif
+ifeq ($(HEADLESS),1)
 QEMU_ARGS+= -display none
 endif
 
