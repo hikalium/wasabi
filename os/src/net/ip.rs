@@ -115,7 +115,7 @@ impl IpV4Packet {
             dst,
             ..Self::default()
         };
-        this.set_data_length(data_length as u16);
+        this.set_data_length(data_length);
         this
     }
     pub fn set_dst(&mut self, dst: IpV4Addr) {
@@ -127,18 +127,17 @@ impl IpV4Packet {
     pub fn protocol(&self) -> IpV4Protocol {
         self.protocol
     }
-    fn set_data_length(&mut self, mut size: u16) {
-        size += (size_of::<Self>() - size_of::<EthernetHeader>()) as u16; // IP header size
+    pub fn data_length(&self) -> usize {
+        self.total_size() - (size_of::<Self>() - size_of::<EthernetHeader>())
+    }
+    pub fn set_data_length(&mut self, mut size: usize) {
+        size += size_of::<Self>() - size_of::<EthernetHeader>(); // IP header size
         size = (size + 1) & !1; // make size odd
-        self.length = size.to_be_bytes()
+        self.length = (size as u16).to_be_bytes()
     }
     /// Number of bytes including IPv4 header and its payload
     pub fn total_size(&self) -> usize {
         u16::from_be_bytes(self.length) as usize
-    }
-    /// payload size
-    pub fn payload_size(&self) -> usize {
-        self.total_size() - 20
     }
     pub fn clear_checksum(&mut self) {
         self.csum = InternetChecksum::default();

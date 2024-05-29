@@ -217,18 +217,14 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
 fn handle_rx_tcp(in_bytes: &[u8]) -> Result<()> {
     let in_packet = Vec::from(in_bytes);
     let in_tcp = TcpPacket::from_slice(&in_packet)?;
-    info!("net: rx: in : {in_tcp:?}",);
     if let Some(sock) = Network::take()
         .tcp_socket_table
         .lock()
         .get(&in_tcp.dst_port())
     {
-        info!(
-            "net: rx: TCP :{} -> :{} sock {sock:?}",
-            in_tcp.src_port(),
-            in_tcp.dst_port()
-        );
         sock.handle_rx(in_bytes)?;
+    } else {
+        info!("net: rx: in (no listening socket) : {in_tcp:?}",);
     }
     Ok(())
 }

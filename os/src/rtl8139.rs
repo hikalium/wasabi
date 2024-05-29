@@ -240,7 +240,7 @@ impl Rtl8139 {
                     0x11, /* Clear RxOverflow + RxOk (written bits will be cleared) */
                 );
             }
-            info!("rtl8139: recv: next_index = {}", rx.next_index);
+            //info!("rtl8139: recv: next_index = {}", rx.next_index);
             rx.packet_count += 1;
         }
         Ok(())

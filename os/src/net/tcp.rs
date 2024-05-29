@@ -14,6 +14,7 @@ use crate::net::manager::Network;
 use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
@@ -128,7 +129,11 @@ pub enum TcpSocketState {
     Closed,
 }
 
+// Step 1: Just receive (no error handling)
+// Step 2: Just echo (no error handling)
+
 pub struct TcpSocket {
+    my_next_seq: Mutex<u32>,
     state: Mutex<TcpSocketState>,
 }
 impl Debug for TcpSocket {
@@ -139,107 +144,123 @@ impl Debug for TcpSocket {
 impl TcpSocket {
     pub fn new(state: TcpSocketState) -> Self {
         Self {
+            my_next_seq: Mutex::new(0, "TcpSocket::my_next_seq"),
             state: Mutex::new(state, "TcpSocket::state"),
         }
     }
     pub fn handle_rx(&self, in_bytes: &[u8]) -> Result<()> {
         let in_packet = Vec::from(in_bytes);
         let in_tcp = TcpPacket::from_slice(&in_packet)?;
-        info!("net: rx: in : {in_tcp:?}",);
         let data = &in_packet[(size_of::<IpV4Packet>() + in_tcp.header_len())..]
-            [..(in_tcp.ip.payload_size() - in_tcp.header_len())];
+            [..(in_tcp.ip.data_length() - in_tcp.header_len())];
+        info!("net: tcp: recv: {in_tcp:?}",);
+        let from_ip = in_tcp.ip.dst();
+        let to_ip = in_tcp.ip.src();
+        let from_port = in_tcp.dst_port();
+        let to_port = in_tcp.src_port();
+        let eth = EthernetHeader::new(
+            EthernetAddr::zero(),
+            EthernetAddr::zero(),
+            EthernetType::ip_v4(),
+        );
+        let ipv4_packet = IpV4Packet::new(
+            eth,
+            to_ip,
+            from_ip,
+            IpV4Protocol::tcp(),
+            size_of::<TcpPacket>() - size_of::<IpV4Packet>(),
+        );
+        let mut out_tcp = TcpPacket::default();
+        out_tcp.set_header_len_nibble(5);
+        out_tcp.ip = ipv4_packet;
 
-        {
-            let mut out_bytes = Vec::new();
-            {
-                let from_ip = in_tcp.ip.dst();
-                let to_ip = in_tcp.ip.src();
-                let from_port = in_tcp.dst_port();
-                let to_port = in_tcp.src_port();
+        out_tcp.ip.set_src(from_ip);
+        out_tcp.ip.set_dst(to_ip);
 
-                out_bytes.resize(size_of::<TcpPacket>() + data.len(), 0);
-                out_bytes[size_of::<TcpPacket>()..].copy_from_slice(data);
-                let eth = EthernetHeader::new(
-                    EthernetAddr::zero(),
-                    EthernetAddr::zero(),
-                    EthernetType::ip_v4(),
-                );
-                let ip_data_length = out_bytes.len() - size_of::<IpV4Packet>();
-                let ipv4_packet =
-                    IpV4Packet::new(eth, to_ip, from_ip, IpV4Protocol::tcp(), ip_data_length);
-                let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
-                out_tcp.set_header_len_nibble(5);
-                out_tcp.ip = ipv4_packet;
+        out_tcp.set_src_port(from_port);
+        out_tcp.set_dst_port(to_port);
 
-                out_tcp.ip.set_src(from_ip);
-                out_tcp.ip.set_dst(to_ip);
+        out_tcp.set_window(0xffff);
 
-                out_tcp.set_src_port(from_port);
-                out_tcp.set_dst_port(to_port);
-
-                out_tcp.set_window(0xffff);
-
-                let prev_state = *self.state.lock();
-                match prev_state {
-                    TcpSocketState::Listen => {
-                        out_tcp.set_syn();
-                        out_tcp.set_ack();
-                        out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
-                        out_tcp.set_seq_num(0);
-                        *self.state.lock() = TcpSocketState::SynReceived;
-                    }
-                    TcpSocketState::SynReceived => {
-                        if in_tcp.ack_num() == 1 {
-                            *self.state.lock() = TcpSocketState::Established;
-                        }
-                    }
-                    TcpSocketState::Established => {
-                        if in_tcp.is_fin() {
-                            out_tcp.set_fin();
-                            out_tcp.set_ack();
-                            out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
-                            out_tcp.set_seq_num(1);
-                            *self.state.lock() = TcpSocketState::LastAck;
-                        }
-                    }
-                    TcpSocketState::LastAck => {
-                        if in_tcp.is_ack() {
-                            info!("TCP connection closed");
-                            *self.state.lock() = TcpSocketState::Listen;
-                            return Ok(());
-                        }
-                    }
-                    _ => {
-                        unimplemented!()
-                    }
+        let mut tcp_data_size = 0;
+        let prev_state = *self.state.lock();
+        match prev_state {
+            TcpSocketState::Listen => {
+                // SYN consumes 1 byte in the seq number space.
+                out_tcp.set_ack();
+                out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+                out_tcp.set_syn();
+                {
+                    let mut seq = self.my_next_seq.lock();
+                    out_tcp.set_seq_num(*seq);
+                    *seq = (*seq).wrapping_add(1);
                 }
-
-                if *self.state.lock() == TcpSocketState::Established && !data.is_empty() {
-                    info!("net: rx: TCP: data: {data:X?}");
+                info!("net: tcp: recv: TCP SYN received");
+                *self.state.lock() = TcpSocketState::SynReceived;
+            }
+            TcpSocketState::SynReceived => {
+                if in_tcp.ack_num() == (*self.my_next_seq.lock()) {
+                    *self.state.lock() = TcpSocketState::Established;
+                    info!("net: tcp: recv: TCP connection established");
+                    return Ok(());
+                }
+            }
+            TcpSocketState::Established => {
+                if in_tcp.is_fin() {
+                    out_tcp.set_fin();
+                    out_tcp.set_ack();
+                    out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(1));
+                    {
+                        let mut seq = self.my_next_seq.lock();
+                        out_tcp.set_seq_num(*seq);
+                        *seq = (*seq).wrapping_add(1);
+                    }
+                    *self.state.lock() = TcpSocketState::LastAck;
+                } else if data.is_empty() {
+                    return Ok(());
+                } else {
                     if let Ok(s) = core::str::from_utf8(data) {
-                        info!("net: rx: TCP: data(str): {s}");
+                        info!("net: tcp: recv: data(str): {s}");
                     }
                     out_tcp.set_ack();
                     out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(data.len() as u32));
-                    out_tcp.set_seq_num(1);
+                    {
+                        let mut seq = self.my_next_seq.lock();
+                        out_tcp.set_seq_num(*seq);
+                        *seq = (*seq).wrapping_add(data.len() as u32);
+                    }
+                    tcp_data_size += data.len();
                 }
-
-                out_tcp.csum = InternetChecksum::default();
             }
-            let mut csum = InternetChecksumGenerator::new();
-            csum.feed(&out_bytes[size_of::<IpV4Packet>()..]);
-            {
-                let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
-                csum.feed(out_tcp.ip.src().as_slice());
-                csum.feed(out_tcp.ip.dst().as_slice());
-                csum.feed(&[0x00, out_tcp.ip.protocol().0]);
-                csum.feed(&20u16.to_be_bytes()); // TCP Header + TCP Data size
-                out_tcp.csum = csum.checksum();
-                info!("net: rx: out: {out_tcp:?}",);
-                crate::print::hexdump(out_tcp.as_slice());
+            TcpSocketState::LastAck => {
+                if in_tcp.is_ack() {
+                    info!("net: tcp: recv: TCP connection closed");
+                    *self.state.lock() = TcpSocketState::Listen;
+                    return Ok(());
+                }
             }
-            Network::take().send_ip_packet(out_bytes.into_boxed_slice());
+            _ => {
+                unimplemented!()
+            }
         }
+        let mut out_bytes = vec![0; size_of::<TcpPacket>() + tcp_data_size];
+        out_tcp
+            .ip
+            .set_data_length(out_bytes.len() - size_of::<IpV4Packet>());
+        out_bytes[0..size_of::<TcpPacket>()].copy_from_slice(out_tcp.as_slice());
+        out_bytes[size_of::<TcpPacket>()..][..tcp_data_size].copy_from_slice(data);
+        let mut csum = InternetChecksumGenerator::new();
+        csum.feed(&out_bytes[size_of::<IpV4Packet>()..]);
+        {
+            let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
+            csum.feed(out_tcp.ip.src().as_slice());
+            csum.feed(out_tcp.ip.dst().as_slice());
+            csum.feed(&[0x00, out_tcp.ip.protocol().0]);
+            csum.feed(&((20 + tcp_data_size) as u16).to_be_bytes()); // TCP Header + TCP Data size
+            out_tcp.csum = csum.checksum();
+            info!("net: tcp: send: {out_tcp:?}",);
+        }
+        Network::take().send_ip_packet(out_bytes.into_boxed_slice());
         Ok(())
     }
 }
