@@ -29,7 +29,7 @@ pub unsafe trait Sliceable: Sized + Copy + Clone {
             // really?
             Ok(unsafe { &*(slice.as_ptr() as *const Self) })
         } else {
-            Err(Error::Failed("Too small"))
+            Err(Error::Failed("Sliceable::from_slice: Too small"))
         }
     }
     fn from_slice_mut(slice: &mut [u8]) -> Result<&mut Self> {
@@ -39,7 +39,7 @@ pub unsafe trait Sliceable: Sized + Copy + Clone {
             // really?
             Ok(unsafe { &mut *(slice.as_ptr() as *mut Self) })
         } else {
-            Err(Error::Failed("Too small"))
+            Err(Error::Failed("Sliceable::from_slice_mut: Too small"))
         }
     }
     fn copy_into_slice(&self) -> Box<[u8]> {

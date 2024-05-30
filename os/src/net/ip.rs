@@ -132,7 +132,6 @@ impl IpV4Packet {
     }
     pub fn set_data_length(&mut self, mut size: usize) {
         size += size_of::<Self>() - size_of::<EthernetHeader>(); // IP header size
-        size = (size + 1) & !1; // make size odd
         self.length = (size as u16).to_be_bytes()
     }
     /// Number of bytes including IPv4 header and its payload

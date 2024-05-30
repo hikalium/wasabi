@@ -151,7 +151,7 @@ impl TcpSocket {
     pub fn handle_rx(&self, in_bytes: &[u8]) -> Result<()> {
         let in_packet = Vec::from(in_bytes);
         let in_tcp = TcpPacket::from_slice(&in_packet)?;
-        let data = &in_packet[(size_of::<IpV4Packet>() + in_tcp.header_len())..]
+        let in_tcp_data = &in_packet[(size_of::<IpV4Packet>() + in_tcp.header_len())..]
             [..(in_tcp.ip.data_length() - in_tcp.header_len())];
         info!("net: tcp: recv: {in_tcp:?}",);
         let from_ip = in_tcp.ip.dst();
@@ -182,7 +182,7 @@ impl TcpSocket {
 
         out_tcp.set_window(0xffff);
 
-        let mut tcp_data_size = 0;
+        let mut tcp_send_data: Option<Vec<u8>> = None;
         let prev_state = *self.state.lock();
         match prev_state {
             TcpSocketState::Listen => {
@@ -216,20 +216,23 @@ impl TcpSocket {
                         *seq = (*seq).wrapping_add(1);
                     }
                     *self.state.lock() = TcpSocketState::LastAck;
-                } else if data.is_empty() {
+                } else if in_tcp_data.is_empty() {
                     return Ok(());
                 } else {
-                    if let Ok(s) = core::str::from_utf8(data) {
-                        info!("net: tcp: recv: data(str): {s}");
+                    if let Ok(s) = core::str::from_utf8(in_tcp_data) {
+                        info!(
+                            "net: tcp: recv: data(str) size = {}: {s}",
+                            in_tcp_data.len()
+                        );
                     }
                     out_tcp.set_ack();
-                    out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(data.len() as u32));
+                    out_tcp.set_ack_num(in_tcp.seq_num().wrapping_add(in_tcp_data.len() as u32));
                     {
                         let mut seq = self.my_next_seq.lock();
                         out_tcp.set_seq_num(*seq);
-                        *seq = (*seq).wrapping_add(data.len() as u32);
+                        *seq = (*seq).wrapping_add(in_tcp_data.len() as u32);
                     }
-                    tcp_data_size += data.len();
+                    tcp_send_data = Some(in_tcp_data.to_vec())
                 }
             }
             TcpSocketState::LastAck => {
@@ -243,22 +246,25 @@ impl TcpSocket {
                 unimplemented!()
             }
         }
-        let mut out_bytes = vec![0; size_of::<TcpPacket>() + tcp_data_size];
-        out_tcp
-            .ip
-            .set_data_length(out_bytes.len() - size_of::<IpV4Packet>());
+        let ip_data_size =
+            out_tcp.header_len() + tcp_send_data.as_ref().map(|d| d.len()).unwrap_or_default();
+        out_tcp.ip.set_data_length(ip_data_size);
+        let mut out_bytes = vec![0; (size_of::<IpV4Packet>() + ip_data_size).next_multiple_of(2)];
         out_bytes[0..size_of::<TcpPacket>()].copy_from_slice(out_tcp.as_slice());
-        out_bytes[size_of::<TcpPacket>()..][..tcp_data_size].copy_from_slice(data);
+        if let Some(tcp_send_data) = &tcp_send_data {
+            out_bytes[size_of::<TcpPacket>()..][..tcp_send_data.len()]
+                .copy_from_slice(tcp_send_data);
+        }
         let mut csum = InternetChecksumGenerator::new();
-        csum.feed(&out_bytes[size_of::<IpV4Packet>()..]);
+        csum.feed(&out_bytes[size_of::<IpV4Packet>()..][..ip_data_size]);
         {
             let out_tcp = TcpPacket::from_slice_mut(&mut out_bytes)?;
             csum.feed(out_tcp.ip.src().as_slice());
             csum.feed(out_tcp.ip.dst().as_slice());
             csum.feed(&[0x00, out_tcp.ip.protocol().0]);
-            csum.feed(&((20 + tcp_data_size) as u16).to_be_bytes()); // TCP Header + TCP Data size
+            csum.feed(&(ip_data_size as u16).to_be_bytes()); // TCP Header + TCP Data size
             out_tcp.csum = csum.checksum();
-            info!("net: tcp: send: {out_tcp:?}",);
+            info!("net: tcp: send: {out_tcp:?} ({tcp_send_data:?})",);
         }
         Network::take().send_ip_packet(out_bytes.into_boxed_slice());
         Ok(())
