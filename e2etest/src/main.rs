@@ -129,4 +129,38 @@ mod test {
         qemu.kill().await?;
         Ok(())
     }
+    #[tokio::test]
+    async fn network_is_working() -> Result<()> {
+        // cargo test -p e2etest -- network
+        let dev_env = DevEnv::new()?;
+        let mut qemu = Qemu::new(dev_env.ovmf_path())?;
+        let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
+        qemu.wait_until_serial_output_contains(
+            "net: rx: DHCP: SERVER -> CLIENT yiaddr = 10.0.2.15 chaddr = 52:54:00:12:34:56",
+        )?;
+        qemu.wait_until_serial_output_contains("netmask: 255.255.255.0")?;
+        qemu.wait_until_serial_output_contains("router: 10.0.2.2")?;
+        qemu.wait_until_serial_output_contains("dns: 10.0.2.3")?;
+        qemu.kill().await?;
+        Ok(())
+    }
+    #[tokio::test]
+    async fn tcp_echo_server_is_working() -> Result<()> {
+        // cargo test -p e2etest -- tcp
+        const TEST_STRING: &str = "hello_from_tcp";
+        let dev_env = DevEnv::new()?;
+        let mut qemu = Qemu::new(dev_env.ovmf_path())?;
+        let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
+        qemu.wait_until_serial_output_contains(
+            "net: rx: DHCP: SERVER -> CLIENT yiaddr = 10.0.2.15 chaddr = 52:54:00:12:34:56",
+        )?;
+        let cmd = format!("echo {TEST_STRING} | nc -w 1 localhost 18080");
+        let (stdout, _) = run_shell_cmd(&cmd)?;
+        eprintln!("{stdout}");
+        println!("{stdout}");
+        assert!(stdout.contains(TEST_STRING));
+
+        qemu.kill().await?;
+        Ok(())
+    }
 }
