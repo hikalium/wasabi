@@ -328,7 +328,15 @@ fn process_tx() -> Result<()> {
                         }
                     }
                 } else {
-                    warn!("No route to {dst_ip}. Dropping the packet.");
+                    warn!("No route to {dst_ip}. Sending ARP from all the interfaces.");
+                    let interfaces = network.interfaces.lock();
+                    for iface in &*interfaces {
+                        if let Some(iface) = iface.upgrade() {
+                            let arp_req = ArpPacket::request(iface.ethernet_addr(), src_ip, dst_ip);
+                            info!("Sending ARP request: {arp_req:?}");
+                            iface.push_packet(arp_req.copy_into_slice())?;
+                        }
+                    }
                 }
             }
         }

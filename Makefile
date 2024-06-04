@@ -273,7 +273,7 @@ tshark:
 
 .PHONY : tshark_json
 tshark_json:
-	@tshark -V -o ip.check_checksum:TRUE -T json -r log/dump_net1.pcap | jq .
+	@tshark -V -o ip.check_checksum:TRUE -x -T json -r log/dump_net1.pcap | jq .
 
 .PHONY : tshark_tcp
 tshark_tcp:

@@ -5,7 +5,6 @@ use crate::net::udp::UdpPacket;
 use crate::util::Sliceable;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use noli::net::IpV4Addr;
 
 /*
 query:
@@ -25,7 +24,7 @@ response:
 #[allow(unused)]
 #[derive(Copy, Clone, Default)]
 pub struct DnsPacket {
-    udp: UdpPacket,
+    pub udp: UdpPacket,
     transaction_id: u16,
     flags: u16,
     num_questions: u16,
@@ -37,21 +36,24 @@ const _: () = assert!(size_of::<DnsPacket>() - size_of::<UdpPacket>() == 12);
 impl DnsPacket {}
 unsafe impl Sliceable for DnsPacket {}
 
-const PORT_DNS_SERVER: u16 = 53;
+pub const PORT_DNS_SERVER: u16 = 53;
 
 pub fn create_dns_query_packet(query_host_name: &str) -> Result<Vec<u8>> {
     let dns = DnsPacket {
         flags: 0x2001,
         num_questions: 0x0100,
+
         ..Default::default()
     };
     let mut query = Vec::new();
     query.extend(dns.as_slice());
     for s in query_host_name.trim().split('.') {
+        let s = s.as_bytes();
         query.push(s.len() as u8);
-        query.extend(s.as_bytes());
+        query.extend(s);
     }
     query.extend([0, 0, 1, 0, 1]);
+    query.resize(512 - query.len(), 0);
     Ok(query)
 }
 /*

@@ -9,13 +9,19 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::info;
 use crate::loader::Elf;
+use crate::net::dns::DnsPacket;
+use crate::net::dns::PORT_DNS_SERVER;
 use crate::net::icmp::IcmpPacket;
 use crate::net::ip::IpV4Addr;
+use crate::net::ip::IpV4Packet;
+use crate::net::ip::IpV4Protocol;
 use crate::net::manager::Network;
+use crate::net::udp::UdpPacket;
 use crate::println;
 use crate::util::Sliceable;
 use crate::x86_64::trigger_debug_interrupt;
 use alloc::vec::Vec;
+use core::mem::size_of;
 use core::str::FromStr;
 
 async fn run_app(name: &str, args: &[&str]) -> Result<i64> {
@@ -75,7 +81,23 @@ pub async fn run(cmdline: &str) -> Result<()> {
             "nslookup" => {
                 if let Some(query) = args.get(1) {
                     if let Some(server) = network.dns() {
-                        let packet = crate::net::dns::create_dns_query_packet(query)?;
+                        let mut packet = crate::net::dns::create_dns_query_packet(query)?;
+                        {
+                            let ip = IpV4Packet::new(
+                                Default::default(),
+                                server,
+                                IpV4Addr::default(),
+                                IpV4Protocol::udp(),
+                                packet.len() - size_of::<IpV4Packet>(),
+                            );
+                            let mut udp = UdpPacket::default();
+                            udp.ip = ip;
+                            udp.set_dst_port(PORT_DNS_SERVER);
+                            udp.set_src_port(53);
+                            udp.set_data_size((packet.len() - size_of::<UdpPacket>()) as u16);
+                            let packet = DnsPacket::from_slice_mut(&mut packet)?;
+                            packet.udp = udp;
+                        }
                         network.send_ip_packet(packet.into());
                     } else {
                         println!("DNS server address is not available yet")
