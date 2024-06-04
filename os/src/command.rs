@@ -72,6 +72,18 @@ pub async fn run(cmdline: &str) -> Result<()> {
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())
             }
+            "nslookup" => {
+                if let Some(query) = args.get(1) {
+                    if let Some(server) = network.dns() {
+                        let packet = crate::net::dns::create_dns_query_packet(query)?;
+                        network.send_ip_packet(packet.into());
+                    } else {
+                        println!("DNS server address is not available yet")
+                    }
+                } else {
+                    println!("usage: nslookup <query>")
+                }
+            }
             app_name => {
                 let result = run_app(app_name, &args).await;
                 if result.is_ok() {
