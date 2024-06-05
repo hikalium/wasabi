@@ -13,7 +13,6 @@ use crate::executor::TimeoutFuture;
 use crate::info;
 use crate::loader::Elf;
 use crate::mutex::Mutex;
-use crate::net::manager::network_manager_thread;
 use crate::print;
 use crate::serial::SerialPort;
 use alloc::collections::VecDeque;
@@ -177,5 +176,4 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
     executor.spawn(Task::new(serial_task));
     executor.spawn(Task::new(console_task));
     executor.spawn(Task::new(mouse_cursor_task));
-    executor.spawn(Task::new(async { network_manager_thread().await }));
 }

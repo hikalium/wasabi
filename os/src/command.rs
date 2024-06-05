@@ -9,6 +9,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::info;
 use crate::loader::Elf;
+use crate::net::dns::create_dns_query_packet;
 use crate::net::dns::DnsPacket;
 use crate::net::dns::PORT_DNS_SERVER;
 use crate::net::icmp::IcmpPacket;
@@ -81,7 +82,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
             "nslookup" => {
                 if let Some(query) = args.get(1) {
                     if let Some(server) = network.dns() {
-                        let mut packet = crate::net::dns::create_dns_query_packet(query)?;
+                        let mut packet = create_dns_query_packet(query)?;
                         {
                             let ip = IpV4Packet::new(
                                 Default::default(),

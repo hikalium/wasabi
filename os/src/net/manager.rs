@@ -2,7 +2,9 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::executor::Task;
 use crate::executor::TimeoutFuture;
+use crate::executor::ROOT_EXECUTOR;
 use crate::info;
 use crate::mutex::Mutex;
 use crate::net::arp::ArpPacket;
@@ -17,6 +19,7 @@ use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_OFFER;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_PADDING;
 use crate::net::dhcp::DHCP_OPT_NETMASK;
 use crate::net::dhcp::DHCP_OPT_ROUTER;
+use crate::net::dns::PORT_DNS_SERVER;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
 use crate::net::eth::EthernetType;
@@ -53,8 +56,8 @@ pub trait NetworkInterface {
 }
 
 pub type ArpTable = BTreeMap<IpV4Addr, (EthernetAddr, Weak<dyn NetworkInterface>)>;
-pub type TcpSocketTable = BTreeMap<u16, TcpSocket>;
-pub type UdpSocketTable = BTreeMap<u16, UdpSocket>;
+pub type TcpSocketTable = BTreeMap<u16, Rc<TcpSocket>>;
+pub type UdpSocketTable = BTreeMap<u16, Rc<UdpSocket>>;
 
 pub struct Network {
     interfaces: Mutex<Vec<Weak<dyn NetworkInterface>>>,
@@ -86,9 +89,18 @@ impl Network {
     pub fn take() -> Rc<Network> {
         let mut network = NETWORK.lock();
         let network = network.get_or_insert_with(|| {
+            let mut executor = ROOT_EXECUTOR.lock();
             let network = Self::new();
-            network.register_tcp_socket(18080, TcpSocket::new(TcpSocketState::Listen));
-            network.register_udp_socket(crate::net::dns::PORT_DNS_SERVER, UdpSocket::default());
+            network.register_tcp_socket(18080, Rc::new(TcpSocket::new(TcpSocketState::Listen)));
+            let dns_client = Rc::new(UdpSocket::default());
+            network.register_udp_socket(PORT_DNS_SERVER, dns_client.clone());
+            executor.spawn(Task::new(async { network_manager_thread().await }));
+            executor.spawn(Task::new(async move {
+                loop {
+                    let dns_packet = dns_client.recv().await;
+                    info!("dns_client: {dns_packet:?}")
+                }
+            }));
             Rc::new(network)
         });
         network.clone()
@@ -98,10 +110,10 @@ impl Network {
         interfaces.push(iface);
         self.interface_has_added.store(true, Ordering::SeqCst);
     }
-    pub fn register_tcp_socket(&self, port: u16, s: TcpSocket) {
+    pub fn register_tcp_socket(&self, port: u16, s: Rc<TcpSocket>) {
         self.tcp_socket_table.lock().insert(port, s);
     }
-    pub fn register_udp_socket(&self, port: u16, s: UdpSocket) {
+    pub fn register_udp_socket(&self, port: u16, s: Rc<UdpSocket>) {
         self.udp_socket_table.lock().insert(port, s);
     }
     pub fn netmask(&self) -> Option<IpV4Addr> {

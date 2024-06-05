@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::error::Result;
 use crate::info;
+use crate::mutex::Mutex;
 use crate::net::checksum::InternetChecksum;
 use crate::net::ip::IpV4Packet;
 use crate::util::Sliceable;
@@ -9,6 +10,11 @@ use alloc::collections::VecDeque;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::vec::Vec;
+use core::future::Future;
+use core::marker::PhantomPinned;
+use core::pin::Pin;
+use core::task::Context;
+use core::task::Poll;
 
 // https://datatracker.ietf.org/doc/html/rfc2131
 // 4.1 Constructing and sending DHCP messages
@@ -53,10 +59,17 @@ impl Debug for UdpPacket {
     }
 }
 
-#[derive(Default)]
 pub struct UdpSocket {
-    tx_queue: VecDeque<Vec<u8>>,
-    rx_queue: VecDeque<Vec<u8>>,
+    tx_queue: Mutex<VecDeque<Vec<u8>>>,
+    rx_queue: Mutex<VecDeque<Vec<u8>>>,
+}
+impl Default for UdpSocket {
+    fn default() -> Self {
+        Self {
+            tx_queue: Mutex::new(VecDeque::new(), "UdpSocket::tx_queue"),
+            rx_queue: Mutex::new(VecDeque::new(), "UdpSocket::rx_queue"),
+        }
+    }
 }
 impl Debug for UdpSocket {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -68,11 +81,35 @@ impl UdpSocket {
         let in_packet = Vec::from(in_bytes);
         let in_udp = UdpPacket::from_slice(&in_packet)?;
         info!("net: udp: recv: {in_udp:?}",);
+        self.rx_queue.lock().push_back(in_packet);
         Ok(())
     }
-    pub fn push_tx_packet(&mut self, packet: Vec<u8>) -> Result<()> {
+    pub fn push_tx_packet(&self, packet: Vec<u8>) -> Result<()> {
         info!("net: udp: push_tx_packet");
-        self.tx_queue.push_back(packet);
+        self.tx_queue.lock().push_back(packet);
         Ok(())
+    }
+    pub fn recv(&self) -> UdpSocketRecvFuture {
+        UdpSocketRecvFuture {
+            rx_queue: &self.rx_queue,
+            _pinned: PhantomPinned,
+        }
+    }
+}
+
+pub struct UdpSocketRecvFuture<'a> {
+    rx_queue: &'a Mutex<VecDeque<Vec<u8>>>,
+    _pinned: PhantomPinned,
+}
+impl<'a> Future for UdpSocketRecvFuture<'a> {
+    type Output = Vec<u8>;
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Vec<u8>> {
+        let mut_self = unsafe { self.get_unchecked_mut() };
+        let packet = mut_self.rx_queue.lock().pop_front();
+        if let Some(packet) = packet {
+            Poll::Ready(packet)
+        } else {
+            Poll::Pending
+        }
     }
 }
