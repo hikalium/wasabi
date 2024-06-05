@@ -28,6 +28,7 @@ use crate::net::tcp::TcpPacket;
 use crate::net::tcp::TcpSocket;
 use crate::net::tcp::TcpSocketState;
 use crate::net::udp::UdpPacket;
+use crate::net::udp::UdpSocket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
 use crate::util::Sliceable;
@@ -53,6 +54,8 @@ pub trait NetworkInterface {
 
 pub type ArpTable = BTreeMap<IpV4Addr, (EthernetAddr, Weak<dyn NetworkInterface>)>;
 pub type TcpSocketTable = BTreeMap<u16, TcpSocket>;
+pub type UdpSocketTable = BTreeMap<u16, UdpSocket>;
+
 pub struct Network {
     interfaces: Mutex<Vec<Weak<dyn NetworkInterface>>>,
     interface_has_added: AtomicBool,
@@ -62,6 +65,7 @@ pub struct Network {
     self_ip: Mutex<Option<IpV4Addr>>,
     ip_tx_queue: Mutex<VecDeque<Box<[u8]>>>,
     tcp_socket_table: Mutex<TcpSocketTable>,
+    udp_socket_table: Mutex<UdpSocketTable>,
     arp_table: Mutex<ArpTable>,
 }
 impl Network {
@@ -75,6 +79,7 @@ impl Network {
             self_ip: Mutex::new(None, "Network.self_ip"),
             ip_tx_queue: Mutex::new(VecDeque::new(), "Network.ip_tx_queue"),
             tcp_socket_table: Mutex::new(BTreeMap::new(), "Network.tcp_socket"),
+            udp_socket_table: Mutex::new(BTreeMap::new(), "Network.udp_socket"),
             arp_table: Mutex::new(BTreeMap::new(), "Network.arp_table"),
         }
     }
@@ -83,6 +88,7 @@ impl Network {
         let network = network.get_or_insert_with(|| {
             let network = Self::new();
             network.register_tcp_socket(18080, TcpSocket::new(TcpSocketState::Listen));
+            network.register_udp_socket(crate::net::dns::PORT_DNS_SERVER, UdpSocket::default());
             Rc::new(network)
         });
         network.clone()
@@ -94,6 +100,9 @@ impl Network {
     }
     pub fn register_tcp_socket(&self, port: u16, s: TcpSocket) {
         self.tcp_socket_table.lock().insert(port, s);
+    }
+    pub fn register_udp_socket(&self, port: u16, s: UdpSocket) {
+        self.udp_socket_table.lock().insert(port, s);
     }
     pub fn netmask(&self) -> Option<IpV4Addr> {
         *self.netmask.lock()
@@ -207,9 +216,13 @@ fn handle_rx_udp(packet: &[u8]) -> Result<()> {
     let udp = UdpPacket::from_slice(packet)?;
     match (udp.src_port(), udp.dst_port()) {
         (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => handle_rx_dhcp_client(packet),
-        (src, dst) => {
-            info!("net: rx: UDP :{src} -> :{dst}");
-            Ok(())
+        (_, dst) => {
+            if let Some(sock) = Network::take().udp_socket_table.lock().get(&dst) {
+                sock.handle_rx(packet)
+            } else {
+                info!("net: rx: in (no listening socket) : {udp:?}",);
+                Ok(())
+            }
         }
     }
 }
@@ -287,7 +300,7 @@ fn probe_interfaces() -> Result<()> {
                     IpV4Addr::new([10, 0, 2, 2]),
                 );
                 iface.push_packet(arp_req.copy_into_slice())?;
-                let dhcp_req = DhcpPacket::request(iface.ethernet_addr());
+                let dhcp_req = DhcpPacket::request(iface.ethernet_addr())?;
                 iface.push_packet(dhcp_req.copy_into_slice())?;
             }
         }

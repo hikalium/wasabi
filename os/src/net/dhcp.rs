@@ -1,3 +1,4 @@
+use crate::error::Result;
 use crate::net::checksum::InternetChecksum;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
@@ -72,7 +73,7 @@ impl DhcpPacket {
     pub fn chaddr(&self) -> EthernetAddr {
         self.chaddr
     }
-    pub fn request(src_eth_addr: EthernetAddr) -> Self {
+    pub fn request(src_eth_addr: EthernetAddr) -> Result<Self> {
         let mut this = Self::default();
         // eth
         let eth = EthernetHeader::new(
@@ -94,7 +95,7 @@ impl DhcpPacket {
         this.udp.set_src_port(UDP_PORT_DHCP_CLIENT);
         this.udp.set_dst_port(UDP_PORT_DHCP_SERVER);
         this.udp
-            .set_data_size((size_of::<Self>() - size_of::<IpV4Packet>()) as u16);
+            .set_data_size(size_of::<Self>() - size_of::<IpV4Packet>())?;
         // udp checksum is omitted (set to zero) since it is optional
         // dhcp
         this.op = DHCP_OP_BOOTREQUEST;
@@ -111,7 +112,7 @@ impl DhcpPacket {
         this.udp.ip.set_checksum(InternetChecksum::calc(
             &this.udp.as_slice()[size_of::<EthernetHeader>()..size_of::<IpV4Packet>()],
         ));
-        this
+        Ok(this)
     }
 }
 impl Default for DhcpPacket {

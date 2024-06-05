@@ -94,7 +94,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
                             udp.ip = ip;
                             udp.set_dst_port(PORT_DNS_SERVER);
                             udp.set_src_port(53);
-                            udp.set_data_size((packet.len() - size_of::<UdpPacket>()) as u16);
+                            udp.set_data_size(packet.len() - size_of::<UdpPacket>())?;
                             let packet = DnsPacket::from_slice_mut(&mut packet)?;
                             packet.udp = udp;
                         }
