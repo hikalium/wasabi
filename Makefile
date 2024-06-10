@@ -198,6 +198,7 @@ run_deps : app
 	mkdir -p mnt/EFI/BOOT
 	cp README.md mnt/
 	cp generated/bin/* mnt/
+	cp default/init.txt mnt/
 
 .PHONY : watch_serial
 watch_serial:

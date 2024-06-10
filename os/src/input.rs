@@ -2,7 +2,6 @@ extern crate alloc;
 
 use crate::boot_info::BootInfo;
 use crate::command;
-use crate::debug_exit;
 use crate::efi::fs::EfiFileName;
 use crate::error;
 use crate::error::Error;
@@ -11,7 +10,6 @@ use crate::executor::Executor;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::info;
-use crate::loader::Elf;
 use crate::mutex::Mutex;
 use crate::print;
 use crate::serial::SerialPort;
@@ -88,29 +86,27 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
             yield_execution().await;
         }
     };
-    let console_task = async {
-        info!("console_task has started");
+    let init_task = async {
+        info!("running init");
         let boot_info = BootInfo::take();
         let root_files = boot_info.root_files();
         let root_files: alloc::vec::Vec<&crate::boot_info::File> =
             root_files.iter().filter_map(|e| e.as_ref()).collect();
-        let init_app = EfiFileName::from_str("init.txt")?;
-        let init_app = root_files.iter().find(|&e| e.name() == &init_app);
-        if let Some(init_app) = init_app {
-            let init_app = String::from_utf8_lossy(init_app.data());
-            let init_app = init_app.trim();
-            let init_app = EfiFileName::from_str(init_app)?;
-            let elf = root_files.iter().find(|&e| e.name() == &init_app);
-            if let Some(elf) = elf {
-                let elf = Elf::parse(elf)?;
-                let app = elf.load()?;
-                app.exec(&[]).await?;
-                debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
-            } else {
-                return Err(Error::Failed("Init app file not found"));
-            }
+        let init_txt = EfiFileName::from_str("init.txt")?;
+        let init_txt = root_files
+            .iter()
+            .find(|&e| e.name() == &init_txt)
+            .ok_or(Error::Failed("init.txt not found"))?;
+        let init_txt = String::from_utf8_lossy(init_txt.data());
+        for line in init_txt.trim().split("\n") {
+            if let Err(e) = command::run(&line).await {
+                error!("{e:?}");
+            };
         }
-
+        Ok(())
+    };
+    let console_task = async {
+        info!("console_task has started");
         let mut s = String::new();
         loop {
             if let Some(c) = InputManager::take().pop_input() {
@@ -176,4 +172,5 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
     executor.spawn(Task::new(serial_task));
     executor.spawn(Task::new(console_task));
     executor.spawn(Task::new(mouse_cursor_task));
+    executor.spawn(Task::new(init_task));
 }

@@ -7,6 +7,7 @@ use crate::efi::fs::EfiFileName;
 use crate::error;
 use crate::error::Error;
 use crate::error::Result;
+use crate::executor::yield_execution;
 use crate::info;
 use crate::loader::Elf;
 use crate::net::dns::create_dns_query_packet;
@@ -58,6 +59,11 @@ pub async fn run(cmdline: &str) -> Result<()> {
         match cmd {
             "panic" => {
                 trigger_debug_interrupt();
+            }
+            "wait_until_network_is_up" => {
+                while network.router().is_none() {
+                    yield_execution().await;
+                }
             }
             "ip" => {
                 println!("netmask: {:?}", network.netmask());

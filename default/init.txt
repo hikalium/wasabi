@@ -1,0 +1,4 @@
+wait_until_network_is_up
+ip
+ip
+ip
