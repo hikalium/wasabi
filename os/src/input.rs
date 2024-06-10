@@ -98,8 +98,8 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
             .find(|&e| e.name() == &init_txt)
             .ok_or(Error::Failed("init.txt not found"))?;
         let init_txt = String::from_utf8_lossy(init_txt.data());
-        for line in init_txt.trim().split("\n") {
-            if let Err(e) = command::run(&line).await {
+        for line in init_txt.trim().split('\n') {
+            if let Err(e) = command::run(line).await {
                 error!("{e:?}");
             };
         }

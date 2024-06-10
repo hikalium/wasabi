@@ -106,22 +106,16 @@ check:
 	make spellcheck
 	make os
 
-.PHONY : app_unit_test
-app_unit_test:
+.PHONY : run_app_unit_test
+run_app_unit_test:
 	cargo test $(APP_PACKAGES)
-
-# Run app on WasabiOS and check if it exits succesfully
-.PHONY : run_app_test
-run_app_test:
-	make internal_run_app_test INIT="hello1"
 
 .PHONY : pre_upload_test
 pre_upload_test:
 	cargo test --package noli
-	make run_app_test
 	make run_os_test
 	make run_os_lib_test
-	make app_unit_test
+	make run_app_unit_test
 
 .PHONY : post_upload_test
 post_upload_test:
@@ -166,19 +160,18 @@ run :
 
 .PHONY : run_e2e_test
 run_e2e_test :
-	cd e2etest && cargo test -- --test-threads=1 --nocapture
+	@echo ">>>>>>>> Running e2etest with FILTER=\"$(FILTER)\""
+	cd e2etest && cargo test -- --test-threads=1 --nocapture $(FILTER)
 
 .PHONY : run_os_test
 run_os_test :
-	export INIT="${INIT}" && \
-		cd os && cargo \
+	cd os && cargo \
 		  --config "target.'cfg(target_os = \"uefi\")'.runner = '$(RUNNER_TEST)'" \
 		test --bin os
 
 .PHONY : run_os_lib_test
 run_os_lib_test :
-	export INIT="${INIT}" && \
-		cd os && cargo \
+	cd os && cargo \
 		  --config "target.'cfg(target_os = \"uefi\")'.runner = '$(RUNNER_TEST)'" \
 		test --lib
 
