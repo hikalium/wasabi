@@ -1,8 +1,12 @@
 extern crate alloc;
 
+use crate::error::Error;
 use crate::error::Result;
+use crate::info;
+use crate::net::ip::IpV4Addr;
 use crate::net::udp::UdpPacket;
 use crate::util::Sliceable;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
@@ -22,15 +26,15 @@ response:
 
 #[repr(packed)]
 #[allow(unused)]
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct DnsPacket {
     pub udp: UdpPacket,
-    transaction_id: u16,
-    flags: u16,
-    num_questions: u16,
-    num_answers: u16,
-    num_authority_rr: u16,
-    num_additional_rr: u16,
+    transaction_id: [u8; 2],
+    flags: [u8; 2],
+    num_questions: [u8; 2],
+    num_answers: [u8; 2],
+    num_authority_rr: [u8; 2],
+    num_additional_rr: [u8; 2],
 }
 const _: () = assert!(size_of::<DnsPacket>() - size_of::<UdpPacket>() == 12);
 impl DnsPacket {}
@@ -40,8 +44,8 @@ pub const PORT_DNS_SERVER: u16 = 53;
 
 pub fn create_dns_query_packet(query_host_name: &str) -> Result<Vec<u8>> {
     let dns = DnsPacket {
-        flags: 0x2001,
-        num_questions: 0x0100,
+        flags: [0x01, 0x20],
+        num_questions: [0x00, 0x01],
 
         ..Default::default()
     };
@@ -55,6 +59,19 @@ pub fn create_dns_query_packet(query_host_name: &str) -> Result<Vec<u8>> {
     query.extend([0, 0, 1, 0, 1]);
     query.resize(512 - query.len(), 0);
     Ok(query)
+}
+
+#[derive(Debug, Clone)]
+pub enum DnsResponseEntry {
+    A { name: String, addr: IpV4Addr },
+}
+
+pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
+    info!("dns_client: {dns_packet:?}");
+    let dns_header = DnsPacket::from_slice(dns_packet)?;
+    info!("dns_header: {dns_header:?}");
+
+    Err(Error::Failed("WIP"))
 }
 /*
 int main(int argc, char** argv) {

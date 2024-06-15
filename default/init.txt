@@ -1,4 +1,4 @@
 wait_until_network_is_up
 ip
-ip
-ip
+wait_until_dns_ready
+nslookup example.com

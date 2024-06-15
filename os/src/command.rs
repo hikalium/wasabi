@@ -82,6 +82,18 @@ pub async fn run(cmdline: &str) -> Result<()> {
                     println!("usage: ip <target_ipv4_addr>")
                 }
             }
+            "wait_until_dns_ready" => loop {
+                if let Some(dns_ip) = network.dns() {
+                    if let Some(eth) = network.arp_table_get(dns_ip) {
+                        info!("DNS server eth: {eth}");
+                        break;
+                    } else {
+                        yield_execution().await;
+                    }
+                } else {
+                    yield_execution().await;
+                }
+            },
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())
             }

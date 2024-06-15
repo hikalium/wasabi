@@ -19,6 +19,7 @@ use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_OFFER;
 use crate::net::dhcp::DHCP_OPT_MESSAGE_TYPE_PADDING;
 use crate::net::dhcp::DHCP_OPT_NETMASK;
 use crate::net::dhcp::DHCP_OPT_ROUTER;
+use crate::net::dns::parse_dns_response;
 use crate::net::dns::PORT_DNS_SERVER;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
@@ -98,7 +99,7 @@ impl Network {
             executor.spawn(Task::new(async move {
                 loop {
                     let dns_packet = dns_client.recv().await;
-                    info!("dns_client: {dns_packet:?}")
+                    parse_dns_response(&dns_packet)?;
                 }
             }));
             Rc::new(network)
@@ -150,6 +151,9 @@ impl Network {
         iface: Weak<dyn NetworkInterface>,
     ) {
         self.arp_table.lock().insert(ip_addr, (eth_addr, iface));
+    }
+    pub fn arp_table_get(&self, ip_addr: IpV4Addr) -> Option<EthernetAddr> {
+        self.arp_table.lock().get(&ip_addr).map(|e| e.0)
     }
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
