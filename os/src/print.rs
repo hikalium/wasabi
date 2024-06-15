@@ -43,7 +43,7 @@ macro_rules! println {
 
 #[macro_export]
 macro_rules! info {
-            ($($arg:tt)*) => ($crate::print!("[INFO]  {}:{}:  {}\n", file!(), line!(), format_args!($($arg)*)));
+            ($($arg:tt)*) => ($crate::print!("[INFO]  {}:{:<3}:  {}\n", file!(), line!(), format_args!($($arg)*)));
 }
 #[macro_export]
 macro_rules! warn {

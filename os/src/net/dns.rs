@@ -6,22 +6,43 @@ use crate::info;
 use crate::net::ip::IpV4Addr;
 use crate::net::udp::UdpPacket;
 use crate::util::Sliceable;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
 /*
-query:
-4f 15 01 20 00 01 00 00  00 00 00 01 07 65 78 61
-6d 70 6c 65 03 63 6f 6d  00 00 01 00 01 00 00 29
-04 d0 00 00 00 00 00 0c  00 0a 00 08 9f 8c ab 51
-7a f5 f9 0f
+c.f. https://datatracker.ietf.org/doc/html/rfc1035
 
-response:
-0c ec 81 80 00 01 00 01  00 00 00 01 07 65 78 61
-6d 70 6c 65 03 63 6f 6d  00 00 01 00 01 c0 0c 00
-01 00 01 00 00 09 98 00  04 5d b8 d7 0e 00 00 29
-04 d0 00 00 00 00 00 00
+e.g. response for hikalium.com
+
+
+
+8, 104, 105, 107, 97, 108, 105, 117, 109,
+3, 99, 111, 109,
+0,
+0, 1,
+0, 1,
+192, 12,  // 4.1.4. Message compression
+    0, 1, // TYPE
+    0, 1, // CLASS
+    0, 0, 0, 225, // TTL
+    0, 4, 185, 199, 108, 153,
+192, 12,
+    0, 1,
+    0, 1,
+    0, 0, 0, 225,
+    0, 4, 185, 199, 111, 153,
+192, 12,
+    0, 1,
+    0, 1,
+    0, 0, 0, 225,
+    0, 4, 185, 199, 110, 153,
+192, 12, 0, 1, 0, 1,
+    0, 0,
+    0, 225,
+    0, 4, 185, 199, 109, 153,
+69, 209, 4, 13
 */
 
 #[repr(packed)]
@@ -37,7 +58,14 @@ pub struct DnsPacket {
     num_additional_rr: [u8; 2],
 }
 const _: () = assert!(size_of::<DnsPacket>() - size_of::<UdpPacket>() == 12);
-impl DnsPacket {}
+impl DnsPacket {
+    fn num_questions(&self) -> usize {
+        u16::from_be_bytes(self.num_questions) as usize
+    }
+    fn num_answers(&self) -> usize {
+        u16::from_be_bytes(self.num_answers) as usize
+    }
+}
 unsafe impl Sliceable for DnsPacket {}
 
 pub const PORT_DNS_SERVER: u16 = 53;
@@ -70,64 +98,47 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
     info!("dns_client: {dns_packet:?}");
     let dns_header = DnsPacket::from_slice(dns_packet)?;
     info!("dns_header: {dns_header:?}");
-
-    Err(Error::Failed("WIP"))
-}
-/*
-int main(int argc, char** argv) {
-
-  struct sockaddr_in client_address;
-  socklen_t client_addr_len = sizeof(client_address);
-  uint8_t buf[4096];
-  ssize_t recv_size =
-      recvfrom(socket_fd, (char*)buf, sizeof(buf), 0,
-               (struct sockaddr*)&client_address, &client_addr_len);
-  if (recv_size == -1) {
-    panic("error: recvfrom returned -1\n");
-  }
-  Print("Received size: ");
-  PrintNum(recv_size);
-  Print("\n");
-
-  for (int i = 0; i < recv_size; i++) {
-    PrintHex8ZeroFilled(buf[i]);
-    Print((i & 0xF) == 0xF ? "\n" : " ");
-  }
-  Print("\n");
-
-  struct DNSMessage* dns = (struct DNSMessage*)buf;
-  Print("Num of answer RRs: ");
-  PrintNum(htons(dns->num_answers));
-  Print("\n");
-
-  uint8_t* p = buf + sizeof(struct DNSMessage);
-  for (int i = 0; i < htons(dns->num_questions); i++) {
-    Print("Query: ");
-    while (*p) {
-      write(1, &p[1], *p);
-      p += *p + 1;
-      if (*p) {
-        write(1, ".", 1);
-      }
+    let dns_res = &dns_packet[size_of::<DnsPacket>()..];
+    info!("dns_res: {dns_res:?}");
+    let mut it = dns_res.iter();
+    let it = it.by_ref();
+    info!("Questions:");
+    for _ in 0..dns_header.num_questions() {
+        // [rfc1035]
+        // 4.1.2. Question section format
+        // [QNAME; N] [QTYPE; 2] [QCLASS; 2]
+        // N can be odd (no padding)
+        let mut name = String::new();
+        loop {
+            if let Some(len) = it.next() {
+                if *len == 0 {
+                    it.advance_by(4).or(Err(Error::Failed("Invalid format")))?;
+                    info!("it: {it:?}");
+                    break;
+                }
+                let s = it.take(*len as usize).cloned().collect::<Vec<u8>>();
+                let s =
+                    String::from_utf8(s).or(Err(Error::Failed("Cannot parse the dns response")))?;
+                name.push_str(&format!("{s}."));
+            } else {
+                return Err(Error::Failed(
+                    "Failed to parse DNS response questions section",
+                ));
+            }
+        }
+        info!("  {name}");
     }
-    p++;
-    p += 2;  // Type
-    p += 2;  // Class
-    Print("\n");
-  }
-
-  Print("Answers:\n");
-  for (int i = 0; i < htons(dns->num_answers); i++) {
-    p += 2;  // pointer
-    p += 2;  // Type
-    p += 2;  // Class
-    p += 4;  // TTL
-    p += 2;  // len (4)
-    PrintIPv4Addr(*(uint32_t*)p);
-    p += 4;
-    Print("\n");
-  }
-
-  return 0;
+    info!("Answers:");
+    for _ in 0..dns_header.num_answers() {
+        it.advance_by(12).or(Err(Error::Failed("Invalid format")))?;
+        let ipv4_addr: [u8; 4] = it
+            .take(4)
+            .cloned()
+            .collect::<Vec<u8>>()
+            .try_into()
+            .or(Err(Error::Failed("failed")))?;
+        let ipv4_addr = IpV4Addr::from_slice(&ipv4_addr)?;
+        info!("  {ipv4_addr:?}");
+    }
+    Ok(Vec::new())
 }
-*/
