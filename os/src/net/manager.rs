@@ -154,7 +154,7 @@ impl Network {
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
 
-fn handle_rx_dhcp_client(packet: &[u8]) -> Result<()> {
+fn handle_rx_dhcp_client(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> {
     let network = Network::take();
     // TODO(hikalium): impl check for xid and cookie
     let dhcp = DhcpPacket::from_slice(packet)?;
@@ -166,7 +166,8 @@ fn handle_rx_dhcp_client(packet: &[u8]) -> Result<()> {
         dhcp.yiaddr(),
         dhcp.chaddr()
     );
-    network.set_self_ip(Some(dhcp.yiaddr()));
+    let new_self_ip = dhcp.yiaddr();
+    network.set_self_ip(Some(new_self_ip));
     let options = &packet[size_of::<DhcpPacket>()..];
     let mut it = options.iter();
     while let Some(op) = it.next().cloned() {
@@ -207,12 +208,17 @@ fn handle_rx_dhcp_client(packet: &[u8]) -> Result<()> {
                     if let Ok(router) = IpV4Addr::from_slice(&data) {
                         info!("router: {router}");
                         network.set_router(Some(*router));
+                        let arp_req =
+                            ArpPacket::request(iface.ethernet_addr(), new_self_ip, *router);
+                        iface.push_packet(arp_req.copy_into_slice())?;
                     }
                 }
                 DHCP_OPT_DNS => {
                     if let Ok(dns) = IpV4Addr::from_slice(&data) {
                         info!("dns: {dns}");
                         network.set_dns(Some(*dns));
+                        let arp_req = ArpPacket::request(iface.ethernet_addr(), new_self_ip, *dns);
+                        iface.push_packet(arp_req.copy_into_slice())?;
                     }
                 }
                 _ => {}
@@ -224,10 +230,10 @@ fn handle_rx_dhcp_client(packet: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn handle_rx_udp(packet: &[u8]) -> Result<()> {
+fn handle_rx_udp(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> {
     let udp = UdpPacket::from_slice(packet)?;
     match (udp.src_port(), udp.dst_port()) {
-        (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => handle_rx_dhcp_client(packet),
+        (UDP_PORT_DHCP_SERVER, UDP_PORT_DHCP_CLIENT) => handle_rx_dhcp_client(packet, iface),
         (_, dst) => {
             if let Some(sock) = Network::take().udp_socket_table.lock().get(&dst) {
                 sock.handle_rx(packet)
@@ -278,7 +284,7 @@ fn handle_rx_arp(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> 
 fn handle_receive(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> {
     match EthernetHeader::from_slice(packet)?.eth_type() {
         e if e == EthernetType::ip_v4() => match IpV4Packet::from_slice(packet)?.protocol() {
-            e if e == IpV4Protocol::udp() => handle_rx_udp(packet),
+            e if e == IpV4Protocol::udp() => handle_rx_udp(packet, iface),
             e if e == IpV4Protocol::tcp() => handle_rx_tcp(packet),
             e if e == IpV4Protocol::icmp() => handle_rx_icmp(packet),
             e => {
@@ -306,12 +312,6 @@ fn probe_interfaces() -> Result<()> {
         for iface in &*interfaces {
             if let Some(iface) = iface.upgrade() {
                 info!("  {:?} {}", iface.ethernet_addr(), iface.name());
-                let arp_req = ArpPacket::request(
-                    iface.ethernet_addr(),
-                    IpV4Addr::new([10, 0, 2, 15]),
-                    IpV4Addr::new([10, 0, 2, 2]),
-                );
-                iface.push_packet(arp_req.copy_into_slice())?;
                 let dhcp_req = DhcpPacket::request(iface.ethernet_addr())?;
                 iface.push_packet(dhcp_req.copy_into_slice())?;
             }
