@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::error::Error;
 use crate::error::Result;
 use crate::hpet::Hpet;
 use crate::mutex::Mutex;
@@ -123,4 +124,34 @@ impl Future for TimeoutFuture {
             Poll::Pending
         }
     }
+}
+
+pub struct SelectFuture<T: Future, U: Future> {
+    left: Mutex<Pin<Box<T>>>,
+    right: Mutex<Pin<Box<U>>>,
+}
+impl<T: Future, U: Future> SelectFuture<T, U> {
+    pub fn new(left: T, right: U) -> Self {
+        let left = Mutex::new(Box::pin(left), "SelectFuture::left");
+        let right = Mutex::new(Box::pin(right), "SelectFuture::right");
+        Self { left, right }
+    }
+}
+impl<T: Future, U: Future> Future for SelectFuture<T, U> {
+    type Output = (Option<T::Output>, Option<U::Output>);
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+        if let Poll::Ready(left) = self.left.lock().as_mut().poll(ctx) {
+            Poll::Ready((Some(left), None))
+        } else if let Poll::Ready(right) = self.right.lock().as_mut().poll(ctx) {
+            Poll::Ready((None, Some(right)))
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+pub async fn with_timeout_ms<F: Future>(f: F, timeout: u64) -> Result<F::Output> {
+    let t = TimeoutFuture::new_ms(timeout);
+    let (_, res) = SelectFuture::new(t, f).await;
+    res.ok_or(Error::Failed("Timed out"))
 }

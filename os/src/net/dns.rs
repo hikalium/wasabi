@@ -2,6 +2,8 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::executor::with_timeout_ms;
+use crate::executor::yield_execution;
 use crate::info;
 use crate::net::ip::IpV4Addr;
 use crate::net::ip::IpV4Packet;
@@ -169,5 +171,13 @@ pub async fn query_dns(query: &str) -> Result<Vec<IpV4Addr>> {
         packet.udp = udp;
     }
     network.send_ip_packet(packet.into());
-    Ok(Vec::new())
+    with_timeout_ms(
+        async {
+            loop {
+                yield_execution().await;
+            }
+        },
+        500,
+    )
+    .await
 }
