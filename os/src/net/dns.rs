@@ -4,6 +4,9 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::info;
 use crate::net::ip::IpV4Addr;
+use crate::net::ip::IpV4Packet;
+use crate::net::ip::IpV4Protocol;
+use crate::net::manager::Network;
 use crate::net::udp::UdpPacket;
 use crate::util::Sliceable;
 use alloc::format;
@@ -140,5 +143,31 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
         let ipv4_addr = IpV4Addr::from_slice(&ipv4_addr)?;
         info!("  {ipv4_addr:?}");
     }
+    Ok(Vec::new())
+}
+
+pub async fn query_dns(query: &str) -> Result<Vec<IpV4Addr>> {
+    let network = Network::take();
+    let server = network
+        .dns()
+        .ok_or(Error::Failed("DNS server address is not available yet"))?;
+    let mut packet = create_dns_query_packet(query)?;
+    {
+        let ip = IpV4Packet::new(
+            Default::default(),
+            server,
+            IpV4Addr::default(),
+            IpV4Protocol::udp(),
+            packet.len() - size_of::<IpV4Packet>(),
+        );
+        let mut udp = UdpPacket::default();
+        udp.ip = ip;
+        udp.set_dst_port(PORT_DNS_SERVER);
+        udp.set_src_port(53);
+        udp.set_data_size(packet.len() - size_of::<UdpPacket>())?;
+        let packet = DnsPacket::from_slice_mut(&mut packet)?;
+        packet.udp = udp;
+    }
+    network.send_ip_packet(packet.into());
     Ok(Vec::new())
 }
