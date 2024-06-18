@@ -29,7 +29,7 @@ pub mod allocator;
 mod ax88179;
 pub mod bitset;
 pub mod boot_info;
-mod command;
+mod cmd;
 pub mod debug_exit;
 pub mod efi;
 pub mod elf;

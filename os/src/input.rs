@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use crate::boot_info::BootInfo;
-use crate::command;
+use crate::cmd;
 use crate::efi::fs::EfiFileName;
 use crate::error;
 use crate::error::Error;
@@ -99,7 +99,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
             .ok_or(Error::Failed("init.txt not found"))?;
         let init_txt = String::from_utf8_lossy(init_txt.data());
         for line in init_txt.trim().split('\n') {
-            if let Err(e) = command::run(line).await {
+            if let Err(e) = cmd::run(line).await {
                 error!("{e:?}");
             };
         }
@@ -111,7 +111,7 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
         loop {
             if let Some(c) = InputManager::take().pop_input() {
                 if c == '\r' || c == '\n' {
-                    if let Err(e) = command::run(&s).await {
+                    if let Err(e) = cmd::run(&s).await {
                         error!("{e:?}");
                     };
                     s.clear();
