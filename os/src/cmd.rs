@@ -106,7 +106,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
             "nslookup" => {
                 if let Some(query) = args.get(1) {
                     let res = query_dns(query).await?;
-                    println!("res: {res:?}")
+                    println!("{res:?}")
                 } else {
                     println!("usage: nslookup <query>")
                 }

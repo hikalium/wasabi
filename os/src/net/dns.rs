@@ -5,17 +5,20 @@ use crate::error::Result;
 use crate::executor::with_timeout_ms;
 use crate::executor::yield_execution;
 use crate::info;
+use crate::mutex::Mutex;
 use crate::net::ip::IpV4Addr;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
 use crate::net::manager::Network;
 use crate::net::udp::UdpPacket;
 use crate::util::Sliceable;
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::sync::atomic::AtomicU16;
+use core::sync::atomic::Ordering;
 
 /*
 c.f. https://datatracker.ietf.org/doc/html/rfc1035
@@ -100,13 +103,15 @@ pub enum DnsResponseEntry {
     A { name: String, addr: IpV4Addr },
 }
 
-pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
+static PENDING_QUERIES: Mutex<BTreeMap<u16, Option<Vec<DnsResponseEntry>>>> =
+    Mutex::new(BTreeMap::new(), "PENDING_QUERIES");
+static NEXT_TRANSACTION_ID: AtomicU16 = AtomicU16::new(1);
+
+pub fn parse_dns_response(dns_packet: &[u8]) -> Result<()> {
     info!("dns_client: {dns_packet:?}");
     let dns_header = DnsPacket::from_slice(dns_packet)?;
-    info!(
-        "dns_header: {dns_header:?}, transaction_id = {}",
-        u16::from_be_bytes(dns_header.transaction_id)
-    );
+    let transaction_id = u16::from_be_bytes(dns_header.transaction_id);
+    info!("dns_header: {dns_header:?}, transaction_id = {transaction_id}",);
     let dns_res = &dns_packet[size_of::<DnsPacket>()..];
     info!("dns_res: {dns_res:?}");
     let mut it = dns_res.iter();
@@ -148,20 +153,22 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
             .try_into()
             .or(Err(Error::Failed("failed")))?;
         let name = name.clone();
-        let addr = IpV4Addr::from_slice(&ipv4_addr)?.clone();
+        let addr = *IpV4Addr::from_slice(&ipv4_addr)?;
         info!("  {addr:?}");
         result.push(DnsResponseEntry::A { name, addr })
     }
-    Ok(result)
+    if PENDING_QUERIES.lock().contains_key(&transaction_id) {
+        PENDING_QUERIES.lock().insert(transaction_id, Some(result));
+    }
+    Ok(())
 }
 
-static NEXT_TRANSACTION_ID: AtomicU16 = AtomicU16::new(1);
-
-pub async fn query_dns(query: &str) -> Result<Vec<IpV4Addr>> {
+pub async fn query_dns(query: &str) -> Result<Vec<DnsResponseEntry>> {
     let network = Network::take();
     let server = network
         .dns()
         .ok_or(Error::Failed("DNS server address is not available yet"))?;
+    let transaction_id = NEXT_TRANSACTION_ID.fetch_add(1, Ordering::SeqCst);
     let mut packet = create_dns_query_packet(query)?;
     {
         let ip = IpV4Packet::new(
@@ -177,15 +184,19 @@ pub async fn query_dns(query: &str) -> Result<Vec<IpV4Addr>> {
         udp.set_src_port(53);
         udp.set_data_size(packet.len() - size_of::<UdpPacket>())?;
         let packet = DnsPacket::from_slice_mut(&mut packet)?;
-        let transaction_id = NEXT_TRANSACTION_ID.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
         packet.udp = udp;
         packet.transaction_id = transaction_id.to_be_bytes();
     }
+    PENDING_QUERIES.lock().insert(transaction_id, None);
     network.send_ip_packet(packet.into());
     with_timeout_ms(
         async {
             loop {
                 yield_execution().await;
+                let res = PENDING_QUERIES.lock().get(&transaction_id).cloned();
+                if let Some(Some(res)) = res {
+                    return res;
+                }
             }
         },
         500,

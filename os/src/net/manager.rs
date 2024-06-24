@@ -99,8 +99,7 @@ impl Network {
             executor.spawn(Task::new(async move {
                 loop {
                     let dns_packet = dns_client.recv().await;
-                    let res = parse_dns_response(&dns_packet)?;
-                    info!("{res:?}")
+                    parse_dns_response(&dns_packet)?;
                 }
             }));
             Rc::new(network)
