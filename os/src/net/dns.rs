@@ -15,6 +15,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
+use core::sync::atomic::AtomicU16;
 
 /*
 c.f. https://datatracker.ietf.org/doc/html/rfc1035
@@ -102,7 +103,10 @@ pub enum DnsResponseEntry {
 pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
     info!("dns_client: {dns_packet:?}");
     let dns_header = DnsPacket::from_slice(dns_packet)?;
-    info!("dns_header: {dns_header:?}");
+    info!(
+        "dns_header: {dns_header:?}, transaction_id = {}",
+        u16::from_be_bytes(dns_header.transaction_id)
+    );
     let dns_res = &dns_packet[size_of::<DnsPacket>()..];
     info!("dns_res: {dns_res:?}");
     let mut it = dns_res.iter();
@@ -151,6 +155,8 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
     Ok(result)
 }
 
+static NEXT_TRANSACTION_ID: AtomicU16 = AtomicU16::new(1);
+
 pub async fn query_dns(query: &str) -> Result<Vec<IpV4Addr>> {
     let network = Network::take();
     let server = network
@@ -171,7 +177,9 @@ pub async fn query_dns(query: &str) -> Result<Vec<IpV4Addr>> {
         udp.set_src_port(53);
         udp.set_data_size(packet.len() - size_of::<UdpPacket>())?;
         let packet = DnsPacket::from_slice_mut(&mut packet)?;
+        let transaction_id = NEXT_TRANSACTION_ID.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
         packet.udp = udp;
+        packet.transaction_id = transaction_id.to_be_bytes();
     }
     network.send_ip_packet(packet.into());
     with_timeout_ms(
