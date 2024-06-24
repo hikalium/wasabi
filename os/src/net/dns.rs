@@ -108,12 +108,12 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
     let mut it = dns_res.iter();
     let it = it.by_ref();
     info!("Questions:");
+    let mut name = String::new();
     for _ in 0..dns_header.num_questions() {
         // [rfc1035]
         // 4.1.2. Question section format
         // [QNAME; N] [QTYPE; 2] [QCLASS; 2]
         // N can be odd (no padding)
-        let mut name = String::new();
         loop {
             if let Some(len) = it.next() {
                 if *len == 0 {
@@ -134,6 +134,7 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
         info!("  {name}");
     }
     info!("Answers:");
+    let mut result = Vec::new();
     for _ in 0..dns_header.num_answers() {
         it.advance_by(12).or(Err(Error::Failed("Invalid format")))?;
         let ipv4_addr: [u8; 4] = it
@@ -142,10 +143,12 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<Vec<DnsResponseEntry>> {
             .collect::<Vec<u8>>()
             .try_into()
             .or(Err(Error::Failed("failed")))?;
-        let ipv4_addr = IpV4Addr::from_slice(&ipv4_addr)?;
-        info!("  {ipv4_addr:?}");
+        let name = name.clone();
+        let addr = IpV4Addr::from_slice(&ipv4_addr)?.clone();
+        info!("  {addr:?}");
+        result.push(DnsResponseEntry::A { name, addr })
     }
-    Ok(Vec::new())
+    Ok(result)
 }
 
 pub async fn query_dns(query: &str) -> Result<Vec<IpV4Addr>> {
