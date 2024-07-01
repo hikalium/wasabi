@@ -6,12 +6,10 @@ use crate::executor::with_timeout_ms;
 use crate::executor::yield_execution;
 use crate::info;
 use crate::mutex::Mutex;
-use crate::net::ip::IpV4Addr;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
 use crate::net::manager::Network;
 use crate::net::udp::UdpPacket;
-use crate::util::Sliceable;
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
@@ -19,6 +17,9 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::sync::atomic::AtomicU16;
 use core::sync::atomic::Ordering;
+use noli::mem::Sliceable;
+use noli::net::DnsResponseEntry;
+use noli::net::IpV4Addr;
 
 /*
 c.f. https://datatracker.ietf.org/doc/html/rfc1035
@@ -96,11 +97,6 @@ pub fn create_dns_query_packet(query_host_name: &str) -> Result<Vec<u8>> {
     query.extend([0, 0, 1, 0, 1]);
     query.resize(512 - query.len(), 0);
     Ok(query)
-}
-
-#[derive(Debug, Clone)]
-pub enum DnsResponseEntry {
-    A { name: String, addr: IpV4Addr },
 }
 
 static PENDING_QUERIES: Mutex<BTreeMap<u16, Option<Vec<DnsResponseEntry>>>> =

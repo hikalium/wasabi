@@ -1,10 +1,10 @@
 extern crate alloc;
 
-use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::fmt::Display;
 use core::mem::size_of;
+use noli::mem::Sliceable;
 
 #[repr(packed)]
 #[allow(unused)]

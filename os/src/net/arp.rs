@@ -3,11 +3,11 @@ extern crate alloc;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
 use crate::net::eth::EthernetType;
-use crate::net::ip::IpV4Addr;
-use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use core::mem::size_of;
+use noli::mem::Sliceable;
+use noli::net::IpV4Addr;
 
 #[repr(packed)]
 #[allow(unused)]

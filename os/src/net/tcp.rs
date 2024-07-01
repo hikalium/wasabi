@@ -11,12 +11,12 @@ use crate::net::eth::EthernetType;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
 use crate::net::manager::Network;
-use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
+use noli::mem::Sliceable;
 
 #[repr(packed)]
 #[allow(unused)]

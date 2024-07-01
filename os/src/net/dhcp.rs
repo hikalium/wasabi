@@ -3,15 +3,15 @@ use crate::net::checksum::InternetChecksum;
 use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
 use crate::net::eth::EthernetType;
-use crate::net::ip::IpV4Addr;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
-use crate::util::Sliceable;
 use core::mem::size_of;
 use core::mem::MaybeUninit;
+use noli::mem::Sliceable;
+use noli::net::IpV4Addr;
 
 // https://datatracker.ietf.org/doc/html/rfc2132
 // 3.3. Subnet Mask (len = 4)

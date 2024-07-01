@@ -5,7 +5,6 @@ use crate::info;
 use crate::mutex::Mutex;
 use crate::net::checksum::InternetChecksum;
 use crate::net::ip::IpV4Packet;
-use crate::util::Sliceable;
 use alloc::collections::VecDeque;
 use alloc::fmt;
 use alloc::fmt::Debug;
@@ -15,6 +14,7 @@ use core::marker::PhantomPinned;
 use core::pin::Pin;
 use core::task::Context;
 use core::task::Poll;
+use noli::mem::Sliceable;
 
 // https://datatracker.ietf.org/doc/html/rfc2131
 // 4.1 Constructing and sending DHCP messages

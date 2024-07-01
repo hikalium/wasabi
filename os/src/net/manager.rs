@@ -25,7 +25,6 @@ use crate::net::eth::EthernetAddr;
 use crate::net::eth::EthernetHeader;
 use crate::net::eth::EthernetType;
 use crate::net::icmp::IcmpPacket;
-use crate::net::ip::IpV4Addr;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
 use crate::net::tcp::TcpPacket;
@@ -35,7 +34,6 @@ use crate::net::udp::UdpPacket;
 use crate::net::udp::UdpSocket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
-use crate::util::Sliceable;
 use crate::warn;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -46,6 +44,8 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
+use noli::mem::Sliceable;
+use noli::net::IpV4Addr;
 
 pub trait NetworkInterface {
     fn name(&self) -> &str;

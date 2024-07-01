@@ -12,13 +12,13 @@ use crate::info;
 use crate::loader::Elf;
 use crate::net::dns::query_dns;
 use crate::net::icmp::IcmpPacket;
-use crate::net::ip::IpV4Addr;
 use crate::net::manager::Network;
 use crate::println;
-use crate::util::Sliceable;
 use crate::x86_64::trigger_debug_interrupt;
 use alloc::vec::Vec;
 use core::str::FromStr;
+use noli::mem::Sliceable;
+use noli::net::IpV4Addr;
 
 async fn run_app(name: &str, args: &[&str]) -> Result<i64> {
     let boot_info = BootInfo::take();

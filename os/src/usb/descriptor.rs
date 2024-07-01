@@ -1,7 +1,7 @@
 use crate::util::IntoPinnedMutableSlice;
-use crate::util::Sliceable;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
+use noli::mem::Sliceable;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]

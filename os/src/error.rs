@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::efi::types::EfiStatus;
 use alloc::string::String;
 use core::num::TryFromIntError;
+use noli::error::Error as NoliError;
 use noli::graphics::GraphicsError;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -21,6 +22,7 @@ pub enum Error {
     PciEcmOutOfRange,
     TryFromIntError,
     LockFailed,
+    NoliError(NoliError),
 }
 impl From<GraphicsError> for Error {
     fn from(e: GraphicsError) -> Self {
@@ -45,6 +47,11 @@ impl From<String> for Error {
 impl From<TryFromIntError> for Error {
     fn from(_: TryFromIntError) -> Self {
         Error::TryFromIntError
+    }
+}
+impl From<NoliError> for Error {
+    fn from(e: NoliError) -> Self {
+        Error::NoliError(e)
     }
 }
 pub type Result<T> = core::result::Result<T, Error>;

@@ -2,11 +2,13 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::mem::Sliceable;
 use crate::print::hexdump;
 use crate::println;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::fmt::Display;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
@@ -60,6 +62,7 @@ impl FromStr for IpV4Addr {
         }
     }
 }
+unsafe impl Sliceable for IpV4Addr {}
 
 /// Socket is an abstruction of "connection" between two components.
 #[derive(Debug)]
@@ -126,6 +129,11 @@ impl TcpStream {
         buf[..copy_size].copy_from_slice(&FAKE_TCP_DATA.as_bytes()[..copy_size]);
         Ok(copy_size)
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum DnsResponseEntry {
+    A { name: String, addr: IpV4Addr },
 }
 
 pub fn lookup_host(host: &str) -> Result<Vec<IpV4Addr>> {

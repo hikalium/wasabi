@@ -2,13 +2,13 @@ extern crate alloc;
 
 use crate::net::checksum::InternetChecksum;
 use crate::net::eth::EthernetHeader;
-use crate::net::ip::IpV4Addr;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
-use crate::util::Sliceable;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use core::mem::size_of;
+use noli::mem::Sliceable;
+use noli::net::IpV4Addr;
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
