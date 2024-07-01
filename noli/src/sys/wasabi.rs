@@ -5,6 +5,7 @@ use core::alloc::Layout;
 use core::ptr::null_mut;
 use core::slice;
 use sabi::MouseEvent;
+use sabi::RawIpV4Addr;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -99,6 +100,9 @@ fn syscall_2(func: u64, arg1: u64, arg2: u64) -> u64 {
 fn syscall_3(func: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
     syscall_5(func, arg1, arg2, arg3, 0, 0)
 }
+fn syscall_4(func: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64) -> u64 {
+    syscall_5(func, arg1, arg2, arg3, arg4, 0)
+}
 fn syscall_5(func: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> u64 {
     let mut retv;
     unsafe {
@@ -169,5 +173,14 @@ impl SystemApi for Api {
             println!("size = {size:#X}");
             Some(unsafe { slice::from_raw_parts(addr, size) })
         }
+    }
+    fn nslookup(host: &str, result: &mut [RawIpV4Addr]) -> i64 {
+        syscall_4(
+            7,
+            host.as_ptr() as u64,
+            host.len() as u64,
+            result.as_ptr() as u64,
+            result.len() as u64,
+        ) as i64
     }
 }

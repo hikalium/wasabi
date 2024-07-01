@@ -31,8 +31,23 @@ pub trait SystemApi {
     fn get_args_region() -> Option<&'static [u8]> {
         unimplemented!()
     }
-    /// Returns Some if there is an args region.
-    fn nslookup(_host: &str, _result: &mut [RawIpV4Addr]) -> u64 {
+    /// Returns 0 if there is a response. Non-zero otherwise.
+    /// -2: NXDOMAIN
+    /// -1: RESOLUTION_FAILED
+    fn nslookup(_host: &str, _result: &mut [RawIpV4Addr]) -> i64 {
+        #[cfg(test)]
+        {
+            if _host == "nolitest.example.com" {
+                _result[0] = [127, 0, 0, 1];
+                return 1;
+            } else if _host == "example.invalid" {
+                // c.f. https://www.rfc-editor.org/rfc/rfc6761.html
+                // >  The domain "invalid." and any names falling within ".invalid." are special in the ways listed below.
+                // > Users MAY assume that queries for "invalid" names will always return NXDOMAIN responses.
+                // > Name resolution APIs and libraries SHOULD recognize "invalid" names as special and SHOULD always return immediate negative responses.
+                return -2;
+            }
+        }
         unimplemented!()
     }
 }

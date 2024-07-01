@@ -3,17 +3,18 @@ extern crate alloc;
 use crate::error::Error;
 use crate::error::Result;
 use crate::mem::Sliceable;
+use crate::prelude::*;
 use crate::print::hexdump;
 use crate::println;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::fmt::Display;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
 use core::convert::From;
 use core::str::FromStr;
+use sabi::RawIpV4Addr;
 
 #[repr(transparent)]
 #[allow(unused)]
@@ -137,20 +138,15 @@ pub enum DnsResponseEntry {
 }
 
 pub fn lookup_host(host: &str) -> Result<Vec<IpV4Addr>> {
-    println!("noli::net::lookup_host: Fake lookup for {host}");
-    let addrs = if host == "example.com" {
-        vec![IpV4Addr::new([127, 0, 0, 1])]
-    } else if host == "example.invalid" {
-        // c.f. https://www.rfc-editor.org/rfc/rfc6761.html
-        // >  The domain "invalid." and any names falling within ".invalid." are special in the ways listed below.
-        // > Users MAY assume that queries for "invalid" names will always return NXDOMAIN responses.
-        // > Name resolution APIs and libraries SHOULD recognize "invalid" names as special and SHOULD always return immediate negative responses.
-        return Err(Error::Failed("NXDOMAIN"));
-    } else {
-        Vec::new()
-    };
-
-    Ok(addrs)
+    let mut result = [RawIpV4Addr::default(); 4];
+    match Api::nslookup(host, &mut result) {
+        n if n >= 0 => Ok(result
+            .iter()
+            .take(n as usize)
+            .map(|e| IpV4Addr::new(*e))
+            .collect()),
+        _ => Err(Error::Failed("DNS resolution failed")),
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -165,7 +161,7 @@ mod test {
     }
     #[test]
     fn lookup_example_com() {
-        let addrs = lookup_host("example.com").expect("lookup_host should succeeds");
+        let addrs = lookup_host("nolitest.example.com").expect("lookup_host should succeeds");
         assert_eq!(addrs.len(), 1);
         assert_eq!(addrs[0], IpV4Addr::new([127, 0, 0, 1]));
     }
