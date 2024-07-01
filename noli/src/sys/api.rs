@@ -1,4 +1,5 @@
 pub use sabi::MouseEvent;
+pub use sabi::RawIpV4Addr;
 
 /// impl can be found at:
 /// - src/sys/wasabi.rs
@@ -28,6 +29,10 @@ pub trait SystemApi {
     }
     /// Returns Some if there is an args region.
     fn get_args_region() -> Option<&'static [u8]> {
+        unimplemented!()
+    }
+    /// Returns Some if there is an args region.
+    fn nslookup(_host: &str, _result: &mut [RawIpV4Addr]) -> u64 {
         unimplemented!()
     }
 }

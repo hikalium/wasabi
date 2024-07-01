@@ -18,7 +18,6 @@ use core::mem::size_of;
 use core::sync::atomic::AtomicU16;
 use core::sync::atomic::Ordering;
 use noli::mem::Sliceable;
-use noli::net::DnsResponseEntry;
 use noli::net::IpV4Addr;
 
 /*
@@ -157,6 +156,11 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<()> {
         PENDING_QUERIES.lock().insert(transaction_id, Some(result));
     }
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub enum DnsResponseEntry {
+    A { name: String, addr: IpV4Addr },
 }
 
 pub async fn query_dns(query: &str) -> Result<Vec<DnsResponseEntry>> {

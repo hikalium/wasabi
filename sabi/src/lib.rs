@@ -49,3 +49,5 @@ pub struct MouseEvent {
     pub button: MouseButtonState,
     pub position: PointerPosition,
 }
+
+pub type RawIpV4Addr = [u8; 4];
