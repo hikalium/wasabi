@@ -212,7 +212,6 @@ impl<'a> Elf<'a> {
     ) -> Result<()> {
         let segment_vaddr_range = sh.vaddr_range();
         let segment_file_range = sh.file_range();
-        println!("Loading Segment: {segment_vaddr_range:?}...");
 
         let dst = region.as_mut_slice();
         let src = self.file.data();
@@ -243,11 +242,9 @@ impl<'a> Elf<'a> {
                 })
                 .fold((u64::MAX, u64::MIN), |l, r| (min(l.0, r.0), max(l.1, r.1))),
         );
-        println!("App_vaddr_range: {app_vaddr_range:?}");
         let mut region = ContiguousPhysicalMemoryPages::alloc_bytes(app_vaddr_range.size())?;
         region.fill_with_bytes(0);
         let region_range = region.range();
-        println!("App region allocated = {region_range:?}",);
         region.set_page_attr(PageAttr::ReadWriteUser)?;
         for s in &segments_to_be_loaded {
             self.load_segment(&mut region, &app_vaddr_range, s)?;
@@ -265,16 +262,12 @@ impl<'a> Elf<'a> {
             .iter()
             .find(|s| s.phdr_type == elf::PHDR_TYPE_DYNAMIC);
         if let Some(dynamic_segment) = dynamic_segment {
-            println!("DYNAMIC segment found");
             let frange = dynamic_segment.offset as usize
                 ..(dynamic_segment.offset + dynamic_segment.fsize) as usize;
             let entries = &self.file.data()[frange]
                 .chunks_exact(size_of::<elf::DynamicEntry>())
                 .map(elf::DynamicEntry::try_from)
                 .collect::<Result<Vec<elf::DynamicEntry>>>()?;
-            for e in entries {
-                println!("{:?}", e);
-            }
             let rela_addr = entries
                 .iter()
                 .find(|e| e.tag == elf::DYNAMIC_TAG_RELA_ADDRESS)
@@ -290,7 +283,6 @@ impl<'a> Elf<'a> {
             if let (Some(rela_addr), Some(rela_total_size), Some(rela_entry_size)) =
                 (rela_addr, rela_total_size, rela_entry_size)
             {
-                println!("RELA found. addr = {rela_addr:#018X} size = {rela_total_size:#018X}");
                 let rela_data = loaded.slice_of_vaddr_range(AddressRange::from_start_and_size(
                     rela_addr,
                     rela_total_size,
