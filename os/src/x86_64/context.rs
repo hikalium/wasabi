@@ -11,7 +11,7 @@ use core::mem::MaybeUninit;
 
 /*
 There are 3 types of contexts:
-    - OS context: async, priviledged (the stack and registers are shared across all threads)
+    - OS context: async, privileged (the stack and registers are shared across all threads)
     - SYSCALL context: synchronous, privileged (using per-APP stack)
     - APP context: unmanaged, unprivileged (using per-APP stack)
 

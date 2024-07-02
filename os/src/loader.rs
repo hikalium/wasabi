@@ -8,7 +8,6 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::memory::AddressRange;
 use crate::memory::ContiguousPhysicalMemoryPages;
-use crate::println;
 use crate::process::ProcessContext;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
@@ -210,16 +209,12 @@ impl<'a> Elf<'a> {
         app_vaddr_range: &AddressRange,
         sh: &elf::SegmentHeader,
     ) -> Result<()> {
-        let segment_vaddr_range = sh.vaddr_range();
         let segment_file_range = sh.file_range();
-
         let dst = region.as_mut_slice();
         let src = self.file.data();
-
         let dst = &mut dst[sh.vaddr_range().to_range_in(app_vaddr_range)?];
         let src = &src[segment_file_range];
         dst[..src.len()].copy_from_slice(src);
-
         Ok(())
     }
     pub fn load(&self) -> Result<LoadedElf> {
@@ -244,7 +239,6 @@ impl<'a> Elf<'a> {
         );
         let mut region = ContiguousPhysicalMemoryPages::alloc_bytes(app_vaddr_range.size())?;
         region.fill_with_bytes(0);
-        let region_range = region.range();
         region.set_page_attr(PageAttr::ReadWriteUser)?;
         for s in &segments_to_be_loaded {
             self.load_segment(&mut region, &app_vaddr_range, s)?;
