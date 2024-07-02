@@ -9,6 +9,30 @@ use core::mem::size_of;
 use core::mem::swap;
 use core::mem::MaybeUninit;
 
+/*
+There are 3 types of contexts:
+    - OS context: async, priviledged (the stack and registers are shared across all threads)
+    - SYSCALL context: synchronous, privileged (using per-APP stack)
+    - APP context: unmanaged, unprivileged (using per-APP stack)
+
+Allowed transitions between them are:
+    OS->SYSCALL : launching an app, resume app execution after yield
+        - Save current context into OS context
+        - Load current context from APP context
+        - Keep current privilege
+    SYSCALL->APP : launching an app, return from syscall
+        - Resume APP registers as ABI says
+        - Use a CPU instruction to resume APP execution
+            - This implies a change on privilege level
+    APP->SYSCALL : handling a syscall
+        - Use a CPU instruction to invoke a syscall
+            - This implies a change on privilege level
+    SYSCALL->OS : exiting / yielding from an app
+        - Save current context into APP context
+        - Load current context from OS context
+        - Keep current privilege
+*/
+
 pub static CONTEXT_OS: Mutex<ExecutionContext> =
     Mutex::new(ExecutionContext::default(), "CONTEXT_OS");
 pub static CONTEXT_APP: Mutex<ExecutionContext> =
