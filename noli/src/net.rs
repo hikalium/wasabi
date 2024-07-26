@@ -145,7 +145,9 @@ pub fn lookup_host(host: &str) -> Result<Vec<IpV4Addr>> {
             .take(n as usize)
             .map(|e| IpV4Addr::new(*e))
             .collect()),
-        _ => Err(Error::Failed("DNS resolution failed")),
+        -1 => Err(Error::Failed("RESOLUTION_FAILED")),
+        -2 => Err(Error::Failed("NXDOMAIN")),
+        _ => Err(Error::Failed("UNDEFINED")),
     }
 }
 
