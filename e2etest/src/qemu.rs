@@ -287,6 +287,19 @@ impl Qemu {
         let mut monitor = QemuMonitor::new(&self.monitor_sock_path()?).await?;
         monitor.send(cmd).await
     }
+    pub async fn send_key_inputs_from_str(&mut self, s: &str) -> Result<()> {
+        // https://gist.github.com/mvidner/8939289
+        for c in s.chars() {
+            let c = match c {
+                '\n' => "ret".to_string(),
+                ' ' => "spc".to_string(),
+                '.' => "dot".to_string(),
+                _ => c.to_string(),
+            };
+            self.send_monitor_cmd(&format!("sendkey {c}")).await?;
+        }
+        Ok(())
+    }
     pub async fn kill(&mut self) -> Result<()> {
         if let Err(e) = self.send_monitor_cmd("quit\n").await {
             eprintln!("Qemu::kill : send_monitor_cmd returned an error but it is expected since the connection is lost: {e:?}")

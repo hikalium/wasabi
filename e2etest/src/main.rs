@@ -136,6 +136,26 @@ mod test {
         Ok(())
     }
     #[tokio::test]
+    async fn app_dig_ok() -> Result<()> {
+        const EXPECTED_OUTPUT: &str = "127.0.0.1";
+        let dev_env = DevEnv::new()?;
+        let app_bin_path = dev_env.build_builtin_app("dig")?;
+        let mut qemu = Qemu::new(dev_env.ovmf_path())?;
+        let _rootfs = qemu
+            .launch_with_wasabi_os_and_files(dev_env.wasabi_efi_path(), &[app_bin_path.as_str()])?;
+        qemu.wait_until_serial_output_contains("usb_hid_keyboard is ready")?;
+        // Confirm that TEST_STRING is not typed into the machine yet.
+        let output = qemu.read_serial_output()?;
+        assert!(!output.contains(EXPECTED_OUTPUT));
+        qemu.send_key_inputs_from_str("\n").await?;
+        qemu.wait_until_serial_output_contains("Welcome to WasabiOS!")?;
+        qemu.send_key_inputs_from_str("dig wasabitest.example.com\n")
+            .await?;
+        qemu.wait_until_serial_output_contains(EXPECTED_OUTPUT)?;
+        qemu.kill().await?;
+        Ok(())
+    }
+    #[tokio::test]
     async fn network_is_working() -> Result<()> {
         // cargo test -p e2etest -- network
         let dev_env = DevEnv::new()?;

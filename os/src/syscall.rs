@@ -87,29 +87,27 @@ fn sys_get_args_region(_args: &[u64; 5]) -> u64 {
 
 fn sys_nslookup(args: &[u64; 5]) -> i64 {
     info!("sys_nslookup!");
-    let _host = {
+    let host = {
         let host = args[0] as *const u8;
         let len = args[1] as usize;
         // TODO(hikalium): validate the buffer
         unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(host, len)) }
     };
-    let _result = {
+    let result = {
         let result = args[2] as *mut sabi::RawIpV4Addr;
         let len = args[3] as usize;
         // TODO(hikalium): validate the buffer
         unsafe { core::slice::from_raw_parts_mut(result, len) }
     };
-    #[cfg(test)]
-    {
-        if _host == "wasabitest.example.com" {
-            _result[0] = [127, 0, 0, 1];
-        } else if _host == "example.invalid" {
-            // c.f. https://www.rfc-editor.org/rfc/rfc6761.html
-            // >  The domain "invalid." and any names falling within ".invalid." are special in the ways listed below.
-            // > Users MAY assume that queries for "invalid" names will always return NXDOMAIN responses.
-            // > Name resolution APIs and libraries SHOULD recognize "invalid" names as special and SHOULD always return immediate negative responses.
-            return -2;
-        }
+    if host == "wasabitest.example.com" {
+        result[0] = [127, 0, 0, 1];
+        return 1;
+    } else if host == "example.invalid" {
+        // c.f. https://www.rfc-editor.org/rfc/rfc6761.html
+        // >  The domain "invalid." and any names falling within ".invalid." are special in the ways listed below.
+        // > Users MAY assume that queries for "invalid" names will always return NXDOMAIN responses.
+        // > Name resolution APIs and libraries SHOULD recognize "invalid" names as special and SHOULD always return immediate negative responses.
+        return -2;
     }
     -1
 }
