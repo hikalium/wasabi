@@ -117,16 +117,16 @@ pub fn enqueue_input_tasks(executor: &mut Executor) {
                     s.clear();
                 }
                 match c {
-                    'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '.' => {
-                        print!("{c}");
-                        s.push(c);
-                    }
                     '\x7f' | '\x08' => {
                         print!("{0} {0}", 0x08 as char);
                         s.pop();
                     }
-                    _ => {
+                    '\n' => {
                         // Do nothing
+                    }
+                    _ => {
+                        print!("{c}");
+                        s.push(c);
                     }
                 }
             }

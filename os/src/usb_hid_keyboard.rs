@@ -86,8 +86,11 @@ fn usage_id_to_char(usage_id: u8) -> Result<KeyEvent> {
         40 => Ok(KeyEvent::Enter),
         42 => Ok(KeyEvent::Char(0x08 as char)),
         44 => Ok(KeyEvent::Char(' ')),
+        45 => Ok(KeyEvent::Char('-')),
+        51 => Ok(KeyEvent::Char(':')),
         54 => Ok(KeyEvent::Char(',')),
         55 => Ok(KeyEvent::Char('.')),
+        56 => Ok(KeyEvent::Char('/')),
         _ => Err(Error::FailedString(format!(
             "Unhandled USB HID Keyboard Usage ID {usage_id:}"
         ))),
