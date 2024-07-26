@@ -110,6 +110,72 @@ impl CpuContext {
 }
 const _: () = assert!(size_of::<CpuContext>() == 8 * 16 + 8 * 2);
 
+pub unsafe fn switch_context(from: &mut ExecutionContext, to: &mut ExecutionContext) -> Result<()> {
+    asm!(
+        //
+        // Save the current execution state to `from` (rsi).
+        //
+
+        // Save general registers.
+        "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop.
+        "push rsi", // ExecutionContext.rsp
+        "push r15",
+        "push r14",
+        "push r13",
+        "push r12",
+        "push r11",
+        "push r10",
+        "push r9",
+        "push r8",
+        "push rdi",
+        "push rsi",
+        "push rbp",
+        "push rbx",
+        "push rdx",
+        "push rcx",
+        "push rax",
+        "pushfq", // ExecutionContext.rflags
+        "lea r8, [rip+0f]", // Label 0 forward: state restore logic below
+        "push r8", // ExecutionContext.rip = state restore logic below
+        "sub rsp, 512",
+        "fxsave64[rsp]",
+        "xchg rsp,rsi", // recover the original rsp
+        // At this point, the current CPU state is saved to `from`.
+
+        //
+        // Load the `to` state onto CPU
+        //
+        "mov rsp, r9", // swap rsp and rdi to utilize push / pop
+        "fxrstor64[rsp]",
+        "add rsp, 512",
+        "pop rax", // Skip RIP
+        "popfq", // Restore RFLAGS
+        "pop rax",
+        "pop rcx",
+        "pop rdx",
+        "pop rbx",
+        "pop rbp",
+        "pop rsi",
+        "pop rdi",
+        "pop r8",
+        "pop r9",
+        "pop r10",
+        "pop r11",
+        "pop r12",
+        "pop r13",
+        "pop r14",
+        "pop r15",
+        "pop rsp",
+        "0:",
+
+        // rsi: from_ctx
+        in("rsi") (from as *mut ExecutionContext as *mut u8).add(size_of::<ExecutionContext>()),
+        // r9: to_ctx
+        in("r9") (to as *mut ExecutionContext as *mut u8),
+    );
+    Ok(())
+}
+
 pub async fn exec_app_context(proc_context: ProcessContext) -> Result<i64> {
     let mut proc_context = Some(proc_context);
     let mut retcode: i64;
