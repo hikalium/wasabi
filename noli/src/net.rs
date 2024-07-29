@@ -24,6 +24,9 @@ impl IpV4Addr {
     pub fn new(ip: [u8; 4]) -> Self {
         Self(ip)
     }
+    pub fn bytes(&self) -> [u8; 4] {
+        self.0
+    }
     pub fn network_prefix(&self, mask: IpV4Addr) -> IpV4Addr {
         Self((u32::from_be_bytes(self.0) & u32::from_be_bytes(mask.0)).to_be_bytes())
     }

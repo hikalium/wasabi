@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::hpet::Hpet;
 use crate::mutex::Mutex;
 use crate::println;
+use crate::x86_64::busy_loop_hint;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use core::future::Future;
@@ -36,17 +37,17 @@ pub async fn yield_execution() {
     Yield::default().await
 }
 
-pub struct Task {
-    future: Pin<Box<dyn Future<Output = Result<()>>>>,
+pub struct Task<T> {
+    future: Pin<Box<dyn Future<Output = Result<T>>>>,
 }
-impl Task {
-    pub fn new(future: impl Future<Output = Result<()>> + 'static) -> Task {
+impl<T> Task<T> {
+    pub fn new(future: impl Future<Output = Result<T>> + 'static) -> Task<T> {
         Task {
             // Pin the task here to avoid invalidating the self references used in  the future
             future: Box::pin(future),
         }
     }
-    fn poll(&mut self, context: &mut Context) -> Poll<Result<()>> {
+    fn poll(&mut self, context: &mut Context) -> Poll<Result<T>> {
         self.future.as_mut().poll(context)
     }
 }
@@ -70,20 +71,34 @@ pub fn spawn_global(future: impl Future<Output = Result<()>> + 'static) {
     executor.spawn(Task::new(future));
 }
 
+pub fn block_on<T>(future: impl Future<Output = Result<T>> + 'static) -> Result<T> {
+    let mut task = Task::new(future);
+    loop {
+        let waker = dummy_waker();
+        let mut context = Context::from_waker(&waker);
+        match task.poll(&mut context) {
+            Poll::Ready(result) => {
+                break result;
+            }
+            Poll::Pending => busy_loop_hint(),
+        }
+    }
+}
+
 pub struct Executor {
-    task_queue: Option<VecDeque<Task>>,
+    task_queue: Option<VecDeque<Task<()>>>,
 }
 impl Executor {
     const fn default() -> Self {
         Self { task_queue: None }
     }
-    fn task_queue(&mut self) -> &mut VecDeque<Task> {
+    fn task_queue(&mut self) -> &mut VecDeque<Task<()>> {
         if self.task_queue.is_none() {
             self.task_queue = Some(VecDeque::new());
         }
         self.task_queue.as_mut().unwrap()
     }
-    pub fn spawn(&mut self, task: Task) {
+    pub fn spawn(&mut self, task: Task<()>) {
         self.task_queue().push_back(task)
     }
     pub fn run(executor: &Mutex<Self>) {

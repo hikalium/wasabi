@@ -1,6 +1,10 @@
 use crate::boot_info::BootInfo;
+use crate::error;
+use crate::executor::block_on;
 use crate::info;
 use crate::input::InputManager;
+use crate::net::dns::query_dns;
+use crate::net::dns::DnsResponseEntry;
 use crate::print;
 use crate::println;
 use crate::process::CURRENT_PROCESS;
@@ -108,6 +112,14 @@ fn sys_nslookup(args: &[u64; 5]) -> i64 {
         // > Users MAY assume that queries for "invalid" names will always return NXDOMAIN responses.
         // > Name resolution APIs and libraries SHOULD recognize "invalid" names as special and SHOULD always return immediate negative responses.
         return -2;
+    }
+    let r = block_on(query_dns(host));
+    if let Ok(r) = &r {
+        let DnsResponseEntry::A { name: _, addr } = &r[0];
+        result[0] = addr.bytes();
+        return 1;
+    } else {
+        error!("{r:?}")
     }
     -1
 }
