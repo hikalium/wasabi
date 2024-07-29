@@ -91,11 +91,7 @@ const _: () = assert!(size_of::<CpuContext>() == 8 * 16 + 8 * 2);
 pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
     let (from, to) = { (from.lock().as_mut_ptr(), to.lock().as_mut_ptr()) };
     asm!(
-        //
         // Save the current execution state to `from` (rsi).
-        //
-
-        // Save general registers.
         "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop.
         "push rsi", // ExecutionContext.rsp
         "push r15",
@@ -121,9 +117,7 @@ pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<Executio
         "xchg rsp,rsi", // recover the original rsp
         // At this point, the current CPU state is saved to `from`.
 
-        //
         // Load the `to` state onto CPU
-        //
         "mov rsp, r9", // swap rsp and rdi to utilize push / pop
         "fxrstor64[rsp]",
         "add rsp, 512",
@@ -146,10 +140,7 @@ pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<Executio
         "pop r15",
         "pop rsp",
         "0:",
-
-        // rsi: from_ctx
         in("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()),
-        // r9: to_ctx
         in("r9") (to as *mut u8),
     );
 }
@@ -159,11 +150,7 @@ pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<Executio
 pub unsafe fn fork_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
     let (from, to) = { (from.lock().as_mut_ptr(), to.lock().as_mut_ptr()) };
     asm!(
-        //
         // Save the current execution state to `from` (rsi).
-        //
-
-        // Save general registers.
         "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop.
         "push rsi", // ExecutionContext.rsp
         "push r15",
@@ -189,36 +176,15 @@ pub unsafe fn fork_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionC
         "xchg rsp,rsi", // recover the original rsp
         // At this point, the current CPU state is saved to `from`.
 
-        //
         // Load the `to` state onto CPU
-        //
         "mov rsp, r9", // swap rsp and rdi to utilize push / pop
         //"fxrstor64[rsp]", // Skip restoring FPU Context
         "add rsp, 512",
-        "pop rax", // Skip RIP
-        "pop rax", // Skip RFLAGS
-        "pop rax", // Skip RAX
-        "pop rax", // Skip RCX
-        "pop rax", // Skip RDX
-        "pop rax", // Skip RBX
-        "pop rax", // Skip RBP
-        "pop rax", // Skip RSI
-        "pop rax", // Skip RDI
-        "pop rax", // Skip R8
-        "pop rax", // Skip R9
-        "pop rax", // Skip R10
-        "pop rax", // Skip R11
-        "pop rax", // Skip R12
-        "pop rax", // Skip R13
-        "pop rax", // Skip R14
-        "pop rax", // Skip R15
+        "add rsp, 8*17", // Skip 17 registers (RIP+RFLAGS+GPReg(except RSP) = 1 + 1 + 16-1 = 17)
         "pop rsp",
         "0:",
-        "ret", // test
-
-        // rsi: from_ctx
+        "ret",
         in("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()) as u64,
-        // r9: to_ctx
         in("r9") (to as u64),
     );
 }
@@ -230,9 +196,15 @@ mod test {
         Mutex::new(ExecutionContext::default(), "CONTEXT_MAIN");
     pub static CONTEXT_TEST: Mutex<ExecutionContext> =
         Mutex::new(ExecutionContext::default(), "CONTEXT_TEST");
+    pub static ANOTHER_FUNC_COUNT: Mutex<usize> = Mutex::new(0, "ANOTHER_FUNC_COUNT");
     fn another_func() {
-        unsafe {
-            switch_context(&CONTEXT_TEST, &CONTEXT_MAIN);
+        *ANOTHER_FUNC_COUNT.lock() *= 2;
+        loop {
+            *ANOTHER_FUNC_COUNT.lock() *= 3;
+            unsafe {
+                switch_context(&CONTEXT_TEST, &CONTEXT_MAIN);
+            }
+            *ANOTHER_FUNC_COUNT.lock() *= 5;
         }
     }
     #[test_case]
@@ -243,7 +215,13 @@ mod test {
         *rip_to_ret_on_another_stack = another_func_addr;
         CONTEXT_TEST.lock().cpu.rsp = rip_to_ret_on_another_stack as *mut u64 as u64;
         unsafe {
+            *ANOTHER_FUNC_COUNT.lock() = 1;
             fork_context(&CONTEXT_MAIN, &CONTEXT_TEST);
+            assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 6);
+            switch_context(&CONTEXT_MAIN, &CONTEXT_TEST);
+            assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 90);
+            switch_context(&CONTEXT_MAIN, &CONTEXT_TEST);
+            assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 1350);
         }
     }
 }
