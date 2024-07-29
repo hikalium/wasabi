@@ -17,9 +17,9 @@ where
         let mut writer = SerialPort::new(SerialPortIndex::Com2);
         writer.init();
         let mut writer = SerialPort::default();
-        write!(writer, "{}...\t", type_name::<T>()).unwrap();
+        writeln!(writer, "[RUNNING] >>> {}", type_name::<T>()).unwrap();
         self();
-        writeln!(writer, "[PASS]").unwrap();
+        writeln!(writer, "[PASS   ] <<< {}", type_name::<T>()).unwrap();
     }
 }
 

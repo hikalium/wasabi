@@ -110,7 +110,7 @@ impl CpuContext {
 }
 const _: () = assert!(size_of::<CpuContext>() == 8 * 16 + 8 * 2);
 
-pub unsafe fn switch_context(from: &mut ExecutionContext, to: &mut ExecutionContext) -> Result<()> {
+pub unsafe fn switch_context(from: &mut ExecutionContext, to: &mut ExecutionContext) {
     asm!(
         //
         // Save the current execution state to `from` (rsi).
@@ -173,7 +173,113 @@ pub unsafe fn switch_context(from: &mut ExecutionContext, to: &mut ExecutionCont
         // r9: to_ctx
         in("r9") (to as *mut ExecutionContext as *mut u8),
     );
-    Ok(())
+}
+
+pub unsafe fn fork_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
+    crate::info!("from: {:#p}", from.lock().as_mut_ptr());
+    crate::info!("to: {:#p}", to.lock().as_mut_ptr());
+    asm!(
+        //
+        // Save the current execution state to `from` (rsi).
+        //
+
+        // Save general registers.
+        "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop.
+        "push rsi", // ExecutionContext.rsp
+        "push r15",
+        "push r14",
+        "push r13",
+        "push r12",
+        "push r11",
+        "push r10",
+        "push r9",
+        "push r8",
+        "push rdi",
+        "push rsi",
+        "push rbp",
+        "push rbx",
+        "push rdx",
+        "push rcx",
+        "push rax",
+        "pushfq", // ExecutionContext.rflags
+        "lea r8, [rip+0f]", // Label 0 forward: state restore logic below
+        "push r8", // ExecutionContext.rip = state restore logic below
+        "sub rsp, 512",
+        "fxsave64[rsp]",
+        "xchg rsp,rsi", // recover the original rsp
+        // At this point, the current CPU state is saved to `from`.
+
+        //
+        // Load the `to` state onto CPU
+        //
+        "mov rsp, r9", // swap rsp and rdi to utilize push / pop
+        //"fxrstor64[rsp]", // Skip restoring FPU Context
+        "add rsp, 512",
+        "pop rax", // Skip RIP
+        "pop rax", // Skip RFLAGS
+        "pop rax", // Skip RAX
+        "pop rax", // Skip RCX
+        "pop rax", // Skip RDX
+        "pop rax", // Skip RBX
+        "pop rax", // Skip RBP
+        "pop rax", // Skip RSI
+        "pop rax", // Skip RDI
+        "pop rax", // Skip R8
+        "pop rax", // Skip R9
+        "pop rax", // Skip R10
+        "pop rax", // Skip R11
+        "pop rax", // Skip R12
+        "pop rax", // Skip R13
+        "pop rax", // Skip R14
+        "pop rax", // Skip R15
+        "pop rsp",
+        "0:",
+        "ret", // test
+
+        // rsi: from_ctx
+        in("rsi") (from.lock().as_mut_ptr() as *mut u8).add(size_of::<ExecutionContext>()) as u64,
+        // r9: to_ctx
+        in("r9") (to.lock().as_mut_ptr() as u64),
+    );
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::info;
+    pub static CONTEXT_MAIN: Mutex<ExecutionContext> =
+        Mutex::new(ExecutionContext::default(), "CONTEXT_MAIN");
+    pub static CONTEXT_TEST: Mutex<ExecutionContext> =
+        Mutex::new(ExecutionContext::default(), "CONTEXT_TEST");
+    fn another_func() {
+        info!("hoge");
+        loop {
+            crate::x86_64::hlt();
+        }
+    }
+    #[test_case]
+    fn switch_context_works() {
+        info!("CONTEXT_MAIN: {:#p}", unsafe {
+            CONTEXT_MAIN.lock().as_mut_ptr()
+        });
+        info!("CONTEXT_TEST: {:#p}", unsafe {
+            CONTEXT_TEST.lock().as_mut_ptr()
+        });
+        let mut another_stack = [0u64; 4096];
+        info!("another_stack: {:#p}", &another_stack);
+        let another_func_addr = another_func as *const unsafe extern "sysv64" fn() as u64;
+        info!("another_func_addr: {another_func_addr:#010X}");
+        let rip_to_ret_on_another_stack = another_stack.last_mut().unwrap();
+        info!("rip_to_ret_on_another_stack: {rip_to_ret_on_another_stack:#p}");
+        *rip_to_ret_on_another_stack = another_func_addr;
+        CONTEXT_TEST.lock().cpu.rsp = rip_to_ret_on_another_stack as *mut u64 as u64;
+        info!("rsp: {:#010X}", CONTEXT_TEST.lock().cpu.rsp);
+        info!("switch_context before");
+        unsafe {
+            fork_context(&CONTEXT_MAIN, &CONTEXT_TEST);
+        }
+        info!("switch_context after");
+    }
 }
 
 pub async fn exec_app_context(proc_context: ProcessContext) -> Result<i64> {

@@ -57,7 +57,7 @@ impl<T: Sized> Default for IoBox<T> {
 }
 
 #[test_case]
-fn io_box_addr() {
+fn io_box_new() {
     IoBox::<u64>::new();
 }
 
