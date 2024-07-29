@@ -9,30 +9,6 @@ use core::mem::size_of;
 use core::mem::swap;
 use core::mem::MaybeUninit;
 
-/*
-There are 3 types of contexts:
-    - OS context: async, privileged (the stack and registers are shared across all threads)
-    - SYSCALL context: synchronous, privileged (using per-APP stack)
-    - APP context: unmanaged, unprivileged (using per-APP stack)
-
-Allowed transitions between them are:
-    OS->SYSCALL : launching an app, resume app execution after yield
-        - Save current context into OS context
-        - Load current context from APP context
-        - Keep current privilege
-    SYSCALL->APP : launching an app, return from syscall
-        - Resume APP registers as ABI says
-        - Use a CPU instruction to resume APP execution
-            - This implies a change on privilege level
-    APP->SYSCALL : handling a syscall
-        - Use a CPU instruction to invoke a syscall
-            - This implies a change on privilege level
-    SYSCALL->OS : exiting / yielding from an app
-        - Save current context into APP context
-        - Load current context from OS context
-        - Keep current privilege
-*/
-
 pub static CONTEXT_OS: Mutex<ExecutionContext> =
     Mutex::new(ExecutionContext::default(), "CONTEXT_OS");
 pub static CONTEXT_APP: Mutex<ExecutionContext> =
@@ -110,7 +86,10 @@ impl CpuContext {
 }
 const _: () = assert!(size_of::<CpuContext>() == 8 * 16 + 8 * 2);
 
-pub unsafe fn switch_context(from: &mut ExecutionContext, to: &mut ExecutionContext) {
+/// # Safety
+/// `to` should be a valid ExecutionContext, and both contexts should not be locked yet.
+pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
+    let (from, to) = { (from.lock().as_mut_ptr(), to.lock().as_mut_ptr()) };
     asm!(
         //
         // Save the current execution state to `from` (rsi).
@@ -169,15 +148,16 @@ pub unsafe fn switch_context(from: &mut ExecutionContext, to: &mut ExecutionCont
         "0:",
 
         // rsi: from_ctx
-        in("rsi") (from as *mut ExecutionContext as *mut u8).add(size_of::<ExecutionContext>()),
+        in("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()),
         // r9: to_ctx
-        in("r9") (to as *mut ExecutionContext as *mut u8),
+        in("r9") (to as *mut u8),
     );
 }
 
+/// # Safety
+/// `to` should be a valid ExecutionContext, and both contexts should not be locked yet.
 pub unsafe fn fork_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
-    crate::info!("from: {:#p}", from.lock().as_mut_ptr());
-    crate::info!("to: {:#p}", to.lock().as_mut_ptr());
+    let (from, to) = { (from.lock().as_mut_ptr(), to.lock().as_mut_ptr()) };
     asm!(
         //
         // Save the current execution state to `from` (rsi).
@@ -237,48 +217,34 @@ pub unsafe fn fork_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionC
         "ret", // test
 
         // rsi: from_ctx
-        in("rsi") (from.lock().as_mut_ptr() as *mut u8).add(size_of::<ExecutionContext>()) as u64,
+        in("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()) as u64,
         // r9: to_ctx
-        in("r9") (to.lock().as_mut_ptr() as u64),
+        in("r9") (to as u64),
     );
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::info;
     pub static CONTEXT_MAIN: Mutex<ExecutionContext> =
         Mutex::new(ExecutionContext::default(), "CONTEXT_MAIN");
     pub static CONTEXT_TEST: Mutex<ExecutionContext> =
         Mutex::new(ExecutionContext::default(), "CONTEXT_TEST");
     fn another_func() {
-        info!("hoge");
-        loop {
-            crate::x86_64::hlt();
+        unsafe {
+            switch_context(&CONTEXT_TEST, &CONTEXT_MAIN);
         }
     }
     #[test_case]
     fn switch_context_works() {
-        info!("CONTEXT_MAIN: {:#p}", unsafe {
-            CONTEXT_MAIN.lock().as_mut_ptr()
-        });
-        info!("CONTEXT_TEST: {:#p}", unsafe {
-            CONTEXT_TEST.lock().as_mut_ptr()
-        });
         let mut another_stack = [0u64; 4096];
-        info!("another_stack: {:#p}", &another_stack);
         let another_func_addr = another_func as *const unsafe extern "sysv64" fn() as u64;
-        info!("another_func_addr: {another_func_addr:#010X}");
         let rip_to_ret_on_another_stack = another_stack.last_mut().unwrap();
-        info!("rip_to_ret_on_another_stack: {rip_to_ret_on_another_stack:#p}");
         *rip_to_ret_on_another_stack = another_func_addr;
         CONTEXT_TEST.lock().cpu.rsp = rip_to_ret_on_another_stack as *mut u64 as u64;
-        info!("rsp: {:#010X}", CONTEXT_TEST.lock().cpu.rsp);
-        info!("switch_context before");
         unsafe {
             fork_context(&CONTEXT_MAIN, &CONTEXT_TEST);
         }
-        info!("switch_context after");
     }
 }
 
