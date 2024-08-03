@@ -6,11 +6,10 @@ extern crate alloc;
 use alloc::string::ToString;
 use noli::bitmap::bitmap_draw_rect;
 use noli::entry_point;
-use noli::prelude::SystemApi;
+use noli::prelude::*;
 use noli::rect::Rect;
 use noli::sheet::Sheet;
 use noli::sys::api::MouseEvent;
-use noli::sys::wasabi::Api;
 use noli::window;
 
 fn main() {
