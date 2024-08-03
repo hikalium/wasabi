@@ -103,10 +103,42 @@ pub fn bitmap_draw_rect<T: Bitmap>(
     Ok(())
 }
 
-pub fn bitmap_draw_char<T: Bitmap>(
+pub fn bitmap_draw_char_3x<T: Bitmap>(
     buf: &mut T,
     fg_color: u32,
-    bg_color: u32,
+    bg_color: Option<u32>,
+    px: i64,
+    py: i64,
+    c: char,
+) -> Result<()> {
+    if !buf.is_in_x_range(px)
+        || !buf.is_in_y_range(py)
+        || !buf.is_in_x_range(px + 8 - 1)
+        || !buf.is_in_y_range(py + 16 - 1)
+    {
+        return Err(Error::GraphicsOutOfRange);
+    }
+
+    let idx = c as usize;
+    for y in 0..48_i64 {
+        for x in 0..24_i64 {
+            let original_x = x / 3;
+            let original_y = y / 3;
+            if idx >= 256 || ((BITMAP_FONT[idx][original_y as usize] >> original_x) & 1) == 1 {
+                bitmap_draw_point(buf, fg_color, px + x, py + y)?;
+            } else if let Some(bg_color) = bg_color {
+                bitmap_draw_point(buf, bg_color, px + x, py + y)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub fn bitmap_draw_char_2x<T: Bitmap>(
+    buf: &mut T,
+    fg_color: u32,
+    bg_color: Option<u32>,
     px: i64,
     py: i64,
     c: char,
@@ -122,21 +154,25 @@ pub fn bitmap_draw_char<T: Bitmap>(
     let idx = c as usize;
     for y in 0..16_i64 {
         for x in 0..8_i64 {
-            let col = if idx >= 256 || ((BITMAP_FONT[idx][y as usize] >> x) & 1) == 1 {
-                fg_color
-            } else {
-                bg_color
-            };
-            bitmap_draw_point(buf, col, px + x, py + y)?;
+            if idx >= 256 || ((BITMAP_FONT[idx][y as usize] >> x) & 1) == 1 {
+                bitmap_draw_point(buf, fg_color, px + x * 2, py + y * 2)?;
+                bitmap_draw_point(buf, fg_color, px + x * 2 + 1, py + y * 2)?;
+                bitmap_draw_point(buf, fg_color, px + x * 2, py + y * 2 + 1)?;
+                bitmap_draw_point(buf, fg_color, px + x * 2 + 1, py + y * 2 + 1)?;
+            } else if let Some(bg_color) = bg_color {
+                // TODO: implement correct background.
+                bitmap_draw_point(buf, bg_color, px + x, py + y)?;
+            }
         }
     }
 
     Ok(())
 }
 
-pub fn bitmap_draw_char_no_bg<T: Bitmap>(
+pub fn bitmap_draw_char<T: Bitmap>(
     buf: &mut T,
     fg_color: u32,
+    bg_color: Option<u32>,
     px: i64,
     py: i64,
     c: char,
@@ -154,38 +190,108 @@ pub fn bitmap_draw_char_no_bg<T: Bitmap>(
         for x in 0..8_i64 {
             if idx >= 256 || ((BITMAP_FONT[idx][y as usize] >> x) & 1) == 1 {
                 bitmap_draw_point(buf, fg_color, px + x, py + y)?;
-            };
+            } else if let Some(bg_color) = bg_color {
+                bitmap_draw_point(buf, bg_color, px + x, py + y)?;
+            }
         }
     }
 
     Ok(())
 }
 
-pub fn bitmap_draw_string_no_bg<T: Bitmap>(
+pub fn bitmap_draw_string_3x<T: Bitmap>(
     buf: &mut T,
     fg_color: u32,
+    bg_color: Option<u32>,
     px: i64,
     py: i64,
     s: &str,
 ) -> Result<()> {
     let mut pos = 0;
     for c in s.chars() {
-        bitmap_draw_char_no_bg(buf, fg_color, px + pos, py, c)?;
+        bitmap_draw_char_3x(buf, fg_color, bg_color, px + pos, py, c)?;
+        pos += 24;
+    }
+    Ok(())
+}
+
+pub fn bitmap_draw_string_2x<T: Bitmap>(
+    buf: &mut T,
+    fg_color: u32,
+    bg_color: Option<u32>,
+    px: i64,
+    py: i64,
+    s: &str,
+) -> Result<()> {
+    let mut pos = 0;
+    for c in s.chars() {
+        bitmap_draw_char_2x(buf, fg_color, bg_color, px + pos, py, c)?;
+        pos += 16;
+    }
+    Ok(())
+}
+
+pub fn bitmap_draw_string<T: Bitmap>(
+    buf: &mut T,
+    fg_color: u32,
+    bg_color: Option<u32>,
+    px: i64,
+    py: i64,
+    s: &str,
+) -> Result<()> {
+    let mut pos = 0;
+    for c in s.chars() {
+        bitmap_draw_char(buf, fg_color, bg_color, px + pos, py, c)?;
         pos += 8;
     }
     Ok(())
 }
 
-pub fn bitmap_draw_string_no_bg_with_underline<T: Bitmap>(
+pub fn bitmap_draw_string_3x_with_underline<T: Bitmap>(
     buf: &mut T,
     fg_color: u32,
+    bg_color: Option<u32>,
     px: i64,
     py: i64,
     s: &str,
 ) -> Result<()> {
     let mut pos = 0;
     for c in s.chars() {
-        bitmap_draw_char_no_bg(buf, fg_color, px + pos, py, c)?;
+        bitmap_draw_char_3x(buf, fg_color, bg_color, px + pos, py, c)?;
+        pos += 24;
+    }
+    bitmap_draw_line(buf, fg_color, px, py + 16, px + pos, py + 16)?;
+    Ok(())
+}
+
+pub fn bitmap_draw_string_2x_with_underline<T: Bitmap>(
+    buf: &mut T,
+    fg_color: u32,
+    bg_color: Option<u32>,
+    px: i64,
+    py: i64,
+    s: &str,
+) -> Result<()> {
+    let mut pos = 0;
+    for c in s.chars() {
+        bitmap_draw_char_2x(buf, fg_color, bg_color, px + pos, py, c)?;
+        pos += 16;
+    }
+    bitmap_draw_line(buf, fg_color, px, py + 16, px + pos, py + 16)?;
+    Ok(())
+}
+
+pub fn bitmap_draw_string_with_underline<T: Bitmap>(
+    buf: &mut T,
+    fg_color: u32,
+    bg_color: Option<u32>,
+    px: i64,
+    py: i64,
+    s: &str,
+) -> Result<()> {
+    let mut pos = 0;
+    for c in s.chars() {
+        bitmap_draw_char(buf, fg_color, bg_color, px + pos, py, c)?;
         pos += 8;
     }
     bitmap_draw_line(buf, fg_color, px, py + 16, px + pos, py + 16)?;

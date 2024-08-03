@@ -3,8 +3,12 @@ extern crate alloc;
 use crate::bitmap::bitmap_draw_line;
 use crate::bitmap::bitmap_draw_point;
 use crate::bitmap::bitmap_draw_rect;
-use crate::bitmap::bitmap_draw_string_no_bg;
-use crate::bitmap::bitmap_draw_string_no_bg_with_underline;
+use crate::bitmap::bitmap_draw_string;
+use crate::bitmap::bitmap_draw_string_2x;
+use crate::bitmap::bitmap_draw_string_2x_with_underline;
+use crate::bitmap::bitmap_draw_string_3x;
+use crate::bitmap::bitmap_draw_string_3x_with_underline;
+use crate::bitmap::bitmap_draw_string_with_underline;
 use crate::error::Error;
 use crate::error::Result;
 use crate::rect::Rect;
@@ -99,7 +103,7 @@ impl Window {
         let width = self.sheet.width();
 
         bitmap_draw_rect(self.sheet.bitmap(), DARKBLUE, 0, 0, width, TITLE_BAR_HEIGHT)?;
-        bitmap_draw_string_no_bg(self.sheet.bitmap(), WHITE, 5, 3, &self.name)?;
+        bitmap_draw_string(self.sheet.bitmap(), WHITE, None, 5, 3, &self.name)?;
 
         // close button
         bitmap_draw_rect(
@@ -243,17 +247,19 @@ impl Window {
         match size {
             StringSize::Medium => {
                 if underline {
-                    bitmap_draw_string_no_bg_with_underline(
+                    bitmap_draw_string_with_underline(
                         self.sheet.bitmap(),
                         color,
+                        None,
                         x,
                         y + TITLE_BAR_HEIGHT,
                         s,
                     )?;
                 } else {
-                    bitmap_draw_string_no_bg(
+                    bitmap_draw_string(
                         self.sheet.bitmap(),
                         color,
+                        None,
                         x,
                         y + TITLE_BAR_HEIGHT,
                         s,
@@ -261,28 +267,46 @@ impl Window {
                 }
             }
             StringSize::Large => {
-                // TODO: support underline
-                /*
-                graphics::draw_string_2x(
-                    color,
-                    self.sheet.x() + x,
-                    self.sheet.y() + y + TITLE_BAR_HEIGHT,
-                    s,
-                )?;
-                */
-                bitmap_draw_string_no_bg(self.sheet.bitmap(), color, x, y + TITLE_BAR_HEIGHT, s)?;
+                if underline {
+                    bitmap_draw_string_2x_with_underline(
+                        self.sheet.bitmap(),
+                        color,
+                        None,
+                        x,
+                        y + TITLE_BAR_HEIGHT,
+                        s,
+                    )?;
+                } else {
+                    bitmap_draw_string_2x(
+                        self.sheet.bitmap(),
+                        color,
+                        None,
+                        x,
+                        y + TITLE_BAR_HEIGHT,
+                        s,
+                    )?;
+                }
             }
             StringSize::XLarge => {
-                // TODO: support underline
-                /*
-                graphics::draw_string_3x(
-                    color,
-                    self.sheet.x() + x,
-                    self.sheet.y() + y + TITLE_BAR_HEIGHT,
-                    s,
-                )?;
-                */
-                bitmap_draw_string_no_bg(self.sheet.bitmap(), color, x, y + TITLE_BAR_HEIGHT, s)?;
+                if underline {
+                    bitmap_draw_string_3x_with_underline(
+                        self.sheet.bitmap(),
+                        color,
+                        None,
+                        x,
+                        y + TITLE_BAR_HEIGHT,
+                        s,
+                    )?;
+                } else {
+                    bitmap_draw_string_3x(
+                        self.sheet.bitmap(),
+                        color,
+                        None,
+                        x,
+                        y + TITLE_BAR_HEIGHT,
+                        s,
+                    )?;
+                }
             }
         }
         Ok(())

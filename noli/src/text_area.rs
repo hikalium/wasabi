@@ -117,7 +117,7 @@ impl<T: Bitmap> TextArea<T> {
             _ => bitmap_draw_char(
                 &mut self.buf,
                 fg,
-                bg,
+                Some(bg),
                 self.x + self.cx * 8,
                 self.y + self.cy * 16,
                 c,
