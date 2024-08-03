@@ -171,6 +171,10 @@ impl Window {
     // TODO: implement these APIs
     pub fn move_position(&self) {}
 
+    pub fn flush_area(&self, rect: Rect) {
+        self.sheet.flush_area(rect);
+    }
+
     pub fn flush(&self) {
         self.sheet.flush();
     }

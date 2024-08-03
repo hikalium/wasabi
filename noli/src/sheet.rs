@@ -52,6 +52,27 @@ impl Sheet {
         &mut self.bitmap
     }
 
+    // `rect` is absolute position.
+    pub fn flush_area(&self, global_rect: Rect) {
+        let local_rect = Rect::new(
+            global_rect.x() - self.x,
+            global_rect.y() - self.y,
+            global_rect.w(),
+            global_rect.h(),
+        )
+        .unwrap();
+        let intersection_rect = self.rect().intersection(&local_rect).unwrap();
+        let (x_range, y_range) = intersection_rect.frame_ranges();
+        for y in y_range.range {
+            for x in x_range.range {
+                let p = self.bitmap.pixel_at(x, y).cloned().unwrap_or_default();
+                let x = x + self.x;
+                let y = y + self.y;
+                let _ = draw_point(p, x, y);
+            }
+        }
+    }
+
     pub fn flush(&self) {
         for y in 0..self.bitmap.height() {
             for x in 0..self.bitmap.width() {
