@@ -11,7 +11,7 @@ use noli::window;
 fn main() {
     println!("window 1");
 
-    let mut window1 =
+    let window1 =
         window::Window::new("first window!".to_string(), 0xffffff, 30, 30, 200, 100).unwrap();
     let mut window2 =
         window::Window::new("second window!!".to_string(), 0xff00ff, 60, 100, 200, 100).unwrap();

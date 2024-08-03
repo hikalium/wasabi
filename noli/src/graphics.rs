@@ -8,13 +8,6 @@ use core::cmp::max;
 use core::cmp::min;
 use core::ops::Range;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum GraphicsError {
-    OutOfRange,
-}
-
-pub type GraphicsResult<T> = core::result::Result<T, GraphicsError>;
-
 /// Draws string in one line. New lines are ignored.
 pub fn draw_string_3x(color: u32, x: i64, y: i64, s: &str) -> Result<()> {
     let mut pos = 0;

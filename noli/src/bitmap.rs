@@ -1,19 +1,14 @@
 extern crate alloc;
 
+use crate::error::Error;
+use crate::error::Result;
 use crate::font::BITMAP_FONT;
-use crate::graphics::GraphicsError;
-use crate::graphics::GraphicsResult;
 use crate::rect::Rect;
 use alloc::vec::Vec;
 use core::cmp::min;
 use core::cmp::Ordering;
 
-unsafe fn unchecked_draw_point<T: Bitmap>(
-    buf: &mut T,
-    color: u32,
-    x: i64,
-    y: i64,
-) -> GraphicsResult<()> {
+unsafe fn unchecked_draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> Result<()> {
     // Assumes the buffer uses ARGB format
     // which means that the components will be stored in [A, R, G, B] order.
     // This is true for little-endian machine but not on big endian.
@@ -22,7 +17,6 @@ unsafe fn unchecked_draw_point<T: Bitmap>(
     Ok(())
 }
 
-#[allow(clippy::many_single_char_names)]
 pub fn bitmap_draw_line<T: Bitmap>(
     buf: &mut T,
     color: u32,
@@ -30,13 +24,13 @@ pub fn bitmap_draw_line<T: Bitmap>(
     y0: i64,
     x1: i64,
     y1: i64,
-) -> GraphicsResult<()> {
+) -> Result<()> {
     if !buf.is_in_x_range(x0)
         || !buf.is_in_x_range(x1)
         || !buf.is_in_y_range(y0)
         || !buf.is_in_y_range(y1)
     {
-        return Err(GraphicsError::OutOfRange);
+        return Err(Error::GraphicsOutOfRange);
     }
 
     if x1 < x0 {
@@ -74,9 +68,9 @@ pub fn bitmap_draw_line<T: Bitmap>(
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn bitmap_draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> GraphicsResult<()> {
+pub fn bitmap_draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> Result<()> {
     if !buf.is_in_x_range(x) || !buf.is_in_x_range(x) {
-        return Err(GraphicsError::OutOfRange);
+        return Err(Error::GraphicsOutOfRange);
     }
     unsafe {
         unchecked_draw_point(buf, color, x, y)?;
@@ -91,13 +85,13 @@ pub fn bitmap_draw_rect<T: Bitmap>(
     py: i64,
     w: i64,
     h: i64,
-) -> GraphicsResult<()> {
+) -> Result<()> {
     if !buf.is_in_x_range(px)
         || !buf.is_in_y_range(py)
         || !buf.is_in_x_range(px + w - 1)
         || !buf.is_in_y_range(py + h - 1)
     {
-        return Err(GraphicsError::OutOfRange);
+        return Err(Error::GraphicsOutOfRange);
     }
 
     for y in py..py + h {
@@ -116,13 +110,13 @@ pub fn bitmap_draw_char<T: Bitmap>(
     px: i64,
     py: i64,
     c: char,
-) -> GraphicsResult<()> {
+) -> Result<()> {
     if !buf.is_in_x_range(px)
         || !buf.is_in_y_range(py)
         || !buf.is_in_x_range(px + 8 - 1)
         || !buf.is_in_y_range(py + 16 - 1)
     {
-        return Err(GraphicsError::OutOfRange);
+        return Err(Error::GraphicsOutOfRange);
     }
 
     let idx = c as usize;
@@ -146,13 +140,13 @@ pub fn bitmap_draw_char_no_bg<T: Bitmap>(
     px: i64,
     py: i64,
     c: char,
-) -> GraphicsResult<()> {
+) -> Result<()> {
     if !buf.is_in_x_range(px)
         || !buf.is_in_y_range(py)
         || !buf.is_in_x_range(px + 8 - 1)
         || !buf.is_in_y_range(py + 16 - 1)
     {
-        return Err(GraphicsError::OutOfRange);
+        return Err(Error::GraphicsOutOfRange);
     }
 
     let idx = c as usize;
@@ -173,7 +167,7 @@ pub fn bitmap_draw_string_no_bg<T: Bitmap>(
     px: i64,
     py: i64,
     s: &str,
-) -> GraphicsResult<()> {
+) -> Result<()> {
     let mut pos = 0;
     for c in s.chars() {
         bitmap_draw_char_no_bg(buf, fg_color, px + pos, py, c)?;
@@ -188,7 +182,7 @@ pub fn bitmap_draw_string_no_bg_with_underline<T: Bitmap>(
     px: i64,
     py: i64,
     s: &str,
-) -> GraphicsResult<()> {
+) -> Result<()> {
     let mut pos = 0;
     for c in s.chars() {
         bitmap_draw_char_no_bg(buf, fg_color, px + pos, py, c)?;
@@ -281,7 +275,7 @@ pub fn transfer_rect<T: Bitmap>(
     sy: i64,
     w: i64,
     h: i64,
-) -> GraphicsResult<()> {
+) -> Result<()> {
     if !buf.is_in_x_range(sx)
         || !buf.is_in_y_range(sy)
         || !buf.is_in_x_range(sx + w - 1)
@@ -291,7 +285,7 @@ pub fn transfer_rect<T: Bitmap>(
         || !buf.is_in_x_range(dx + w - 1)
         || !buf.is_in_y_range(dy + h - 1)
     {
-        return Err(GraphicsError::OutOfRange);
+        return Err(Error::GraphicsOutOfRange);
     }
 
     match (dy.cmp(&sy), dx.cmp(&sx)) {
@@ -492,7 +486,6 @@ mod tests {
 
 /// Transfers the pixels in a rect sized (w, h) at (sx, sy) in the src bitmap
 /// to (dx, dy) in the dst bitmap.
-#[allow(clippy::many_single_char_names)]
 pub fn draw_bmp_clipped<DstBitmap: Bitmap, SrcBitmap: Bitmap>(
     dst: &mut DstBitmap,
     src: &SrcBitmap,

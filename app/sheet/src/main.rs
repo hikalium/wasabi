@@ -12,11 +12,11 @@ fn main() {
     let mut s2 = Sheet::new(Rect::new(150, 150, 200, 200).unwrap());
 
     let b1 = s1.bitmap();
-    bitmap_draw_rect(b1, 0x0000ff, 0, 0, b1.width(), b1.height());
+    let _ = bitmap_draw_rect(b1, 0x0000ff, 0, 0, b1.width(), b1.height());
     s1.flush();
 
     let b2 = s2.bitmap();
-    bitmap_draw_rect(b2, 0xff00ff, 0, 0, b2.width(), b2.height());
+    let _ = bitmap_draw_rect(b2, 0xff00ff, 0, 0, b2.width(), b2.height());
     s2.flush();
 
     s1.flush();
