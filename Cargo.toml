@@ -12,6 +12,7 @@ members = [
     "app/uname",
     "app/window0",
     "app/window1",
+    "app/window2",
     "dbgutil",
     "e2etest",
     "font",

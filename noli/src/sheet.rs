@@ -54,17 +54,17 @@ impl Sheet {
 
     // `rect` is absolute position.
     pub fn flush_area(&self, global_rect: Rect) {
-        let local_rect = Rect::new(
-            global_rect.x() - self.x,
-            global_rect.y() - self.y,
-            global_rect.w(),
-            global_rect.h(),
-        )
-        .unwrap();
-        let intersection_rect = match self.rect().intersection(&local_rect) {
+        let global_intersection_rect = match self.rect().intersection(&global_rect) {
             Some(r) => r,
             None => return,
         };
+        let intersection_rect = Rect::new(
+            global_intersection_rect.x() - self.x,
+            global_intersection_rect.y() - self.y,
+            global_intersection_rect.w(),
+            global_intersection_rect.h(),
+        )
+        .unwrap();
         let (x_range, y_range) = intersection_rect.frame_ranges();
         for y in y_range.range {
             for x in x_range.range.clone() {
