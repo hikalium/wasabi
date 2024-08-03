@@ -61,7 +61,10 @@ impl Sheet {
             global_rect.h(),
         )
         .unwrap();
-        let intersection_rect = self.rect().intersection(&local_rect).unwrap();
+        let intersection_rect = match self.rect().intersection(&local_rect) {
+            Some(r) => r,
+            None => return,
+        };
         let (x_range, y_range) = intersection_rect.frame_ranges();
         for y in y_range.range {
             for x in x_range.range.clone() {
