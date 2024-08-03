@@ -182,9 +182,6 @@ pub trait Bitmap {
             .add(((y * self.pixels_per_line() + x) * self.bytes_per_pixel()) as usize)
             as *const u32
     }
-    fn flush(&self) {
-        // Do nothing
-    }
     fn is_in_x_range(&self, px: i64) -> bool {
         0 <= px && px < min(self.width(), self.pixels_per_line())
     }
@@ -276,6 +273,7 @@ pub fn transfer_rect<T: Bitmap>(
     Ok(())
 }
 
+#[derive(PartialEq, Eq, Debug)]
 pub struct BitmapBuffer {
     buf: Vec<u8>,
     width: i64,

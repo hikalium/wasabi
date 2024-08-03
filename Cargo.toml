@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "app/sheet",
     "app/dig",
     "app/hello0",
     "app/hello1",
