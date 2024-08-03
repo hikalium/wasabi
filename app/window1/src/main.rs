@@ -12,9 +12,9 @@ fn main() {
     println!("window 1");
 
     window::Window::new("first window!".to_string(), 0xffffff, 30, 30, 200, 100).unwrap();
-    let window2 =
+    let mut window2 =
         window::Window::new("second window!!".to_string(), 0xff00ff, 60, 100, 200, 100).unwrap();
-    let window3 =
+    let mut window3 =
         window::Window::new("third window!!".to_string(), 0x0000ff, 90, 170, 200, 100).unwrap();
 
     window2.fill_rect(0xff0000, 0, 0, 50, 50).unwrap();

@@ -23,16 +23,6 @@ unsafe fn unchecked_draw_point<T: Bitmap>(
 }
 
 #[allow(clippy::many_single_char_names)]
-pub fn bitmap_draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> GraphicsResult<()> {
-    if !buf.is_in_x_range(x) || !buf.is_in_x_range(x) {
-        return Err(GraphicsError::OutOfRange);
-    }
-    unsafe {
-        unchecked_draw_point(buf, color, x, y)?;
-    }
-    Ok(())
-}
-
 pub fn bitmap_draw_line<T: Bitmap>(
     buf: &mut T,
     color: u32,
@@ -80,6 +70,17 @@ pub fn bitmap_draw_line<T: Bitmap>(
     }
     bitmap_draw_point(buf, color, x0, y0)?;
     bitmap_draw_point(buf, color, x1, y1)?;
+    Ok(())
+}
+
+#[allow(clippy::many_single_char_names)]
+pub fn bitmap_draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> GraphicsResult<()> {
+    if !buf.is_in_x_range(x) || !buf.is_in_x_range(x) {
+        return Err(GraphicsError::OutOfRange);
+    }
+    unsafe {
+        unchecked_draw_point(buf, color, x, y)?;
+    }
     Ok(())
 }
 
@@ -136,6 +137,64 @@ pub fn bitmap_draw_char<T: Bitmap>(
         }
     }
 
+    Ok(())
+}
+
+pub fn bitmap_draw_char_no_bg<T: Bitmap>(
+    buf: &mut T,
+    fg_color: u32,
+    px: i64,
+    py: i64,
+    c: char,
+) -> GraphicsResult<()> {
+    if !buf.is_in_x_range(px)
+        || !buf.is_in_y_range(py)
+        || !buf.is_in_x_range(px + 8 - 1)
+        || !buf.is_in_y_range(py + 16 - 1)
+    {
+        return Err(GraphicsError::OutOfRange);
+    }
+
+    let idx = c as usize;
+    for y in 0..16_i64 {
+        for x in 0..8_i64 {
+            if idx >= 256 || ((BITMAP_FONT[idx][y as usize] >> x) & 1) == 1 {
+                bitmap_draw_point(buf, fg_color, px + x, py + y)?;
+            };
+        }
+    }
+
+    Ok(())
+}
+
+pub fn bitmap_draw_string_no_bg<T: Bitmap>(
+    buf: &mut T,
+    fg_color: u32,
+    px: i64,
+    py: i64,
+    s: &str,
+) -> GraphicsResult<()> {
+    let mut pos = 0;
+    for c in s.chars() {
+        bitmap_draw_char_no_bg(buf, fg_color, px + pos, py, c)?;
+        pos += 8;
+    }
+    Ok(())
+}
+
+pub fn bitmap_draw_string_no_bg_with_underline<T: Bitmap>(
+    buf: &mut T,
+    fg_color: u32,
+    px: i64,
+    py: i64,
+    s: &str,
+) -> GraphicsResult<()> {
+    let mut pos = 0;
+    for c in s.chars() {
+        bitmap_draw_char_no_bg(buf, fg_color, px + pos, py, c)?;
+        pos += 8;
+    }
+    bitmap_draw_line(buf, fg_color, px, py + 16, px + pos, py + 16)?;
     Ok(())
 }
 

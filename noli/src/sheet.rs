@@ -28,6 +28,22 @@ impl Sheet {
         self.y = y;
     }
 
+    pub fn x(&self) -> i64 {
+        self.x
+    }
+
+    pub fn y(&self) -> i64 {
+        self.y
+    }
+
+    pub fn width(&self) -> i64 {
+        self.bitmap.width()
+    }
+
+    pub fn height(&self) -> i64 {
+        self.bitmap.height()
+    }
+
     pub fn rect(&self) -> Rect {
         Rect::new(self.x, self.y, self.bitmap.width(), self.bitmap.height()).unwrap()
     }
@@ -47,7 +63,7 @@ impl Sheet {
         }
     }
 
-    pub fn draw_border(&self, color: u32) -> Result<()> {
+    pub fn draw_border(&mut self, color: u32) -> Result<()> {
         draw_line(color, self.x, self.y, self.x + self.bitmap.width(), self.y)?;
         draw_line(color, self.x, self.y, self.x, self.y + self.bitmap.height())?;
         draw_line(
