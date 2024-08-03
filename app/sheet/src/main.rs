@@ -19,6 +19,8 @@ fn main() {
     bitmap_draw_rect(b2, 0xff00ff, 0, 0, b2.width(), b2.height());
     s2.flush();
 
+    s1.flush();
+
     let _ = s1.draw_border(0x00ff00);
     let _ = s2.draw_border(0xff0000);
 }

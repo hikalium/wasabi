@@ -23,6 +23,11 @@ impl Sheet {
         }
     }
 
+    pub fn set_position(&mut self, x: i64, y: i64) {
+        self.x = x;
+        self.y = y;
+    }
+
     pub fn rect(&self) -> Rect {
         Rect::new(self.x, self.y, self.bitmap.width(), self.bitmap.height()).unwrap()
     }
