@@ -64,7 +64,7 @@ impl Sheet {
         let intersection_rect = self.rect().intersection(&local_rect).unwrap();
         let (x_range, y_range) = intersection_rect.frame_ranges();
         for y in y_range.range {
-            for x in x_range.range {
+            for x in x_range.range.clone() {
                 let p = self.bitmap.pixel_at(x, y).cloned().unwrap_or_default();
                 let x = x + self.x;
                 let y = y + self.y;
