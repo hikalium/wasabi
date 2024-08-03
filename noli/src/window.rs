@@ -81,7 +81,7 @@ impl Window {
     pub fn new(name: String, color: u32, x: i64, y: i64, width: i64, height: i64) -> Result<Self> {
         let mut sheet = Sheet::new(Rect::new(x, y, width, height).unwrap());
 
-        bitmap_draw_rect(sheet.bitmap(), color, x, y, width, height);
+        bitmap_draw_rect(sheet.bitmap(), color, 0, 0, width, height);
 
         let mut window = Self {
             name,
@@ -96,19 +96,17 @@ impl Window {
     }
 
     fn init_titlebar(&mut self) -> Result<()> {
-        let x = self.sheet.x();
-        let y = self.sheet.y();
         let width = self.sheet.width();
 
-        bitmap_draw_rect(self.sheet.bitmap(), DARKBLUE, x, y, width, TITLE_BAR_HEIGHT);
-        bitmap_draw_string_no_bg(self.sheet.bitmap(), WHITE, x + 5, y + 3, &self.name);
+        bitmap_draw_rect(self.sheet.bitmap(), DARKBLUE, 0, 0, width, TITLE_BAR_HEIGHT);
+        bitmap_draw_string_no_bg(self.sheet.bitmap(), WHITE, 5, 3, &self.name);
 
         // close button
         bitmap_draw_rect(
             self.sheet.bitmap(),
             GREY,
-            x + width - (6 + BUTTON_SIZE),
-            y + 4,
+            width - (6 + BUTTON_SIZE),
+            4,
             BUTTON_SIZE,
             BUTTON_SIZE,
         );
@@ -117,54 +115,54 @@ impl Window {
         bitmap_draw_line(
             self.sheet.bitmap(),
             WHITE,
-            x + width - (6 + BUTTON_SIZE),
-            y + 4,
-            x + width - 6,
-            y + 4,
+            width - (6 + BUTTON_SIZE),
+            4,
+            width - 6,
+            4,
         );
         bitmap_draw_line(
             self.sheet.bitmap(),
             WHITE,
-            x + width - (6 + BUTTON_SIZE),
-            y + 4,
-            x + width - (6 + BUTTON_SIZE),
-            y + 4 + BUTTON_SIZE,
+            width - (6 + BUTTON_SIZE),
+            4,
+            width - (6 + BUTTON_SIZE),
+            4 + BUTTON_SIZE,
         );
 
         // shadow for button
         bitmap_draw_line(
             self.sheet.bitmap(),
             DARKGREY,
-            x + width - (6 + BUTTON_SIZE),
-            y + 4 + BUTTON_SIZE,
-            x + width - 6,
-            y + 4 + BUTTON_SIZE,
+            width - (6 + BUTTON_SIZE),
+            4 + BUTTON_SIZE,
+            width - 6,
+            4 + BUTTON_SIZE,
         );
         bitmap_draw_line(
             self.sheet.bitmap(),
             DARKGREY,
-            x + width - 6,
-            y + 4,
-            x + width - 6,
-            y + 4 + BUTTON_SIZE,
+            width - 6,
+            4,
+            width - 6,
+            4 + BUTTON_SIZE,
         );
 
         // x
         bitmap_draw_line(
             self.sheet.bitmap(),
             BLACK,
-            x + width - (6 + BUTTON_SIZE) + 4,
-            y + 8,
-            x + width - (6 + BUTTON_SIZE) + 12,
-            y + 16,
+            width - (6 + BUTTON_SIZE) + 4,
+            8,
+            width - (6 + BUTTON_SIZE) + 12,
+            16,
         );
         bitmap_draw_line(
             self.sheet.bitmap(),
             BLACK,
-            x + width - (6 + BUTTON_SIZE) + 4,
-            y + 16,
-            x + width - (6 + BUTTON_SIZE) + 12,
-            y + 8,
+            width - (6 + BUTTON_SIZE) + 4,
+            16,
+            width - (6 + BUTTON_SIZE) + 12,
+            8,
         );
 
         Ok(())
@@ -193,13 +191,11 @@ impl Window {
             return Err(Error::Failed("fill_rect: out of range"));
         }
 
-        let x = self.sheet.x();
-        let y = self.sheet.y();
         bitmap_draw_rect(
             self.sheet.bitmap(),
             color,
-            x + px,
-            y + py + TITLE_BAR_HEIGHT,
+            px,
+            py + TITLE_BAR_HEIGHT,
             width,
             height,
         );
@@ -215,15 +211,13 @@ impl Window {
             return Err(Error::Failed("out of range"));
         }
 
-        let x = self.sheet.x();
-        let y = self.sheet.y();
         bitmap_draw_line(
             self.sheet.bitmap(),
             color,
-            x + x1,
-            y + y1 + TITLE_BAR_HEIGHT,
-            x + x0,
-            y + y0 + TITLE_BAR_HEIGHT,
+            x1,
+            y1 + TITLE_BAR_HEIGHT,
+            x0,
+            y0 + TITLE_BAR_HEIGHT,
         );
         Ok(())
     }
@@ -242,24 +236,22 @@ impl Window {
             return Err(Error::Failed("draw_string: out of range"));
         }
 
-        let x0 = self.sheet.x();
-        let y0 = self.sheet.y();
         match size {
             StringSize::Medium => {
                 if underline {
                     bitmap_draw_string_no_bg_with_underline(
                         self.sheet.bitmap(),
                         color,
-                        x0 + x,
-                        y0 + y + TITLE_BAR_HEIGHT,
+                        x,
+                        y + TITLE_BAR_HEIGHT,
                         s,
                     );
                 } else {
                     bitmap_draw_string_no_bg(
                         self.sheet.bitmap(),
                         color,
-                        x0 + x,
-                        y0 + y + TITLE_BAR_HEIGHT,
+                        x,
+                        y + TITLE_BAR_HEIGHT,
                         s,
                     );
                 }
@@ -274,13 +266,7 @@ impl Window {
                     s,
                 )?;
                 */
-                bitmap_draw_string_no_bg(
-                    self.sheet.bitmap(),
-                    color,
-                    x0 + x,
-                    y0 + y + TITLE_BAR_HEIGHT,
-                    s,
-                );
+                bitmap_draw_string_no_bg(self.sheet.bitmap(), color, x, y + TITLE_BAR_HEIGHT, s);
             }
             StringSize::XLarge => {
                 // TODO: support underline
@@ -292,13 +278,7 @@ impl Window {
                     s,
                 )?;
                 */
-                bitmap_draw_string_no_bg(
-                    self.sheet.bitmap(),
-                    color,
-                    x0 + x,
-                    y0 + y + TITLE_BAR_HEIGHT,
-                    s,
-                );
+                bitmap_draw_string_no_bg(self.sheet.bitmap(), color, x, y + TITLE_BAR_HEIGHT, s);
             }
         }
         Ok(())
@@ -310,14 +290,7 @@ impl Window {
             return Err(Error::Failed("draw_point: out of range"));
         }
 
-        let x0 = self.sheet.x();
-        let y0 = self.sheet.y();
-        bitmap_draw_point(
-            self.sheet.bitmap(),
-            color,
-            x0 + x,
-            y0 + y + TITLE_BAR_HEIGHT,
-        );
+        bitmap_draw_point(self.sheet.bitmap(), color, x, y + TITLE_BAR_HEIGHT);
         Ok(())
     }
 }
