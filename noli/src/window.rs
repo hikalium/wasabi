@@ -172,7 +172,10 @@ impl Window {
 
     // TODO: implement these APIs
     pub fn move_position(&self) {}
-    pub fn flush(&self) {}
+
+    pub fn flush(&self) {
+        self.sheet.flush();
+    }
 
     pub fn fill_rect(
         &mut self,
