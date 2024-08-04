@@ -4,6 +4,7 @@ use crate::error::Result;
 use crate::memory::ContiguousPhysicalMemoryPages;
 use crate::mutex::Mutex;
 use crate::println;
+use crate::x86_64::context::switch_context;
 use crate::x86_64::context::ExecutionContext;
 use crate::x86_64::paging::PageAttr;
 use alloc::collections::VecDeque;
@@ -14,7 +15,7 @@ pub static CURRENT_PROCESS: Mutex<Option<ProcessContext>> = Mutex::new(None, "CU
 pub struct ProcessContext {
     args_region: Option<ContiguousPhysicalMemoryPages>,
     stack_region: ContiguousPhysicalMemoryPages,
-    context: ExecutionContext,
+    context: Mutex<ExecutionContext>,
 }
 impl ProcessContext {
     pub fn new(stack_size: usize, args: Option<&[&str]>) -> Result<Self> {
@@ -33,11 +34,14 @@ impl ProcessContext {
         Ok(Self {
             args_region,
             stack_region: ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?,
-            context: ExecutionContext::default(),
+            context: Mutex::new(ExecutionContext::default(), "ProcessContext::context"),
         })
     }
-    pub fn stack(&mut self) -> &mut ContiguousPhysicalMemoryPages {
+    pub fn stack_mut(&mut self) -> &mut ContiguousPhysicalMemoryPages {
         &mut self.stack_region
+    }
+    pub fn context(&mut self) -> &Mutex<ExecutionContext> {
+        &mut self.context
     }
     pub fn args_region_start_addr(&self) -> Option<usize> {
         self.args_region.as_ref().map(|ar| ar.range().start())
@@ -49,7 +53,7 @@ pub struct Scheduler {
     queue: Mutex<VecDeque<ProcessContext>>,
 }
 impl Scheduler {
-    const fn default() -> Self {
+    pub const fn default() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new(), "Scheduler::wait_queue"),
         }
@@ -66,10 +70,14 @@ impl Scheduler {
             // No process to switch
             return;
         }
-        let from = queue.pop_back();
+        let mut from = queue
+            .pop_front()
+            .expect("queue should have a process to switch from");
         let to = queue
             .get_mut(0)
             .expect("queue should have a process to swith to");
+        unsafe { switch_context(from.context(), to.context()) }
+        queue.push_back(from);
     }
 }
 
@@ -88,22 +96,20 @@ mod test {
     }
     #[test_case]
     fn switch_process_works() {
-        unimplemented!()
-        /*
-        let mut another_stack = [0u64; 4096];
+        let mut proc = ProcessContext::new(4096, None).expect("proc creation should succeed");
         let another_func_addr = another_proc_func as *const unsafe extern "sysv64" fn() as u64;
-        let rip_to_ret_on_another_stack = another_stack.last_mut().unwrap();
-        *rip_to_ret_on_another_stack = another_func_addr;
-        CONTEXT_TEST.lock().cpu.rsp = rip_to_ret_on_another_stack as *mut u64 as u64;
-        unsafe {
-            *ANOTHER_FUNC_COUNT.lock() = 1;
-            fork_context(&CONTEXT_MAIN, &CONTEXT_TEST);
-            assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 6);
-            switch_context(&CONTEXT_MAIN, &CONTEXT_TEST);
-            assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 90);
-            switch_context(&CONTEXT_MAIN, &CONTEXT_TEST);
-            assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 1350);
-        }
-            */
+        let stack_slice = proc.stack_mut().as_mut_slice();
+        let stack_slice_len = stack_slice.len();
+        stack_slice[(stack_slice_len - 8)..].copy_from_slice(&another_func_addr.to_le_bytes());
+        let rsp = proc.stack_mut().range().end() - 8;
+        proc.context().lock().cpu.rsp = rsp as u64;
+
+        *ANOTHER_FUNC_COUNT.lock() = 1;
+        TEST_SCHEDULER.switch_process();
+        assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 6);
+        TEST_SCHEDULER.switch_process();
+        assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 90);
+        TEST_SCHEDULER.switch_process();
+        assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 1350);
     }
 }

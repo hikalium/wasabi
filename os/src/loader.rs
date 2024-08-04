@@ -45,7 +45,7 @@ impl<'a> LoadedElf<'a> {
         let stack_size = 1024 * 1024;
         let mut proc = ProcessContext::new(stack_size, Some(args))?;
 
-        let stack = proc.stack();
+        let stack = proc.stack_mut();
         let stack_range = stack.range();
         stack.fill_with_bytes(0);
         stack.set_page_attr(PageAttr::ReadWriteUser)?;
