@@ -83,7 +83,7 @@ fn sys_get_mouse_cursor_position(args: &[u64; 5]) -> u64 {
 
 fn sys_get_args_region(_args: &[u64; 5]) -> u64 {
     if let Some(proc) = CURRENT_PROCESS.lock().as_ref() {
-        proc.args_region_start_addr() as u64
+        proc.args_region_start_addr().unwrap_or_default() as u64
     } else {
         0
     }

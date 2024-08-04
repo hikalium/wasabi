@@ -42,10 +42,10 @@ impl<'a> LoadedElf<'a> {
         Err(Error::Failed("vaddr not found"))
     }
     pub async fn exec(self, args: &[&str]) -> Result<i64> {
-        let proc_context = ProcessContext::new(args)?;
-
         let stack_size = 1024 * 1024;
-        let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(stack_size)?;
+        let mut proc = ProcessContext::new(stack_size, Some(args))?;
+
+        let stack = proc.stack();
         let stack_range = stack.range();
         stack.fill_with_bytes(0);
         stack.set_page_attr(PageAttr::ReadWriteUser)?;
@@ -56,7 +56,7 @@ impl<'a> LoadedElf<'a> {
             app_ctx.cpu.rflags = 2;
             app_ctx.cpu.rsp = stack_range.end() as u64; // stack grows toward 0, so empty stack pointer will be the end addr
         }
-        exec_app_context(proc_context).await
+        exec_app_context(proc).await
     }
     pub fn slice_of_vaddr_range(&self, range_on_vaddr: AddressRange) -> Result<&[u8]> {
         let range = range_on_vaddr.to_range_in(&self.app_vaddr_range)?;

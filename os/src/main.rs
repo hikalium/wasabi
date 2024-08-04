@@ -116,8 +116,9 @@ fn run_tasks() -> Result<()> {
     }
     init::init_pci();
     // Start executing tasks
-    Executor::run(&ROOT_EXECUTOR);
-    Ok(())
+    loop {
+        Executor::poll(&ROOT_EXECUTOR);
+    }
 }
 
 fn main() -> Result<()> {
