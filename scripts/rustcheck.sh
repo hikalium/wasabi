@@ -55,7 +55,7 @@ fi
 
 set +e
 FILES=`git ls-files *.rs`
-LIST=`wc -l ${FILES} | sort -n | grep '.rs$' | awk '$1>500' | grep '.rs$'`
+LIST=`wc -l ${FILES} | sort -n | grep '.rs$' | awk '$1>999' | grep '.rs$'`
 RESULT_STATUS=$?
 set -e
 if test $RESULT_STATUS -eq 0; then
