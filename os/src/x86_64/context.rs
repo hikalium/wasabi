@@ -86,107 +86,76 @@ impl CpuContext {
 }
 const _: () = assert!(size_of::<CpuContext>() == 8 * 16 + 8 * 2);
 
+global_asm!(
+    ".global asm_switch_context",
+    "asm_switch_context:",
+    // Save the current execution state to `from` (rsi).
+    "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop.
+    "push rsi",     // ExecutionContext.rsp
+    "push r15",
+    "push r14",
+    "push r13",
+    "push r12",
+    "push r11",
+    "push r10",
+    "push r9",
+    "push r8",
+    "push rdi",
+    "push rsi",
+    "push rbp",
+    "push rbx",
+    "push rdx",
+    "push rcx",
+    "push rax",
+    "pushfq",                            // ExecutionContext.rflags
+    "lea r8, [rip+asm_restore_context]", // Use r8 as tmp
+    "push r8",                           // ExecutionContext.rip = asm_restore_context
+    "sub rsp, 512",
+    "fxsave64[rsp]",
+    "xchg rsp,rsi", // recover the original rsp
+    // At this point, the current CPU state is saved to `from`.
+    "xchg rsp, r9", // swap rsp and rdi to utilize push / pop
+    "asm_restore_context:",
+    // Load the `to` state onto CPU
+    "fxrstor64[rsp]",
+    "add rsp, 512",
+    "pop rax", // Skip RIP
+    "popfq",   // Restore RFLAGS
+    "pop rax",
+    "pop rcx",
+    "pop rdx",
+    "pop rbx",
+    "pop rbp",
+    "pop rsi",
+    "pop rdi",
+    "pop r8",
+    "pop r9",
+    "pop r10",
+    "pop r11",
+    "pop r12",
+    "pop r13",
+    "pop r14",
+    "pop r15",
+    "pop rsp",
+    "ret",
+);
+
 /// # Safety
 /// `to` should be a valid ExecutionContext, and both contexts should not be locked yet.
-pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
-    let (from, to) = { (from.lock().as_mut_ptr(), to.lock().as_mut_ptr()) };
+pub unsafe fn unchecked_switch_context(from: *mut ExecutionContext, to: *mut ExecutionContext) {
     asm!(
         // Save the current execution state to `from` (rsi).
-        "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop.
-        "push rsi", // ExecutionContext.rsp
-        "push r15",
-        "push r14",
-        "push r13",
-        "push r12",
-        "push r11",
-        "push r10",
-        "push r9",
-        "push r8",
-        "push rdi",
-        "push rsi",
-        "push rbp",
-        "push rbx",
-        "push rdx",
-        "push rcx",
-        "push rax",
-        "pushfq", // ExecutionContext.rflags
-        "lea r8, [rip+0f]", // Label 0 forward: state restore logic below
-        "push r8", // ExecutionContext.rip = state restore logic below
-        "sub rsp, 512",
-        "fxsave64[rsp]",
-        "xchg rsp,rsi", // recover the original rsp
-        // At this point, the current CPU state is saved to `from`.
-
-        // Load the `to` state onto CPU
-        "mov rsp, r9", // swap rsp and rdi to utilize push / pop
-        "fxrstor64[rsp]",
-        "add rsp, 512",
-        "pop rax", // Skip RIP
-        "popfq", // Restore RFLAGS
-        "pop rax",
-        "pop rcx",
-        "pop rdx",
-        "pop rbx",
-        "pop rbp",
-        "pop rsi",
-        "pop rdi",
-        "pop r8",
-        "pop r9",
-        "pop r10",
-        "pop r11",
-        "pop r12",
-        "pop r13",
-        "pop r14",
-        "pop r15",
-        "pop rsp",
-        "0:",
-        in("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()),
-        in("r9") (to as *mut u8),
+        "call asm_switch_context",
+        inout("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()) => _,
+        inout("r9") (to as *mut u8) => _,
     );
 }
 
 /// # Safety
 /// `to` should be a valid ExecutionContext, and both contexts should not be locked yet.
-pub unsafe fn fork_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
-    let (from, to) = { (from.lock().as_mut_ptr(), to.lock().as_mut_ptr()) };
-    asm!(
-        // Save the current execution state to `from` (rsi).
-        "xchg rsp,rsi", // swap rsi with rsp to utilize push/pop.
-        "push rsi", // ExecutionContext.rsp
-        "push r15",
-        "push r14",
-        "push r13",
-        "push r12",
-        "push r11",
-        "push r10",
-        "push r9",
-        "push r8",
-        "push rdi",
-        "push rsi",
-        "push rbp",
-        "push rbx",
-        "push rdx",
-        "push rcx",
-        "push rax",
-        "pushfq", // ExecutionContext.rflags
-        "lea r8, [rip+0f]", // Label 0 forward: state restore logic below
-        "push r8", // ExecutionContext.rip = state restore logic below
-        "sub rsp, 512",
-        "fxsave64[rsp]",
-        "xchg rsp,rsi", // recover the original rsp
-        // At this point, the current CPU state is saved to `from`.
-
-        // Load the `to` state onto CPU
-        "mov rsp, r9", // swap rsp and rdi to utilize push / pop
-        //"fxrstor64[rsp]", // Skip restoring FPU Context
-        "add rsp, 512",
-        "add rsp, 8*17", // Skip 17 registers (RIP+RFLAGS+GPReg(except RSP) = 1 + 1 + 16-1 = 17)
-        "pop rsp",
-        "0:",
-        "ret",
-        in("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()) as u64,
-        in("r9") (to as u64),
-    );
+pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
+    let (to, from) = (to.lock().as_mut_ptr(), from.lock().as_mut_ptr());
+    unchecked_switch_context(from, to)
 }
 
 #[cfg(test)]
@@ -214,9 +183,10 @@ mod test {
         let rip_to_ret_on_another_stack = another_stack.last_mut().unwrap();
         *rip_to_ret_on_another_stack = another_func_addr;
         CONTEXT_TEST.lock().cpu.rsp = rip_to_ret_on_another_stack as *mut u64 as u64;
+        CONTEXT_TEST.lock().cpu.rflags = 6 as *mut u64 as u64;
         unsafe {
             *ANOTHER_FUNC_COUNT.lock() = 1;
-            fork_context(&CONTEXT_MAIN, &CONTEXT_TEST);
+            switch_context(&CONTEXT_MAIN, &CONTEXT_TEST);
             assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 6);
             switch_context(&CONTEXT_MAIN, &CONTEXT_TEST);
             assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 90);
