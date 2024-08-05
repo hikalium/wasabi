@@ -4,7 +4,6 @@ use crate::efi::types::EfiStatus;
 use alloc::string::String;
 use core::num::TryFromIntError;
 use noli::error::Error as NoliError;
-use noli::graphics::GraphicsError;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Error {
@@ -12,7 +11,7 @@ pub enum Error {
     Failed(&'static str),
     FailedString(String),
     FileNameTooLong,
-    GraphicsError(GraphicsError),
+    GraphicsError,
     PciBusDeviceFunctionOutOfRange,
     ReadFileSizeMismatch { expected: usize, actual: usize },
     ApicRegIndexOutOfRange,
@@ -23,11 +22,6 @@ pub enum Error {
     TryFromIntError,
     LockFailed,
     NoliError(NoliError),
-}
-impl From<GraphicsError> for Error {
-    fn from(e: GraphicsError) -> Self {
-        Error::GraphicsError(e)
-    }
 }
 impl From<EfiStatus> for Error {
     fn from(e: EfiStatus) -> Self {
@@ -51,6 +45,9 @@ impl From<TryFromIntError> for Error {
 }
 impl From<NoliError> for Error {
     fn from(e: NoliError) -> Self {
+        if e == NoliError::GraphicsOutOfRange {
+            return Error::GraphicsError;
+        }
         Error::NoliError(e)
     }
 }

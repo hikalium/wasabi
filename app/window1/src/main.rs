@@ -11,10 +11,11 @@ use noli::window;
 fn main() {
     println!("window 1");
 
-    window::Window::new("first window!".to_string(), 0xffffff, 30, 30, 200, 100).unwrap();
-    let window2 =
+    let window1 =
+        window::Window::new("first window!".to_string(), 0xffffff, 30, 30, 200, 100).unwrap();
+    let mut window2 =
         window::Window::new("second window!!".to_string(), 0xff00ff, 60, 100, 200, 100).unwrap();
-    let window3 =
+    let mut window3 =
         window::Window::new("third window!!".to_string(), 0x0000ff, 90, 170, 200, 100).unwrap();
 
     window2.fill_rect(0xff0000, 0, 0, 50, 50).unwrap();
@@ -29,9 +30,24 @@ fn main() {
         )
         .unwrap();
 
+    window3
+        .draw_string(
+            0x000000,
+            5,
+            10,
+            "test",
+            window::StringSize::XLarge,
+            /*underline*/ false,
+        )
+        .unwrap();
     assert!(window3.fill_rect(0xff0000, 50, 50, 50, 26).is_ok());
     // try to fill a bigger rect than the size of the window.
     assert!(window3.fill_rect(0xff0000, 100, 50, 50, 27).is_err());
+
+    window1.flush();
+    window2.flush();
+    window3.flush();
+    window1.flush();
 }
 
 entry_point!(main);

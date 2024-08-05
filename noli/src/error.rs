@@ -9,7 +9,9 @@ pub trait ErrorTrait: Debug {}
 pub enum Error {
     Failed(&'static str),
     FailedString(String),
+    GraphicsOutOfRange,
 }
+
 impl ErrorTrait for Error {}
 pub type Result<T> = core::result::Result<T, Error>;
 

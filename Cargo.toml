@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "app/sheet",
     "app/dig",
     "app/hello0",
     "app/hello1",
@@ -11,6 +12,7 @@ members = [
     "app/uname",
     "app/window0",
     "app/window1",
+    "app/window2",
     "dbgutil",
     "e2etest",
     "font",
