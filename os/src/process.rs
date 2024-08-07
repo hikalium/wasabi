@@ -49,6 +49,19 @@ impl ProcessContext {
             context: Mutex::new(ExecutionContext::default(), "ProcessContext::context"),
         })
     }
+    pub fn new_with_fn(f: *const unsafe extern "sysv64" fn()) -> Result<ProcessContext> {
+        let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(4096)?;
+        let f = f as *const unsafe extern "sysv64" fn() as u64;
+        let stack_slice = stack.as_mut_slice();
+        let stack_slice_len = stack_slice.len();
+        stack_slice[(stack_slice_len - 8)..].copy_from_slice(&f.to_le_bytes());
+        let rsp = stack.range().end() - 8;
+        let mut proc = ProcessContext::new(Some(stack), None)?;
+
+        proc.context().lock().cpu.rsp = rsp as u64;
+        proc.context().lock().cpu.rflags = 2;
+        Ok(proc)
+    }
     pub fn stack_mut(&mut self) -> Option<&mut ContiguousPhysicalMemoryPages> {
         self.stack_region.as_mut()
     }
@@ -126,18 +139,9 @@ mod test {
     }
     #[test_case]
     fn switch_process_works() {
-        let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(4096)
-            .expect("Memory page allocation should succeed");
-        let another_func_addr = another_proc_func as *const unsafe extern "sysv64" fn() as u64;
-        let stack_slice = stack.as_mut_slice();
-        let stack_slice_len = stack_slice.len();
-        stack_slice[(stack_slice_len - 8)..].copy_from_slice(&another_func_addr.to_le_bytes());
-        let rsp = stack.range().end() - 8;
-        let mut proc =
-            ProcessContext::new(Some(stack), None).expect("proc creation should succeed");
-
-        proc.context().lock().cpu.rsp = rsp as u64;
-        proc.context().lock().cpu.rflags = 2;
+        let proc =
+            ProcessContext::new_with_fn(another_proc_func as *const unsafe extern "sysv64" fn())
+                .expect("Proc creation should succeed");
         TEST_SCHEDULER.clear_queue();
         TEST_SCHEDULER.schedule(ProcessContext::default()); // context for current
         TEST_SCHEDULER.schedule(proc);
@@ -150,4 +154,6 @@ mod test {
         TEST_SCHEDULER.switch_process();
         assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 1350);
     }
+    #[test_case]
+    fn await_process_exit() {}
 }
