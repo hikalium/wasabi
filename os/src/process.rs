@@ -9,6 +9,10 @@ use crate::x86_64::context::unchecked_switch_context;
 use crate::x86_64::context::ExecutionContext;
 use crate::x86_64::paging::PageAttr;
 use alloc::collections::VecDeque;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::Context;
+use core::task::Poll;
 use noli::args::serialize_args;
 
 static ROOT_SCHEDULER: Scheduler = Scheduler::new();
@@ -155,6 +159,26 @@ impl Scheduler {
         crate::info!("switch_process!");
         // The lock for `queue` should be dropped at this point
         unsafe { unchecked_switch_context(from, to) }
+    }
+}
+
+pub struct ProcessCompletionFuture {
+    time_out: u64,
+}
+impl ProcessCompletionFuture {
+    pub fn new(target: &ProcessContext) -> Self {
+        Self { time_out }
+    }
+}
+impl Future for ProcessCompletionFuture {
+    type Output = ();
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<()> {
+        let time_out = self.time_out;
+        if time_out < Hpet::take().main_counter() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
     }
 }
 

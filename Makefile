@@ -288,3 +288,6 @@ generated/bin/os.efi:
 generated/noVNC-% :
 	wget -O generated/novnc.tar.gz https://github.com/novnc/noVNC/archive/refs/tags/v$*.tar.gz
 	cd generated && tar -xvf novnc.tar.gz
+
+list_structs:
+	git grep -o 'struct [A-Z][A-Za-z0-9]* ' | sed -e 's#/src/#::#' -e 's#main\.rs:##' -e 's#lib\.rs:##' -e 's#struct ##' -e 's/\.rs:/::/' -e 's#/#::#' | sort -u
