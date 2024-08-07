@@ -8,11 +8,21 @@
 
 extern crate alloc;
 
+use alloc::string::String;
 use core::pin::Pin;
+use core::str::FromStr;
 use noli::bitmap::bitmap_draw_line;
+use noli::bitmap::bitmap_draw_point;
+use noli::bitmap::bitmap_draw_rect;
 use noli::bitmap::Bitmap;
+use noli::bitmap::BitmapBuffer;
 use os::boot_info::BootInfo;
+use os::boot_info::File;
+use os::cmd;
+use os::efi::fs::EfiFileName;
 use os::efi::types::EfiHandle;
+use os::error;
+use os::error::Error;
 use os::error::Result;
 use os::executor::spawn_global;
 use os::executor::yield_execution;
@@ -21,12 +31,15 @@ use os::executor::TimeoutFuture;
 use os::executor::ROOT_EXECUTOR;
 use os::info;
 use os::init;
-use os::input::enqueue_input_tasks;
+use os::input::InputManager;
+use os::print;
 use os::println;
+use os::serial::SerialPort;
 use os::x86_64;
 use os::x86_64::paging::write_cr3;
 use os::x86_64::read_rsp;
 use os::x86_64::syscall::init_syscall;
+use sabi::MouseEvent;
 
 fn paint_wasabi_logo() {
     const SIZE: i64 = 256;
@@ -66,54 +79,149 @@ fn paint_wasabi_logo() {
     }
 }
 
-fn run_tasks() -> Result<()> {
-    let task0 = async {
-        let mut vram = BootInfo::take().vram();
-        let h = 10;
-        let colors = [0xFF0000, 0x00FF00, 0x0000FF];
-        let y = vram.height() / 16 * 14;
-        let xbegin = vram.width() / 2;
-        let mut x = xbegin;
-        let mut c = 0;
-        loop {
-            bitmap_draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
-            x += 1;
-            if x >= vram.width() {
-                x = xbegin;
-                c += 1;
-            }
-            TimeoutFuture::new_ms(10).await;
-            yield_execution().await;
+async fn draw_progress_bar(
+    top: i64,
+    left: i64,
+    width: i64,
+    height: i64,
+    interval_ms: u64,
+) -> Result<()> {
+    let mut vram = BootInfo::take().vram();
+    let colors = [0xFF0000, 0x00FF00, 0x0000FF];
+    let y = top;
+    let mut x = left;
+    let mut c = 0;
+    loop {
+        let _ = bitmap_draw_line(&mut vram, colors[c % 3], x, y, x, y + height);
+        x += 1;
+        if x >= left + width {
+            x = left;
+            c += 1;
         }
-    };
-    let task1 = async {
-        let mut vram = BootInfo::take().vram();
-        let h = 10;
-        let colors = [0xFF0000, 0x00FF00, 0x0000FF];
-        let y = vram.height() / 16 * 15;
-        let xbegin = vram.width() / 2;
-        let mut x = xbegin;
-        let mut c = 0;
+        TimeoutFuture::new_ms(interval_ms).await;
+        yield_execution().await;
+    }
+}
+
+fn run_tasks() -> Result<()> {
+    let vram = BootInfo::take().vram();
+    let task0 = draw_progress_bar(
+        vram.height() / 16 * 14,
+        vram.width() / 2,
+        vram.width() / 2,
+        10,
+        10,
+    );
+    let task1 = draw_progress_bar(
+        vram.height() / 16 * 15,
+        vram.width() / 2,
+        vram.width() / 2,
+        10,
+        1,
+    );
+    let serial_task = async {
+        let sp = SerialPort::default();
         loop {
-            bitmap_draw_line(&mut vram, colors[c % 3], x, y, x, y + h)?;
-            x += 1;
-            if x >= vram.width() {
-                x = xbegin;
-                c += 1;
+            if let Some(c) = sp.try_read() {
+                if let Some(c) = char::from_u32(c as u32) {
+                    let c = if c == '\r' { '\n' } else { c };
+                    InputManager::take().push_input(c);
+                }
             }
             TimeoutFuture::new_ms(20).await;
             yield_execution().await;
         }
     };
-    // Enqueue tasks
-    {
-        {
-            let mut executor = ROOT_EXECUTOR.lock();
-            enqueue_input_tasks(&mut executor);
+    let init_task = async {
+        info!("running init");
+        let boot_info = BootInfo::take();
+        let root_files = boot_info.root_files();
+        let root_files: alloc::vec::Vec<&File> =
+            root_files.iter().filter_map(|e| e.as_ref()).collect();
+        let init_txt = EfiFileName::from_str("init.txt")?;
+        let init_txt = root_files
+            .iter()
+            .find(|&e| e.name() == &init_txt)
+            .ok_or(Error::Failed("init.txt not found"))?;
+        let init_txt = String::from_utf8_lossy(init_txt.data());
+        for line in init_txt.trim().split('\n') {
+            if let Err(e) = cmd::run(line).await {
+                error!("{e:?}");
+            };
         }
-        spawn_global(task0);
-        spawn_global(task1);
-    }
+        Ok(())
+    };
+    let console_task = async {
+        info!("console_task has started");
+        let mut s = String::new();
+        loop {
+            if let Some(c) = InputManager::take().pop_input() {
+                if c == '\r' || c == '\n' {
+                    if let Err(e) = cmd::run(&s).await {
+                        error!("{e:?}");
+                    };
+                    s.clear();
+                }
+                match c {
+                    '\x7f' | '\x08' => {
+                        print!("{0} {0}", 0x08 as char);
+                        s.pop();
+                    }
+                    '\n' => {
+                        // Do nothing
+                    }
+                    _ => {
+                        print!("{c}");
+                        s.push(c);
+                    }
+                }
+            }
+            TimeoutFuture::new_ms(20).await;
+            yield_execution().await;
+        }
+    };
+    let mouse_cursor_task = async {
+        const CURSOR_SIZE: i64 = 16;
+        let mut cursor_bitmap = BitmapBuffer::new(CURSOR_SIZE, CURSOR_SIZE, CURSOR_SIZE);
+        for y in 0..CURSOR_SIZE {
+            for x in 0..(CURSOR_SIZE - y) {
+                if x <= y {
+                    bitmap_draw_point(&mut cursor_bitmap, 0x00ff00, x, y)
+                        .expect("Failed to paint cursor");
+                }
+            }
+        }
+        let mut vram = BootInfo::take().vram();
+
+        noli::bitmap::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)
+            .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
+
+        loop {
+            if let Some(MouseEvent {
+                position: p,
+                button: b,
+            }) = InputManager::take().pop_cursor_input_absolute()
+            {
+                let color = (b.l() as u32) * 0xff0000;
+                let color = !color;
+
+                bitmap_draw_rect(&mut vram, color, p.x, p.y, 1, 1)?;
+                /*
+                crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, p.x, p.y)
+                    .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
+                */
+            }
+            TimeoutFuture::new_ms(15).await;
+            yield_execution().await;
+        }
+    };
+    // Enqueue tasks
+    spawn_global(task0);
+    spawn_global(task1);
+    spawn_global(serial_task);
+    spawn_global(console_task);
+    spawn_global(mouse_cursor_task);
+    spawn_global(init_task);
     init::init_pci();
     // Start executing tasks
     loop {
