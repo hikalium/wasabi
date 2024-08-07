@@ -130,6 +130,7 @@ fn main() -> Result<()> {
     core::mem::forget(interrupt_config);
     init::init_paging()?;
     init::init_timer();
+    os::process::init();
     init_syscall();
 
     // Note: This log message is used by the e2etest to check if the OS is booted

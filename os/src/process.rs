@@ -11,7 +11,13 @@ use crate::x86_64::paging::PageAttr;
 use alloc::collections::VecDeque;
 use noli::args::serialize_args;
 
+static ROOT_SCHEDULER: Scheduler = Scheduler::new();
 pub static CURRENT_PROCESS: Mutex<Option<ProcessContext>> = Mutex::new(None, "CURRENT_PROCESS");
+
+pub fn init() {
+    ROOT_SCHEDULER.clear_queue();
+    ROOT_SCHEDULER.schedule(ProcessContext::default()); // context for current
+}
 
 pub struct ProcessContext {
     args_region: Option<ContiguousPhysicalMemoryPages>,
@@ -79,6 +85,9 @@ pub struct Scheduler {
     queue: Mutex<VecDeque<ProcessContext>>,
 }
 impl Scheduler {
+    pub fn root() -> &'static Self {
+        &ROOT_SCHEDULER
+    }
     pub const fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new(), "Scheduler::wait_queue"),
