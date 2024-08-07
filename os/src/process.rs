@@ -4,6 +4,7 @@ use crate::error::Result;
 use crate::memory::ContiguousPhysicalMemoryPages;
 use crate::mutex::Mutex;
 use crate::println;
+use crate::x86_64::context::unchecked_load_context;
 use crate::x86_64::context::unchecked_switch_context;
 use crate::x86_64::context::ExecutionContext;
 use crate::x86_64::paging::PageAttr;
@@ -51,7 +52,7 @@ impl ProcessContext {
     }
     pub fn new_with_fn(f: *const unsafe extern "sysv64" fn()) -> Result<ProcessContext> {
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(4096)?;
-        let f = f as *const unsafe extern "sysv64" fn() as u64;
+        let f = f as u64;
         let stack_slice = stack.as_mut_slice();
         let stack_slice_len = stack_slice.len();
         stack_slice[(stack_slice_len - 8)..].copy_from_slice(&f.to_le_bytes());
@@ -88,6 +89,31 @@ impl Scheduler {
     }
     pub fn clear_queue(&self) {
         self.queue.lock().clear();
+    }
+    pub fn exit_current_process(&self) -> ! {
+        let (from, to) = {
+            let mut queue = self.queue.lock();
+            if queue.len() <= 1 {
+                // No process to switch
+                panic!("No more process to schedule!");
+            }
+            let from = queue
+                .pop_front()
+                .expect("queue should have a process to exit");
+            let to = unsafe {
+                queue
+                    .front_mut()
+                    .expect("queue should have a process to swith to")
+                    .context()
+                    .lock()
+                    .as_mut_ptr()
+            };
+            (from, to)
+        };
+        #[allow(clippy::drop_non_drop)]
+        core::mem::drop(from);
+        unsafe { unchecked_load_context(to) };
+        unreachable!("Nothing should come back here");
     }
     pub fn switch_process(&self) {
         let (from, to) = {
@@ -154,6 +180,33 @@ mod test {
         TEST_SCHEDULER.switch_process();
         assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 1350);
     }
+    fn proc_func_exit_after_two() {
+        crate::info!("proc_func_exit_after_two entry");
+        *ANOTHER_FUNC_COUNT.lock() *= 2;
+        for _ in 0..2 {
+            *ANOTHER_FUNC_COUNT.lock() *= 3;
+            TEST_SCHEDULER.switch_process();
+            *ANOTHER_FUNC_COUNT.lock() *= 5;
+        }
+        crate::info!("proc_func_exit_after_two loop exit");
+        TEST_SCHEDULER.exit_current_process()
+    }
     #[test_case]
-    fn await_process_exit() {}
+    fn await_process_exit() {
+        let proc = ProcessContext::new_with_fn(
+            proc_func_exit_after_two as *const unsafe extern "sysv64" fn(),
+        )
+        .expect("Proc creation should succeed");
+        TEST_SCHEDULER.clear_queue();
+        TEST_SCHEDULER.schedule(ProcessContext::default()); // context for current
+        TEST_SCHEDULER.schedule(proc);
+
+        *ANOTHER_FUNC_COUNT.lock() = 1;
+        TEST_SCHEDULER.switch_process();
+        assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 6);
+        TEST_SCHEDULER.switch_process();
+        assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 90);
+        TEST_SCHEDULER.switch_process();
+        assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 450);
+    }
 }

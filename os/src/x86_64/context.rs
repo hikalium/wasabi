@@ -114,8 +114,9 @@ global_asm!(
     "fxsave64[rsp]",
     "xchg rsp,rsi", // recover the original rsp
     // At this point, the current CPU state is saved to `from`.
-    "xchg rsp, r9", // swap rsp and rdi to utilize push / pop
+    ".global asm_restore_context",
     "asm_restore_context:",
+    "xchg rsp, r9", // swap rsp and rdi to utilize push / pop
     // Load the `to` state onto CPU
     "fxrstor64[rsp]",
     "add rsp, 512",
@@ -141,12 +142,20 @@ global_asm!(
 );
 
 /// # Safety
-/// `to` should be a valid ExecutionContext, and both contexts should not be locked yet.
+/// `to` should be a valid ExecutionContext, and both contexts should not be locked on the call.
 pub unsafe fn unchecked_switch_context(from: *mut ExecutionContext, to: *mut ExecutionContext) {
     asm!(
-        // Save the current execution state to `from` (rsi).
         "call asm_switch_context",
         inout("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()) => _,
+        inout("r9") (to as *mut u8) => _,
+    );
+}
+
+/// # Safety
+/// `to` should be a valid ExecutionContext, and both contexts should not be locked on the call.
+pub unsafe fn unchecked_load_context(to: *mut ExecutionContext) {
+    asm!(
+        "call asm_restore_context",
         inout("r9") (to as *mut u8) => _,
     );
 }
