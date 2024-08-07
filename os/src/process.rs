@@ -73,6 +73,9 @@ impl Scheduler {
     pub fn schedule(&self, proc: ProcessContext) {
         self.queue.lock().push_back(proc);
     }
+    pub fn clear_queue(&self) {
+        self.queue.lock().clear();
+    }
     pub fn switch_process(&self) {
         let (from, to) = {
             // To make sure the lock is unlocked before the
@@ -135,6 +138,7 @@ mod test {
 
         proc.context().lock().cpu.rsp = rsp as u64;
         proc.context().lock().cpu.rflags = 2;
+        TEST_SCHEDULER.clear_queue();
         TEST_SCHEDULER.schedule(ProcessContext::default()); // context for current
         TEST_SCHEDULER.schedule(proc);
 
