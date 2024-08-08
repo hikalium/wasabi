@@ -4,6 +4,8 @@ use crate::x86_64;
 /// This function prints the addr of itself for debug purpose.
 #[no_mangle]
 pub fn print_kernel_debug_metadata() {
+    // Note: This log message is used by the e2etest and dbgutil
+    // so please do not edit if you are unsure!
     info!(
         "DEBUG_METADATA: print_kernel_debug_metadata = {:#018p}",
         print_kernel_debug_metadata as *const ()

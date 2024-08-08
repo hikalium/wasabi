@@ -19,6 +19,7 @@ use noli::bitmap::BitmapBuffer;
 use os::boot_info::BootInfo;
 use os::boot_info::File;
 use os::cmd;
+use os::debug;
 use os::efi::fs::EfiFileName;
 use os::efi::types::EfiHandle;
 use os::error;
@@ -36,7 +37,6 @@ use os::print;
 use os::println;
 use os::serial::SerialPort;
 use os::x86_64;
-use os::x86_64::paging::write_cr3;
 use os::x86_64::read_rsp;
 use os::x86_64::syscall::init_syscall;
 use sabi::MouseEvent;
@@ -241,6 +241,10 @@ fn main() -> Result<()> {
     os::process::init();
     init_syscall();
 
+    // Note: This log message is used by the e2etest and dbgutil
+    // so please do not edit if you are unsure!
+    info!("Welcome to WasabiOS!");
+
     run_tasks()?;
     Ok(())
 }
@@ -248,14 +252,7 @@ fn main() -> Result<()> {
 #[no_mangle]
 fn stack_switched() -> ! {
     info!("rsp switched to: {:#018X}", read_rsp());
-
-    // Note: This log message is used by the e2etest and dbgutil
-    // so please do not edit if you are unsure!
-    info!(
-        "DEBUG_METADATA: efi_main = {:#018p}, write_cr3 = {:#018p}",
-        efi_main as *const (), write_cr3 as *const ()
-    );
-
+    debug::print_kernel_debug_metadata();
     // For normal boot
     #[cfg(not(test))]
     main().unwrap();
