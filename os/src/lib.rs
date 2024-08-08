@@ -30,7 +30,7 @@ mod ax88179;
 pub mod bitset;
 pub mod boot_info;
 pub mod cmd;
-pub mod debug_exit;
+pub mod debug;
 pub mod efi;
 pub mod elf;
 pub mod error;
@@ -68,5 +68,6 @@ fn efi_main(
     efi_system_table: core::pin::Pin<&'static efi::EfiSystemTable>,
 ) {
     crate::init::init_basic_runtime(image_handle, efi_system_table);
+    crate::debug::print_kernel_debug_metadata();
     test_main();
 }

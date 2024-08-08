@@ -1,4 +1,5 @@
-use crate::debug_exit;
+use crate::debug;
+use crate::info;
 use crate::serial;
 use core::any::type_name;
 use core::fmt::Write;
@@ -24,12 +25,10 @@ where
 }
 
 pub fn test_runner(tests: &[&dyn Testable]) -> ! {
-    let mut writer = SerialPort::new(SerialPortIndex::Com2);
-    writer.init();
-    writeln!(writer, "Running {} tests...", tests.len()).unwrap();
+    info!("Running {} tests...", tests.len());
     for test in tests {
         test.run();
     }
-    write!(writer, "Done!").unwrap();
-    debug_exit::exit_qemu(debug_exit::QemuExitCode::Success)
+    info!("Done!");
+    debug::exit_qemu(debug::QemuExitCode::Success)
 }

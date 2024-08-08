@@ -1,4 +1,12 @@
+use crate::info;
 use crate::x86_64;
+
+pub fn print_kernel_debug_metadata() {
+    info!(
+        "DEBUG_METADATA: print_kernel_debug_metadata = {:#018p}",
+        print_kernel_debug_metadata as *const ()
+    );
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]

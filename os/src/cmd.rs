@@ -2,7 +2,7 @@ extern crate alloc;
 
 use crate::boot_info::BootInfo;
 #[cfg(test)]
-use crate::debug_exit;
+use crate::debug;
 use crate::efi::fs::EfiFileName;
 use crate::error;
 use crate::error::Error;
@@ -33,9 +33,9 @@ async fn run_app(name: &str, args: &[&str]) -> Result<i64> {
         let result = app.exec(args).await?;
         #[cfg(test)]
         if result == 0 {
-            debug_exit::exit_qemu(debug_exit::QemuExitCode::Success);
+            debug::exit_qemu(debug::QemuExitCode::Success);
         } else {
-            debug_exit::exit_qemu(debug_exit::QemuExitCode::Fail);
+            debug::exit_qemu(debug::QemuExitCode::Fail);
         }
         #[cfg(not(test))]
         Ok(result)

@@ -49,6 +49,9 @@ endif
 ifeq ($(HEADLESS),1)
 QEMU_ARGS+= -display none
 endif
+ifeq ($(GDB),1)
+	QEMU_ARGS+= -gdb tcp::3333 -S
+endif
 
 # QEMU_ARGS+= -device usb-tablet
 #		-vnc 0.0.0.0:$(PORT_OFFSET_VNC),password=on \

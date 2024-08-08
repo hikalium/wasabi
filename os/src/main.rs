@@ -241,12 +241,6 @@ fn main() -> Result<()> {
     os::process::init();
     init_syscall();
 
-    // Note: This log message is used by the e2etest to check if the OS is booted
-    // so please be careful!
-    info!(
-        "Welcome to WasabiOS! efi_main = {:#018p}, write_cr3 = {:#018p}",
-        efi_main as *const (), write_cr3 as *const ()
-    );
     run_tasks()?;
     Ok(())
 }
@@ -254,6 +248,14 @@ fn main() -> Result<()> {
 #[no_mangle]
 fn stack_switched() -> ! {
     info!("rsp switched to: {:#018X}", read_rsp());
+
+    // Note: This log message is used by the e2etest and dbgutil
+    // so please do not edit if you are unsure!
+    info!(
+        "DEBUG_METADATA: efi_main = {:#018p}, write_cr3 = {:#018p}",
+        efi_main as *const (), write_cr3 as *const ()
+    );
+
     // For normal boot
     #[cfg(not(test))]
     main().unwrap();

@@ -9,8 +9,11 @@ use crate::x86_64::context::unchecked_switch_context;
 use crate::x86_64::context::ExecutionContext;
 use crate::x86_64::paging::PageAttr;
 use alloc::collections::VecDeque;
+use alloc::rc::Rc;
 use core::future::Future;
 use core::pin::Pin;
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 use core::task::Context;
 use core::task::Poll;
 use noli::args::serialize_args;
@@ -27,6 +30,7 @@ pub struct ProcessContext {
     args_region: Option<ContiguousPhysicalMemoryPages>,
     stack_region: Option<ContiguousPhysicalMemoryPages>,
     context: Mutex<ExecutionContext>,
+    exited: Rc<AtomicBool>,
 }
 impl Default for ProcessContext {
     fn default() -> Self {
@@ -34,6 +38,7 @@ impl Default for ProcessContext {
             args_region: None,
             stack_region: None,
             context: Mutex::new(ExecutionContext::default(), "ProcessContext::context"),
+            exited: Rc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -58,6 +63,7 @@ impl ProcessContext {
             args_region,
             stack_region,
             context: Mutex::new(ExecutionContext::default(), "ProcessContext::context"),
+            exited: Rc::new(AtomicBool::new(false)),
         })
     }
     pub fn new_with_fn(f: *const unsafe extern "sysv64" fn()) -> Result<ProcessContext> {
@@ -104,8 +110,10 @@ impl Scheduler {
         self.queue.lock().clear();
     }
     pub fn exit_current_process(&self) -> ! {
-        let (from, to) = {
+        let to = {
+            crate::info!("lock the queue");
             let mut queue = self.queue.lock();
+            crate::info!("queue lock held");
             if queue.len() <= 1 {
                 // No process to switch
                 panic!("No more process to schedule!");
@@ -113,6 +121,8 @@ impl Scheduler {
             let from = queue
                 .pop_front()
                 .expect("queue should have a process to exit");
+            from.exited.store(true, Ordering::SeqCst);
+            crate::info!("getting to");
             let to = unsafe {
                 queue
                     .front_mut()
@@ -121,10 +131,10 @@ impl Scheduler {
                     .lock()
                     .as_mut_ptr()
             };
-            (from, to)
+            crate::info!("got to");
+            to
         };
-        #[allow(clippy::drop_non_drop)]
-        core::mem::drop(from);
+        crate::info!("Loading next context");
         unsafe { unchecked_load_context(to) };
         unreachable!("Nothing should come back here");
     }
@@ -162,21 +172,25 @@ impl Scheduler {
     }
 }
 
-pub struct ProcessCompletionFuture {
-    time_out: u64,
+pub struct ProcessCompletionFuture<'a> {
+    exited: Rc<AtomicBool>,
+    scheduler: &'a Scheduler,
 }
-impl ProcessCompletionFuture {
-    pub fn new(target: &ProcessContext) -> Self {
-        Self { time_out }
+impl<'a> ProcessCompletionFuture<'a> {
+    pub fn new(target: &ProcessContext, scheduler: &'a Scheduler) -> Self {
+        Self {
+            exited: target.exited.clone(),
+            scheduler,
+        }
     }
 }
-impl Future for ProcessCompletionFuture {
-    type Output = ();
-    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<()> {
-        let time_out = self.time_out;
-        if time_out < Hpet::take().main_counter() {
-            Poll::Ready(())
+impl<'a> Future for ProcessCompletionFuture<'a> {
+    type Output = Result<usize>;
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
+        if self.exited.load(Ordering::SeqCst) {
+            Poll::Ready(Ok(0))
         } else {
+            self.scheduler.switch_process();
             Poll::Pending
         }
     }
@@ -185,6 +199,7 @@ impl Future for ProcessCompletionFuture {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::executor::block_on;
     pub static ANOTHER_FUNC_COUNT: Mutex<usize> = Mutex::new(0, "ANOTHER_FUNC_COUNT");
     pub static TEST_SCHEDULER: Scheduler = Scheduler::new();
     fn another_proc_func() {
@@ -215,11 +230,17 @@ mod test {
     }
     fn proc_func_exit_after_two() {
         crate::info!("proc_func_exit_after_two entry");
-        *ANOTHER_FUNC_COUNT.lock() *= 2;
+        {
+            *ANOTHER_FUNC_COUNT.lock() *= 2;
+        }
         for _ in 0..2 {
-            *ANOTHER_FUNC_COUNT.lock() *= 3;
+            {
+                *ANOTHER_FUNC_COUNT.lock() *= 3;
+            }
             TEST_SCHEDULER.switch_process();
-            *ANOTHER_FUNC_COUNT.lock() *= 5;
+            {
+                *ANOTHER_FUNC_COUNT.lock() *= 5;
+            }
         }
         crate::info!("proc_func_exit_after_two loop exit");
         TEST_SCHEDULER.exit_current_process()
@@ -232,14 +253,14 @@ mod test {
         .expect("Proc creation should succeed");
         TEST_SCHEDULER.clear_queue();
         TEST_SCHEDULER.schedule(ProcessContext::default()); // context for current
+        let wait = ProcessCompletionFuture::new(&proc, &TEST_SCHEDULER);
         TEST_SCHEDULER.schedule(proc);
 
         *ANOTHER_FUNC_COUNT.lock() = 1;
-        TEST_SCHEDULER.switch_process();
-        assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 6);
-        TEST_SCHEDULER.switch_process();
-        assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 90);
-        TEST_SCHEDULER.switch_process();
+        crate::info!("block_on start");
+        let res = block_on(wait);
+        crate::info!("block_on end. res = {res:?}");
+
         assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 450);
     }
 }

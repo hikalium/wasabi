@@ -116,7 +116,7 @@ global_asm!(
     // At this point, the current CPU state is saved to `from`.
     ".global asm_restore_context",
     "asm_restore_context:",
-    "xchg rsp, r9", // swap rsp and rdi to utilize push / pop
+    "xchg rsp, rdi", // swap rsp and rdi to utilize push / pop
     // Load the `to` state onto CPU
     "fxrstor64[rsp]",
     "add rsp, 512",
@@ -141,29 +141,32 @@ global_asm!(
     "ret",
 );
 
+extern "sysv64" {
+    // argN: rdi, rsi, rdx, rcx, r8, r9
+    fn asm_switch_context(to: *mut u8, from: *mut u8);
+    fn asm_restore_context(to: *mut u8);
+}
+
 /// # Safety
 /// `to` should be a valid ExecutionContext, and both contexts should not be locked on the call.
 pub unsafe fn unchecked_switch_context(from: *mut ExecutionContext, to: *mut ExecutionContext) {
-    asm!(
-        "call asm_switch_context",
-        inout("rsi") (from as *mut u8).add(size_of::<ExecutionContext>()) => _,
-        inout("r9") (to as *mut u8) => _,
+    asm_switch_context(
+        to as *mut u8,
+        (from as *mut u8).add(size_of::<ExecutionContext>()),
     );
 }
 
 /// # Safety
 /// `to` should be a valid ExecutionContext, and both contexts should not be locked on the call.
 pub unsafe fn unchecked_load_context(to: *mut ExecutionContext) {
-    asm!(
-        "call asm_restore_context",
-        inout("r9") (to as *mut u8) => _,
-    );
+    crate::info!("unchecked_load_context");
+    asm_restore_context(to as *mut u8);
 }
 
 /// # Safety
 /// `to` should be a valid ExecutionContext, and both contexts should not be locked yet.
 pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<ExecutionContext>) {
-    let (to, from) = (to.lock().as_mut_ptr(), from.lock().as_mut_ptr());
+    let (to, from) = { (to.lock().as_mut_ptr(), from.lock().as_mut_ptr()) };
     unchecked_switch_context(from, to)
 }
 

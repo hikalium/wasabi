@@ -4,7 +4,7 @@ use core::fmt::Write;
 use core::panic::PanicInfo;
 
 #[cfg(test)]
-use crate::debug_exit;
+use crate::debug;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -14,5 +14,5 @@ fn panic(info: &PanicInfo) -> ! {
     #[cfg(not(test))]
     crate::x86_64::rest_in_peace();
     #[cfg(test)]
-    debug_exit::exit_qemu(debug_exit::QemuExitCode::Fail);
+    debug::exit_qemu(debug::QemuExitCode::Fail);
 }
