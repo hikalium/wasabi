@@ -1,6 +1,8 @@
 use crate::info;
 use crate::x86_64;
 
+/// This function prints the addr of itself for debug purpose.
+#[no_mangle]
 pub fn print_kernel_debug_metadata() {
     info!(
         "DEBUG_METADATA: print_kernel_debug_metadata = {:#018p}",

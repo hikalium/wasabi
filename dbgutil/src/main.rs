@@ -55,8 +55,9 @@ lazy_static! {
     static ref RE_LOADER_CODE: Regex = Regex::new(r"\[0x(.*)-0x(.*)\).*type: LOADER_CODE").unwrap();
     static ref RE_OBJDUMP_SECTION_TEXT: Regex =
         Regex::new(r"(?P<addr>[a-zA-Z0-9]+) <.text>").unwrap();
-    static ref RE_WASABI_BOOTED: Regex =
-        Regex::new(r"^Wasabi OS booted\. efi_main = 0x(?P<addr>[a-fA-F0-9]+)$").unwrap();
+    static ref RE_DEBUG_METADATA: Regex =
+        Regex::new(r"DEBUG_METADATA: print_kernel_debug_metadata = 0x(?P<addr>[a-fA-F0-9]+)$")
+            .unwrap();
     static ref RE_DEBUG_INFO_ADDR_WRITE_CR3: Regex =
         Regex::new(r"^debug_info: write_cr3 = 0x(?P<addr>[a-fA-F0-9]+)$").unwrap();
 }
@@ -201,16 +202,19 @@ fn main() -> Result<()> {
             let serial_log = std::fs::read_to_string(args.serial_log)?;
             let serial_log: Vec<&str> = serial_log.trim().split('\n').collect();
 
-            let efi_main_runtime_addr = serial_log
-                .iter()
-                .find_map(|line| RE_WASABI_BOOTED.captures(line))
-                .expect("'Wasabi OS booted' message is not found");
-            let efi_main_runtime_addr = u64::from_str_radix(&efi_main_runtime_addr["addr"], 16)
-                .expect("failed to parse efi_main_runtime_addr");
-            let efi_main_text_ofs = symbol_text_ofs_table
-                .get("efi_main")
-                .context("efi_main not found in symbol_text_ofs_table")?;
-            let text_ofs_to_runtime_addr = efi_main_runtime_addr - efi_main_text_ofs;
+            let text_ofs_to_runtime_addr = {
+                let efi_main_runtime_addr = serial_log
+                    .iter()
+                    .find_map(|line| RE_DEBUG_METADATA.captures(line))
+                    .expect("No log message that matches with RE_DEBUG_METADATA found");
+                let efi_main_runtime_addr = u64::from_str_radix(&efi_main_runtime_addr["addr"], 16)
+                    .expect("failed to parse efi_main_runtime_addr");
+                let efi_main_text_ofs = symbol_text_ofs_table
+                    .get("print_kernel_debug_metadata")
+                    .context("print_kernel_debug_metadata not found in symbol_text_ofs_table")?;
+                efi_main_runtime_addr - efi_main_text_ofs
+            };
+            eprintln!("text_ofs_to_runtime_addr = {text_ofs_to_runtime_addr:#X}");
 
             // *_runtime_addr: actual address (e.g. RIP values) at runtime
             // *_text_ofs: offset in the .text section
