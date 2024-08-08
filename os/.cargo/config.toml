@@ -1,5 +1,6 @@
 [build]
 target = 'x86_64-unknown-uefi'
+rustflags = ["-Cforce-unwind-tables", "-Cforce-frame-pointers"]
 
 [lib]
 target = "x86_64-unknown-uefi"

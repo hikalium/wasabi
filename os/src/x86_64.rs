@@ -96,6 +96,15 @@ pub fn read_rsp() -> u64 {
     value
 }
 
+pub fn read_rbp() -> u64 {
+    let mut rbp;
+    unsafe {
+        asm!("mov rax, rbp",
+            out("rax") rbp);
+    }
+    rbp
+}
+
 pub fn clflush(ptr: usize) {
     unsafe {
         asm!("clflush [rax]",

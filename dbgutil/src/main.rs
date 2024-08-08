@@ -128,10 +128,10 @@ fn get_latest_file(pattern: &str) -> Result<String> {
 }
 
 fn detect_files() -> Result<DebugFiles> {
+    let efi_path =
+        get_latest_file("mnt/EFI/BOOT/BOOTX64.EFI").context("failed to detect efi_path")?;
     let pdb_path = get_latest_file("target/x86_64-unknown-uefi/*/deps/os-*.pdb")
         .context("failed to detect pdb_path")?;
-    let efi_path = get_latest_file("target/x86_64-unknown-uefi/*/os.efi")
-        .context("failed to detect efi_path")?;
     Ok(DebugFiles { pdb_path, efi_path })
 }
 
@@ -144,18 +144,18 @@ fn main() -> Result<()> {
     let mut pdb = pdb::PDB::open(file).unwrap();
     let sections = pdb.sections().unwrap().unwrap();
     println!(
-        "{:8} {:10} {:10} {:10} {:10} {:10}",
-        "text", "paddr", "vaddr", "raw_ofs", "raw_size", "raw_ofs_end"
+        "{:8} file[{:10}..{:10}] {:10} {:10} {:10}",
+        "text", "raw_ofs", "end", "raw_size", "paddr", "vaddr"
     );
     for s in &sections {
         println!(
-            "{:8} {:#010X} {:#010X} {:#010X} {:#010X} {:#010X}",
+            "{:8} file[{:#010X}..{:#010X}] {:#010X} {:#010X} {:#010X}",
             s.name(),
+            s.pointer_to_raw_data,
+            s.pointer_to_raw_data + s.size_of_raw_data,
+            s.size_of_raw_data,
             s.physical_address,
             s.virtual_address,
-            s.pointer_to_raw_data,
-            s.size_of_raw_data,
-            s.pointer_to_raw_data + s.size_of_raw_data,
         );
     }
     let text_section = *sections.iter().find(|s| s.name() == ".text").unwrap();
