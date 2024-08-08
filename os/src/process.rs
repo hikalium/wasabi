@@ -67,7 +67,7 @@ impl ProcessContext {
         })
     }
     pub fn new_with_fn(f: *const unsafe extern "sysv64" fn()) -> Result<ProcessContext> {
-        let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(4096)?;
+        let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(1024 * 1024)?;
         let f = f as u64;
         let stack_slice = stack.as_mut_slice();
         let stack_slice_len = stack_slice.len();
@@ -153,10 +153,11 @@ impl Scheduler {
             unsafe {
                 let to = queue
                     .front_mut()
-                    .expect("queue should have a process to swith to")
-                    .context()
-                    .lock()
-                    .as_mut_ptr();
+                    .expect("queue should have a process to swith to");
+                if to.exited.load(Ordering::SeqCst) {
+                    panic!("trying to switch to exited process...!!!")
+                }
+                let to = to.context().lock().as_mut_ptr();
                 let from = queue
                     .back_mut()
                     .expect("queue should have a process to swith to")

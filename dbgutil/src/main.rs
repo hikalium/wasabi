@@ -86,6 +86,7 @@ struct ExceptionInfo {
 }
 fn dump_rip(rip: u64, params: &CodeParams) -> Result<()> {
     let text_ofs = rip - params.text_ofs_to_runtime_addr;
+    eprintln!("dump_rip! text_ofs = {text_ofs:#018X}");
     let rip_in_objdump = text_ofs + params.text_base_in_objdump;
     let rip_in_objdump_str = format!("{rip_in_objdump:x}");
 
@@ -122,8 +123,8 @@ fn get_latest_file(pattern: &str) -> Result<String> {
         .output()
         .expect("failed to execute ls");
     result.status.exit_ok()?;
-    let result = String::from_utf8(result.stdout)?;
-    let result = result.as_str().trim().to_string();
+    let result = String::from_utf8_lossy(&result.stdout);
+    let result = result.trim().to_string();
     Ok(result)
 }
 
@@ -187,7 +188,7 @@ fn main() -> Result<()> {
         .arg(&files.efi_path)
         .output()
         .expect("failed to execute objdump");
-    let objdump_lines = String::from_utf8(objdump_lines.stdout).unwrap();
+    let objdump_lines = String::from_utf8_lossy(&objdump_lines.stdout);
     let objdump_lines: Vec<String> = objdump_lines.split('\n').map(|s| s.to_string()).collect();
 
     let text_base_in_objdump = objdump_lines

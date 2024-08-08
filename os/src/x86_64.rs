@@ -63,8 +63,11 @@ pub mod syscall;
 
 extern crate alloc;
 
+use crate::serial::SerialPort;
 use core::arch::asm;
 use core::fmt;
+use core::fmt::Write;
+use core::slice;
 
 // Due to the syscall instruction spec
 // GDT entries should be in this order:
@@ -94,15 +97,6 @@ pub fn read_rsp() -> u64 {
             out("rax") value);
     }
     value
-}
-
-pub fn read_rbp() -> u64 {
-    let mut rbp;
-    unsafe {
-        asm!("mov rax, rbp",
-            out("rax") rbp);
-    }
-    rbp
 }
 
 pub fn clflush(ptr: usize) {
@@ -362,4 +356,51 @@ pub fn rest_in_peace() -> ! {
     loop {
         unsafe { asm!("cli;hlt;") }
     }
+}
+
+#[no_mangle]
+pub fn dump_stack() {
+    let mut serial_writer = SerialPort::default();
+    // push rbp -> rbp = initial_rsp_on_func_entry -> (func body) -> pop rbp -> ret
+    let mut rbp: u64;
+    let mut rsp: u64;
+    let mut rip: u64;
+    unsafe {
+        asm!(
+        "lea rdx, [rip+0f]",
+        "call rdx",
+        "0:",
+        "pop rdx",
+        "mov rax, rbp",
+        "mov rcx, rsp",
+        out("rax") rbp,
+        out("rcx") rsp,
+        out("rdx") rip,
+        );
+    }
+    writeln!(serial_writer, "[PANIC] RIP = {rip:#018X}").unwrap();
+    writeln!(serial_writer, "[PANIC] RSP = {rsp:#018X}").unwrap();
+    writeln!(serial_writer, "[PANIC] RBP = {rbp:#018X}").unwrap();
+    writeln!(serial_writer, "[PANIC] *RBP = {:#018X}", unsafe {
+        *(rbp as *const u64)
+    })
+    .unwrap();
+    writeln!(
+        serial_writer,
+        "[PANIC] dump_stack() = {:#018X}",
+        dump_stack as *const fn() as u64
+    )
+    .unwrap();
+    for i in 0..1024 {
+        let addr = rsp + i * 8;
+        writeln!(
+            serial_writer,
+            "[PANIC] *({:#018X}) : {:#018X}",
+            addr,
+            unsafe { *(addr as *const u64) }
+        )
+        .unwrap();
+    }
+    let stack = unsafe { slice::from_raw_parts(rbp as *const u8, 64) };
+    crate::print::hexdump(stack);
 }
