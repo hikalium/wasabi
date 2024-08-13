@@ -66,7 +66,7 @@ impl ProcessContext {
             exited: Rc::new(AtomicBool::new(false)),
         })
     }
-    pub fn new_with_fn(f: *const unsafe extern "sysv64" fn()) -> Result<ProcessContext> {
+    pub fn new_with_fn(f: extern "sysv64" fn(u64), arg1: u64) -> Result<ProcessContext> {
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(1024 * 1024)?;
         let f = f as u64;
         let stack_slice = stack.as_mut_slice();
@@ -76,6 +76,7 @@ impl ProcessContext {
         let mut proc = ProcessContext::new(Some(stack), None)?;
 
         proc.context().lock().cpu.rsp = rsp as u64;
+        proc.context().lock().cpu.rdi = arg1;
         proc.context().lock().cpu.rflags = 2;
         Ok(proc)
     }
@@ -203,7 +204,7 @@ mod test {
     use crate::executor::block_on;
     pub static ANOTHER_FUNC_COUNT: Mutex<usize> = Mutex::new(0, "ANOTHER_FUNC_COUNT");
     pub static TEST_SCHEDULER: Scheduler = Scheduler::new();
-    fn another_proc_func() {
+    extern "sysv64" fn another_proc_func(_: u64) {
         crate::info!("another_proc_func entry");
         *ANOTHER_FUNC_COUNT.lock() *= 2;
         loop {
@@ -214,9 +215,8 @@ mod test {
     }
     #[test_case]
     fn switch_process_works() {
-        let proc =
-            ProcessContext::new_with_fn(another_proc_func as *const unsafe extern "sysv64" fn())
-                .expect("Proc creation should succeed");
+        let proc = ProcessContext::new_with_fn(another_proc_func, 0)
+            .expect("Proc creation should succeed");
         TEST_SCHEDULER.clear_queue();
         TEST_SCHEDULER.schedule(ProcessContext::default()); // context for current
         TEST_SCHEDULER.schedule(proc);
@@ -229,7 +229,7 @@ mod test {
         TEST_SCHEDULER.switch_process();
         assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 1350);
     }
-    fn proc_func_exit_after_two() {
+    extern "sysv64" fn proc_func_exit_after_two(_: u64) {
         crate::info!("proc_func_exit_after_two entry");
         {
             *ANOTHER_FUNC_COUNT.lock() *= 2;
@@ -248,10 +248,8 @@ mod test {
     }
     #[test_case]
     fn await_process_exit() {
-        let proc = ProcessContext::new_with_fn(
-            proc_func_exit_after_two as *const unsafe extern "sysv64" fn(),
-        )
-        .expect("Proc creation should succeed");
+        let proc = ProcessContext::new_with_fn(proc_func_exit_after_two, 0)
+            .expect("Proc creation should succeed");
         TEST_SCHEDULER.clear_queue();
         TEST_SCHEDULER.schedule(ProcessContext::default()); // context for current
         let wait = ProcessCompletionFuture::new(&proc, &TEST_SCHEDULER);
@@ -263,5 +261,19 @@ mod test {
         crate::info!("block_on end. res = {res:?}");
 
         assert_eq!(*ANOTHER_FUNC_COUNT.lock(), 450);
+    }
+    extern "sysv64" fn proc_func_with_arg(arg1: u64) {
+        assert!(arg1 == 42);
+        TEST_SCHEDULER.exit_current_process()
+    }
+    #[test_case]
+    fn await_process_with_param() {
+        let proc = ProcessContext::new_with_fn(proc_func_with_arg, 42)
+            .expect("Proc creation should succeed");
+        TEST_SCHEDULER.clear_queue();
+        TEST_SCHEDULER.schedule(ProcessContext::default()); // context for current
+        let wait = ProcessCompletionFuture::new(&proc, &TEST_SCHEDULER);
+        TEST_SCHEDULER.schedule(proc);
+        assert_eq!(block_on(wait), Ok(0));
     }
 }
