@@ -280,6 +280,10 @@ tshark_tcp:
 tcp_hello:
 	echo "hello" | nc localhost ${TCP_FORWARD_PORT}
 
+.PHONY : tcp_echo_server
+tcp_echo_server:
+	socat -v tcp-l:15000,reuseaddr,fork exec:'/bin/cat'
+
 .PHONY : vnc
 vnc: generated/noVNC-$(NOVNC_VERSION)
 	( echo 'change vnc password $(VNC_PASSWORD)' | while ! nc localhost $(PORT_MONITOR) ; do sleep 1 ; done ) &
