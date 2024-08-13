@@ -1,8 +1,14 @@
+extern crate alloc;
+
 use crate::error::Result;
+use crate::executor::block_on;
 use crate::executor::yield_execution;
+use crate::info;
 use crate::mutex::Mutex;
 use crate::process::ProcessContext;
+use crate::process::Scheduler;
 use crate::process::CURRENT_PROCESS;
+use alloc::boxed::Box;
 use core::arch::asm;
 use core::arch::global_asm;
 use core::mem::size_of;
@@ -208,7 +214,15 @@ mod test {
     }
 }
 
-pub async fn exec_app_context(proc_context: ProcessContext) -> Result<i64> {
+pub extern "sysv64" fn exec_app_context_proc_func(proc_ctx_ptr: u64) {
+    info!("exec_app_context begin");
+    let proc_ctx = unsafe { Box::from_raw(proc_ctx_ptr as *mut ProcessContext) };
+    let res = block_on(exec_app_context(proc_ctx));
+    info!("exec_app_context end {res:?}");
+    Scheduler::root().exit_current_process();
+}
+
+pub async fn exec_app_context(proc_context: Box<ProcessContext>) -> Result<i64> {
     let mut proc_context = Some(proc_context);
     let mut retcode: i64;
     loop {

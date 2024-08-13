@@ -8,6 +8,7 @@ use crate::x86_64::context::unchecked_load_context;
 use crate::x86_64::context::unchecked_switch_context;
 use crate::x86_64::context::ExecutionContext;
 use crate::x86_64::paging::PageAttr;
+use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use core::future::Future;
@@ -18,8 +19,10 @@ use core::task::Context;
 use core::task::Poll;
 use noli::args::serialize_args;
 
+// To take ROOT_SCHEDULER, use Scheduler::root()
 static ROOT_SCHEDULER: Scheduler = Scheduler::new();
-pub static CURRENT_PROCESS: Mutex<Option<ProcessContext>> = Mutex::new(None, "CURRENT_PROCESS");
+pub static CURRENT_PROCESS: Mutex<Option<Box<ProcessContext>>> =
+    Mutex::new(None, "CURRENT_PROCESS");
 
 pub fn init() {
     ROOT_SCHEDULER.clear_queue();

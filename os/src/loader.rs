@@ -8,14 +8,17 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::memory::AddressRange;
 use crate::memory::ContiguousPhysicalMemoryPages;
+use crate::process::ProcessCompletionFuture;
 use crate::process::ProcessContext;
+use crate::process::Scheduler;
 use crate::util::read_le_u16;
 use crate::util::read_le_u32;
 use crate::util::read_le_u64;
 use crate::util::write_le_u64;
-use crate::x86_64::context::exec_app_context;
+use crate::x86_64::context::exec_app_context_proc_func;
 use crate::x86_64::context::CONTEXT_APP;
 use crate::x86_64::paging::PageAttr;
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
@@ -54,8 +57,16 @@ impl<'a> LoadedElf<'a> {
             app_ctx.cpu.rflags = 2;
             app_ctx.cpu.rsp = stack_range.end() as u64; // stack grows toward 0, so empty stack pointer will be the end addr
         }
-        let proc = ProcessContext::new(Some(stack), Some(args))?;
-        exec_app_context(proc).await
+        let app_proc = Box::new(ProcessContext::new(Some(stack), Some(args))?);
+        let proc = ProcessContext::new_with_fn(
+            exec_app_context_proc_func,
+            Box::into_raw(app_proc) as u64,
+        )?;
+        let scheduler = Scheduler::root();
+        let wait = ProcessCompletionFuture::new(&proc, &scheduler);
+        scheduler.schedule(proc);
+        wait.await?;
+        Ok(0)
     }
     pub fn slice_of_vaddr_range(&self, range_on_vaddr: AddressRange) -> Result<&[u8]> {
         let range = range_on_vaddr.to_range_in(&self.app_vaddr_range)?;
