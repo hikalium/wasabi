@@ -89,16 +89,20 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 }
             },
             "httpget" => {
-                if let Some(ip) = args.get(1) {
-                    let ip = IpV4Addr::from_str(ip);
-                    if let Ok(ip) = ip {
-                        network.send_ip_packet(IcmpPacket::new_request(ip).copy_into_slice());
-                    } else {
-                        println!("{ip:?}")
-                    }
+                let host = if let Some(host) = args.get(1) {
+                    host
                 } else {
-                    println!("usage: httpget <hostname>")
-                }
+                    println!("usage: httpget <host or ip>");
+                    return Ok(());
+                };
+                let ip = if let Ok(ip) = IpV4Addr::from_str(&host) {
+                    ip
+                } else {
+                    let res = query_dns(&host).await?;
+                    println!("{res:?}");
+                    return Ok(());
+                };
+                network.send_ip_packet(IcmpPacket::new_request(ip).copy_into_slice());
             }
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())
