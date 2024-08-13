@@ -7,25 +7,17 @@ use crate::net::dns::query_dns;
 use crate::net::dns::DnsResponseEntry;
 use crate::print;
 use crate::println;
+use crate::process::Scheduler;
 use crate::process::CURRENT_PROCESS;
 use crate::x86_64::syscall::return_to_os;
 use crate::x86_64::syscall::write_exit_reason;
 use crate::x86_64::syscall::write_return_value;
-use crate::x86_64::syscall::write_return_value_to_app;
 use core::ptr::write_volatile;
 use noli::bitmap::bitmap_draw_point;
 use sabi::MouseEvent;
 
 fn exit_to_os(retv: u64) -> ! {
     write_exit_reason(0);
-    write_return_value(retv);
-    return_to_os();
-    unreachable!("Somehow returned from the OS unexpectedly...");
-}
-
-// yield_to_os resumes app's execution directly so it will not come back to this code...
-fn yield_to_os(retv: u64) -> ! {
-    write_exit_reason(1);
     write_return_value(retv);
     return_to_os();
     unreachable!("Somehow returned from the OS unexpectedly...");
@@ -63,21 +55,23 @@ fn sys_draw_point(args: &[u64; 5]) -> u64 {
 }
 
 fn sys_read_key(_args: &[u64; 5]) -> u64 {
-    if let Some(c) = InputManager::take().pop_input() {
-        c as u64
-    } else {
-        write_return_value_to_app(0);
-        yield_to_os(1);
+    loop {
+        if let Some(c) = InputManager::take().pop_input() {
+            return c as u64;
+        } else {
+            Scheduler::root().switch_process()
+        }
     }
 }
 
 fn sys_get_mouse_cursor_position(args: &[u64; 5]) -> u64 {
-    if let Some(e) = InputManager::take().pop_cursor_input_absolute() {
-        unsafe { write_volatile(args[0] as *mut MouseEvent, e) }
-        0
-    } else {
-        write_return_value_to_app(1);
-        yield_to_os(1);
+    loop {
+        if let Some(e) = InputManager::take().pop_cursor_input_absolute() {
+            unsafe { write_volatile(args[0] as *mut MouseEvent, e) }
+            return 0;
+        } else {
+            Scheduler::root().switch_process()
+        }
     }
 }
 

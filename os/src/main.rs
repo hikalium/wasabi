@@ -152,6 +152,7 @@ fn run_tasks() -> Result<()> {
         Ok(())
     };
     let console_task = async {
+        // Note: this message is used by e2e_test. Please do not remove.
         info!("console_task has started");
         let mut s = String::new();
         loop {

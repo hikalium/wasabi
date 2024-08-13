@@ -112,7 +112,7 @@ mod test {
         let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         let _rootfs = qemu
             .launch_with_wasabi_os_and_files(dev_env.wasabi_efi_path(), &[app_bin_path.as_str()])?;
-        qemu.wait_until_serial_output_contains("usb_hid_keyboard is ready")?;
+        qemu.wait_until_serial_output_contains("console_task has started")?;
         // Confirm that TEST_STRING is not typed into the machine yet.
         let output = qemu.read_serial_output()?;
         assert!(!output.contains(EXPECTED_OUTPUT));

@@ -59,10 +59,6 @@ pub fn init_syscall() {
     }
 }
 
-pub fn write_return_value_to_app(retv: u64) {
-    CONTEXT_APP.lock().cpu.rax = retv;
-}
-
 pub fn write_return_value(retv: u64) {
     CONTEXT_OS.lock().cpu.rax = retv;
 }
