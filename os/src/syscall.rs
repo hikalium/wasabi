@@ -1,6 +1,6 @@
 use crate::boot_info::BootInfo;
 use crate::error;
-use crate::executor::block_on;
+use crate::executor::block_on_and_schedule;
 use crate::info;
 use crate::input::InputManager;
 use crate::net::dns::query_dns;
@@ -113,7 +113,7 @@ fn sys_nslookup(args: &[u64; 5]) -> i64 {
         // > Name resolution APIs and libraries SHOULD recognize "invalid" names as special and SHOULD always return immediate negative responses.
         return -2;
     }
-    let r = block_on(query_dns(host));
+    let r = block_on_and_schedule(query_dns(host));
     if let Ok(r) = &r {
         let DnsResponseEntry::A { name: _, addr } = &r[0];
         result[0] = addr.bytes();

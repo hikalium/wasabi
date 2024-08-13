@@ -63,7 +63,7 @@ impl<'a> LoadedElf<'a> {
             Box::into_raw(app_proc) as u64,
         )?;
         let scheduler = Scheduler::root();
-        let wait = ProcessCompletionFuture::new(&proc, &scheduler);
+        let wait = ProcessCompletionFuture::new(&proc, scheduler);
         scheduler.schedule(proc);
         wait.await?;
         Ok(0)

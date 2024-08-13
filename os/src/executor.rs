@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::hpet::Hpet;
 use crate::mutex::Mutex;
 use crate::println;
+use crate::process::Scheduler;
 use crate::x86_64::busy_loop_hint;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
@@ -81,6 +82,20 @@ pub fn block_on<T>(future: impl Future<Output = Result<T>> + 'static) -> Result<
                 break result;
             }
             Poll::Pending => busy_loop_hint(),
+        }
+    }
+}
+
+pub fn block_on_and_schedule<T>(future: impl Future<Output = Result<T>> + 'static) -> Result<T> {
+    let mut task = Task::new(future);
+    loop {
+        let waker = dummy_waker();
+        let mut context = Context::from_waker(&waker);
+        match task.poll(&mut context) {
+            Poll::Ready(result) => {
+                break result;
+            }
+            Poll::Pending => Scheduler::root().switch_process(),
         }
     }
 }

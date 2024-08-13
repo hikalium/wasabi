@@ -71,7 +71,7 @@ impl ProcessContext {
     }
     pub fn new_with_fn(f: extern "sysv64" fn(u64), arg1: u64) -> Result<ProcessContext> {
         let mut stack = ContiguousPhysicalMemoryPages::alloc_bytes(1024 * 1024)?;
-        let f = f as u64;
+        let f = f as usize as u64;
         let stack_slice = stack.as_mut_slice();
         let stack_slice_len = stack_slice.len();
         stack_slice[(stack_slice_len - 8)..].copy_from_slice(&f.to_le_bytes());
