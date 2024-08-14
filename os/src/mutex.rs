@@ -75,8 +75,12 @@ impl<T: Sized> Mutex<T> {
         }
     }
     pub fn lock(&self) -> MutexGuard<T> {
-        self.try_lock()
-            .unwrap_or_else(|_| panic!("lock failed! name = {}", self.name))
+        for _ in 0..10000 {
+            if let Ok(locked) = self.try_lock() {
+                return locked;
+            }
+        }
+        panic!("lock failed! name = {}", self.name)
     }
     pub fn under_locked<R: Sized>(&self, f: &dyn Fn(&mut T) -> Result<R>) -> Result<R> {
         let mut locked = self.lock();
