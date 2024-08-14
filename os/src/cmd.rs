@@ -11,8 +11,10 @@ use crate::executor::yield_execution;
 use crate::info;
 use crate::loader::Elf;
 use crate::net::dns::query_dns;
+use crate::net::dns::DnsResponseEntry;
 use crate::net::icmp::IcmpPacket;
 use crate::net::manager::Network;
+use crate::net::tcp::TcpSocket;
 use crate::println;
 use crate::x86_64::trigger_debug_interrupt;
 use alloc::vec::Vec;
@@ -92,17 +94,29 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 let host = if let Some(host) = args.get(1) {
                     host
                 } else {
-                    println!("usage: httpget <host or ip>");
-                    return Ok(());
+                    "10.0.2.2"
+                };
+                let port = if let Some(port) = args.get(2) {
+                    port
+                } else {
+                    "15000"
+                };
+                let port = if let Ok(port) = u16::from_str(port) {
+                    port
+                } else {
+                    return Err(Error::Failed("Failed to parse the port number"));
                 };
                 let ip = if let Ok(ip) = IpV4Addr::from_str(&host) {
                     ip
+                } else if let Some(DnsResponseEntry::A { addr, name: _ }) =
+                    query_dns(&host).await?.get(0)
+                {
+                    *addr
                 } else {
-                    let res = query_dns(&host).await?;
-                    println!("{res:?}");
                     return Ok(());
                 };
-                network.send_ip_packet(IcmpPacket::new_request(ip).copy_into_slice());
+                let sock = TcpSocket::open(ip, port);
+                println!("{sock:?}")
             }
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())

@@ -13,10 +13,12 @@ use crate::net::ip::IpV4Protocol;
 use crate::net::manager::Network;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use noli::mem::Sliceable;
+use noli::net::IpV4Addr;
 
 #[repr(packed)]
 #[allow(unused)]
@@ -148,6 +150,14 @@ impl TcpSocket {
             state: Mutex::new(state, "TcpSocket::state"),
         }
     }
+    pub fn open(_dst_ip: IpV4Addr, dst_port: u16) -> Result<Rc<Self>> {
+        let sock = Rc::new(TcpSocket::new(TcpSocketState::SynSent));
+        Network::take().register_tcp_socket(dst_port, sock.clone());
+        Ok(sock)
+    }
+    /*
+    fn gen_tcp_packet(&self) -> Result<Vec<u8>> {}
+    */
     pub fn handle_rx(&self, in_bytes: &[u8]) -> Result<()> {
         let in_packet = Vec::from(in_bytes);
         let in_tcp = TcpPacket::from_slice(&in_packet)?;
@@ -158,6 +168,7 @@ impl TcpSocket {
         let to_ip = in_tcp.ip.src();
         let from_port = in_tcp.dst_port();
         let to_port = in_tcp.src_port();
+        //
         let eth = EthernetHeader::new(
             EthernetAddr::zero(),
             EthernetAddr::zero(),
