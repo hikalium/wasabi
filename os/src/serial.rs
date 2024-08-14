@@ -42,7 +42,9 @@ impl SerialPort {
         if read_io_port_u8(self.base() + 5) & 0x01 == 0 {
             None
         } else {
-            Some(read_io_port_u8(self.base()))
+            let c = read_io_port_u8(self.base());
+            write_io_port_u8(self.base() + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
+            Some(c)
         }
     }
 
