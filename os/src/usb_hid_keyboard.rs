@@ -97,16 +97,12 @@ fn usage_id_to_char(usage_id: u8) -> Result<KeyEvent> {
     }
 }
 
-pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
-    init_usb_hid_keyboard(&mut ddc).await?;
-
+pub async fn usb_hid_keyboard_mainloop(ddc: UsbDeviceDriverContext) -> Result<()> {
     let port = ddc.port();
     let slot = ddc.slot();
     let xhci = ddc.xhci();
     let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut prev_pressed_keys = BitSet::<32>::new();
-    // Note: this message is used by e2etest - please keep this as is!
-    info!("usb_hid_keyboard is ready");
     loop {
         let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
@@ -161,4 +157,13 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
             return Err(Error::FailedString(format!("port {} disconnected", port)));
         }
     }
+}
+
+pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
+    init_usb_hid_keyboard(&mut ddc).await?;
+    // Note: this message is used by e2etest - please keep this as is!
+    info!("usb_hid_keyboard starts running");
+    let e = usb_hid_keyboard_mainloop(ddc).await;
+    info!("usb_hid_keyboard quit: {e:?}");
+    e
 }

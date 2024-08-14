@@ -297,10 +297,15 @@ pub struct OutputContext {
 }
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
 
+// [xhci_1_2] p.31
+// The Device Context Base Address Array contains 256 Entries
+// and supports up to 255 USB devices or hubs
+// [xhci_1_2] p.59
+// the first entry (SlotID = '0') in the Device Context Base
+// Address Array is utilized by the xHCI Scratchpad mechanism.
 #[repr(C, align(64))]
 pub struct RawDeviceContextBaseAddressArray {
-    scratchpad_buffers: u64,
-    context: [u64; 255],
+    context: [u64; 256],
     _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<RawDeviceContextBaseAddressArray>() == 2048);
@@ -318,7 +323,7 @@ pub struct DeviceContextBaseAddressArray {
 impl DeviceContextBaseAddressArray {
     pub fn new(scratchpad_buffers: Pin<Box<[*mut u8]>>) -> Self {
         let mut inner = RawDeviceContextBaseAddressArray::new();
-        inner.scratchpad_buffers = scratchpad_buffers.as_ptr() as u64;
+        inner.context[0] = scratchpad_buffers.as_ptr() as u64;
         Self {
             inner: Box::pin(inner),
             context: unsafe { MaybeUninit::zeroed().assume_init() },
@@ -331,13 +336,13 @@ impl DeviceContextBaseAddressArray {
         self.inner.as_mut().get_unchecked_mut() as *mut RawDeviceContextBaseAddressArray
     }
     pub fn set_output_context(&mut self, slot: u8, output_context: Pin<Box<OutputContext>>) {
+        let slot = slot as usize;
         // Own the output context here
-        let idx = (slot - 1) as usize;
-        self.context[idx] = Some(output_context);
+        self.context[slot] = Some(output_context);
         // ...and set it in the actual pointer array
         unsafe {
-            self.inner.as_mut().get_unchecked_mut().context[idx] =
-                self.context[idx]
+            self.inner.as_mut().get_unchecked_mut().context[slot] =
+                self.context[slot]
                     .as_ref()
                     .expect("Output Context was None")
                     .as_ref()
