@@ -19,6 +19,7 @@ use core::ops::Deref;
 use core::ops::DerefMut;
 use core::panic::Location;
 use core::sync::atomic::AtomicBool;
+use core::sync::atomic::AtomicU32;
 use core::sync::atomic::Ordering;
 
 pub struct MutexGuard<'a, T> {
@@ -51,7 +52,7 @@ impl<'a, T> DerefMut for MutexGuard<'a, T> {
 }
 impl<'a, T> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
-        self.mutex.is_taken.store(false, Ordering::Relaxed)
+        self.mutex.is_taken.store(false, Ordering::SeqCst)
     }
 }
 impl<'a, T> Debug for MutexGuard<'a, T> {
@@ -63,6 +64,7 @@ impl<'a, T> Debug for MutexGuard<'a, T> {
 pub struct Mutex<T> {
     data: SyncUnsafeCell<T>,
     is_taken: AtomicBool,
+    taker_line_num: AtomicU32,
     name: &'static str,
 }
 impl<T: Sized> Mutex<T> {
@@ -70,6 +72,7 @@ impl<T: Sized> Mutex<T> {
         Self {
             data: SyncUnsafeCell::new(data),
             is_taken: AtomicBool::new(false),
+            taker_line_num: AtomicU32::new(0),
             name,
         }
     }
@@ -77,9 +80,11 @@ impl<T: Sized> Mutex<T> {
     fn try_lock(&self) -> Result<MutexGuard<T>> {
         if self
             .is_taken
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
+            self.taker_line_num
+                .store(Location::caller().line(), Ordering::SeqCst);
             Ok(unsafe { MutexGuard::new(self, &self.data) })
         } else {
             Err(Error::LockFailed)
@@ -93,9 +98,10 @@ impl<T: Sized> Mutex<T> {
             }
         }
         panic!(
-            "lock failed! name = {}, caller: {:?}",
+            "lock failed! name = {}, caller: {:?}, taker_line_num: {}",
             self.name,
-            Location::caller()
+            Location::caller(),
+            self.taker_line_num.load(Ordering::SeqCst),
         )
     }
     pub fn under_locked<R: Sized>(&self, f: &dyn Fn(&mut T) -> Result<R>) -> Result<R> {

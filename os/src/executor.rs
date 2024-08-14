@@ -117,8 +117,8 @@ impl Executor {
         self.task_queue().push_back(task)
     }
     pub fn poll(executor: &Mutex<Self>) {
-        let mut executor_locked = executor.lock();
-        if let Some(mut task) = executor_locked.task_queue().pop_front() {
+        let task = executor.lock().task_queue().pop_front();
+        if let Some(mut task) = task {
             let waker = dummy_waker();
             let mut context = Context::from_waker(&waker);
             match task.poll(&mut context) {
@@ -126,7 +126,7 @@ impl Executor {
                     println!("Task done! {:?}", result);
                 }
                 Poll::Pending => {
-                    executor_locked.task_queue().push_back(task);
+                    executor.lock().task_queue().push_back(task);
                 }
             }
         }
