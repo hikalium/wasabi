@@ -3,7 +3,6 @@ extern crate alloc;
 use crate::error::Result;
 use crate::executor::block_on;
 use crate::executor::yield_execution;
-use crate::info;
 use crate::mutex::Mutex;
 use crate::process::ProcessContext;
 use crate::process::Scheduler;
@@ -215,10 +214,8 @@ mod test {
 }
 
 pub extern "sysv64" fn exec_app_context_proc_func(proc_ctx_ptr: u64) {
-    info!("exec_app_context begin");
     let proc_ctx = unsafe { Box::from_raw(proc_ctx_ptr as *mut ProcessContext) };
-    let res = block_on(exec_app_context(proc_ctx));
-    info!("exec_app_context end {res:?}");
+    let _ = block_on(exec_app_context(proc_ctx));
     Scheduler::root().exit_current_process();
 }
 

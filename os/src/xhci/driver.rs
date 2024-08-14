@@ -306,7 +306,7 @@ impl XhciDriverForPci {
         Ok(())
     }
     fn spawn(bdf: BusDeviceFunction) -> Result<Self> {
-        (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
+        let task = Task::new(async move {
             let xhc = create_host_controller(bdf)?;
             let xhc = Rc::new(xhc);
             Self::ensure_ring_is_working(xhc.clone()).await?;
@@ -317,7 +317,8 @@ impl XhciDriverForPci {
                     yield_execution().await;
                 }
             }
-        }));
+        });
+        ROOT_EXECUTOR.lock().spawn(task);
         Ok(Self::default())
     }
 }

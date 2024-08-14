@@ -14,20 +14,25 @@
 use crate::error::Error;
 use crate::error::Result;
 use core::cell::SyncUnsafeCell;
+use core::fmt::Debug;
 use core::ops::Deref;
 use core::ops::DerefMut;
+use core::panic::Location;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
 pub struct MutexGuard<'a, T> {
     mutex: &'a Mutex<T>,
     data: &'a mut T,
+    location: Location<'a>,
 }
 impl<'a, T> MutexGuard<'a, T> {
+    #[track_caller]
     unsafe fn new(mutex: &'a Mutex<T>, data: &SyncUnsafeCell<T>) -> Self {
         Self {
             mutex,
             data: &mut *data.get(),
+            location: *Location::caller(),
         }
     }
 }
@@ -49,6 +54,11 @@ impl<'a, T> Drop for MutexGuard<'a, T> {
         self.mutex.is_taken.store(false, Ordering::Relaxed)
     }
 }
+impl<'a, T> Debug for MutexGuard<'a, T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "MutexGuard {{ location: {:?} }}", self.location)
+    }
+}
 
 pub struct Mutex<T> {
     data: SyncUnsafeCell<T>,
@@ -63,6 +73,7 @@ impl<T: Sized> Mutex<T> {
             name,
         }
     }
+    #[track_caller]
     fn try_lock(&self) -> Result<MutexGuard<T>> {
         if self
             .is_taken
@@ -74,13 +85,18 @@ impl<T: Sized> Mutex<T> {
             Err(Error::LockFailed)
         }
     }
+    #[track_caller]
     pub fn lock(&self) -> MutexGuard<T> {
         for _ in 0..10000 {
             if let Ok(locked) = self.try_lock() {
                 return locked;
             }
         }
-        panic!("lock failed! name = {}", self.name)
+        panic!(
+            "lock failed! name = {}, caller: {:?}",
+            self.name,
+            Location::caller()
+        )
     }
     pub fn under_locked<R: Sized>(&self, f: &dyn Fn(&mut T) -> Result<R>) -> Result<R> {
         let mut locked = self.lock();

@@ -68,8 +68,8 @@ pub fn dummy_waker() -> Waker {
 }
 pub static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default(), "ROOT_EXECUTOR");
 pub fn spawn_global(future: impl Future<Output = Result<()>> + 'static) {
-    let mut executor = ROOT_EXECUTOR.lock();
-    executor.spawn(Task::new(future));
+    let task = Task::new(future);
+    ROOT_EXECUTOR.lock().spawn(task);
 }
 
 pub fn block_on<T>(future: impl Future<Output = Result<T>> + 'static) -> Result<T> {

@@ -275,11 +275,12 @@ impl Rtl8139DriverInstance {
             let d = Rc::downgrade(&d);
             Network::take().register_interface(d);
         }
-        (*ROOT_EXECUTOR.lock()).spawn(Task::new(async move {
+        let task = Task::new(async move {
             loop {
                 d.poll().await?
             }
-        }));
+        });
+        ROOT_EXECUTOR.lock().spawn(task);
         Ok(Self {})
     }
 }

@@ -171,7 +171,6 @@ impl Scheduler {
                 (from, to)
             }
         };
-        crate::info!("switch_process!");
         // The lock for `queue` should be dropped at this point
         unsafe { unchecked_switch_context(from, to) }
     }

@@ -90,18 +90,23 @@ impl Network {
     pub fn take() -> Rc<Network> {
         let mut network = NETWORK.lock();
         let network = network.get_or_insert_with(|| {
-            let mut executor = ROOT_EXECUTOR.lock();
             let network = Self::new();
             network.register_tcp_socket(18080, Rc::new(TcpSocket::new(TcpSocketState::Listen)));
             let dns_client = Rc::new(UdpSocket::default());
             network.register_udp_socket(PORT_DNS_SERVER, dns_client.clone());
-            executor.spawn(Task::new(async { network_manager_thread().await }));
-            executor.spawn(Task::new(async move {
-                loop {
-                    let dns_packet = dns_client.recv().await;
-                    parse_dns_response(&dns_packet)?;
-                }
-            }));
+            {
+                let task = Task::new(async { network_manager_thread().await });
+                ROOT_EXECUTOR.lock().spawn(task);
+            }
+            {
+                let task = Task::new(async move {
+                    loop {
+                        let dns_packet = dns_client.recv().await;
+                        parse_dns_response(&dns_packet)?;
+                    }
+                });
+                ROOT_EXECUTOR.lock().spawn(task);
+            }
             Rc::new(network)
         });
         network.clone()

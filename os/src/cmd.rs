@@ -10,6 +10,7 @@ use crate::error::Result;
 use crate::executor::yield_execution;
 use crate::info;
 use crate::loader::Elf;
+use crate::mutex::Mutex;
 use crate::net::dns::query_dns;
 use crate::net::dns::DnsResponseEntry;
 use crate::net::icmp::IcmpPacket;
@@ -55,6 +56,12 @@ pub async fn run(cmdline: &str) -> Result<()> {
         match cmd {
             "panic" => {
                 trigger_debug_interrupt();
+            }
+            "deadlock" => {
+                let mutex: Mutex<()> = Mutex::new((), "deadlock testing");
+                let a = mutex.lock();
+                let b = mutex.lock();
+                println!("{a:?}, {b:?}");
             }
             "wait_until_network_is_up" => {
                 while network.router().is_none() {
@@ -106,10 +113,10 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 } else {
                     return Err(Error::Failed("Failed to parse the port number"));
                 };
-                let ip = if let Ok(ip) = IpV4Addr::from_str(&host) {
+                let ip = if let Ok(ip) = IpV4Addr::from_str(host) {
                     ip
                 } else if let Some(DnsResponseEntry::A { addr, name: _ }) =
-                    query_dns(&host).await?.get(0)
+                    query_dns(host).await?.first()
                 {
                     *addr
                 } else {
