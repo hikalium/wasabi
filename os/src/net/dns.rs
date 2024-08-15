@@ -4,7 +4,6 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::executor::with_timeout_ms;
 use crate::executor::yield_execution;
-use crate::info;
 use crate::mutex::Mutex;
 use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
@@ -103,15 +102,11 @@ static PENDING_QUERIES: Mutex<BTreeMap<u16, Option<Vec<DnsResponseEntry>>>> =
 static NEXT_TRANSACTION_ID: AtomicU16 = AtomicU16::new(1);
 
 pub fn parse_dns_response(dns_packet: &[u8]) -> Result<()> {
-    info!("dns_client: {dns_packet:?}");
     let dns_header = DnsPacket::from_slice(dns_packet)?;
     let transaction_id = u16::from_be_bytes(dns_header.transaction_id);
-    info!("dns_header: {dns_header:?}, transaction_id = {transaction_id}",);
     let dns_res = &dns_packet[size_of::<DnsPacket>()..];
-    info!("dns_res: {dns_res:?}");
     let mut it = dns_res.iter();
     let it = it.by_ref();
-    info!("Questions:");
     let mut name = String::new();
     for _ in 0..dns_header.num_questions() {
         // [rfc1035]
@@ -122,7 +117,6 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<()> {
             if let Some(len) = it.next() {
                 if *len == 0 {
                     it.advance_by(4).or(Err(Error::Failed("Invalid format")))?;
-                    info!("it: {it:?}");
                     break;
                 }
                 let s = it.take(*len as usize).cloned().collect::<Vec<u8>>();
@@ -135,9 +129,7 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<()> {
                 ));
             }
         }
-        info!("  {name}");
     }
-    info!("Answers:");
     let mut result = Vec::new();
     for _ in 0..dns_header.num_answers() {
         it.advance_by(12).or(Err(Error::Failed("Invalid format")))?;
@@ -149,7 +141,6 @@ pub fn parse_dns_response(dns_packet: &[u8]) -> Result<()> {
             .or(Err(Error::Failed("failed")))?;
         let name = name.clone();
         let addr = *IpV4Addr::from_slice(&ipv4_addr)?;
-        info!("  {addr:?}");
         result.push(DnsResponseEntry::A { name, addr })
     }
     if PENDING_QUERIES.lock().contains_key(&transaction_id) {
