@@ -114,3 +114,9 @@ impl<T: Sized> Mutex<T> {
     }
 }
 unsafe impl<T> Sync for Mutex<T> {}
+impl<T: Default> Default for Mutex<T> {
+    #[track_caller]
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}

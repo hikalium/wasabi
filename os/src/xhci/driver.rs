@@ -9,6 +9,7 @@ use crate::executor::yield_execution;
 use crate::executor::Task;
 use crate::executor::ROOT_EXECUTOR;
 use crate::info;
+use crate::mutex::Mutex;
 use crate::pci::BusDeviceFunction;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
@@ -290,6 +291,9 @@ impl XhciDriverForPci {
             } else {
                 info!("Port {}: Device detached: {:?}", port, portsc);
             }
+        }
+        while let Some(e) = xhc.primary_event_ring().lock().pop()? {
+            info!("xhci/event: {e:?}");
         }
         let waker = dummy_waker();
         let mut ctx = Context::from_waker(&waker);

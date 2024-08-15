@@ -66,7 +66,7 @@ impl CompletionCode {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 #[repr(C, align(16))]
 pub struct GenericTrbEntry {
     data: Volatile<u64>,

@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::error::Result;
+use core::mem::MaybeUninit;
 use core::ops::BitAnd;
 use core::ops::BitOr;
 use core::ops::Not;
@@ -10,9 +11,24 @@ use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 
 #[repr(transparent)]
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Volatile<T> {
     value: T,
+}
+impl<T: Default> Default for Volatile<T> {
+    fn default() -> Self {
+        Self {
+            value: T::default(),
+        }
+    }
+}
+impl<T: Clone> Clone for Volatile<T> {
+    fn clone(&self) -> Self {
+        let mut this = MaybeUninit::uninit();
+        let mut this: Self = unsafe { this.assume_init() };
+        this.write(self.read());
+        this
+    }
 }
 impl<T> Volatile<T> {
     pub fn read(&self) -> T {

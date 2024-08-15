@@ -3,10 +3,12 @@ extern crate alloc;
 use crate::allocator::ALLOCATOR;
 use crate::error::Error;
 use crate::error::Result;
+use crate::info;
 use crate::mutex::Mutex;
 use crate::warn;
 use crate::x86_64::paging::disable_cache;
 use crate::x86_64::paging::IoBox;
+use crate::xhci::future::EventWaitInfo;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::NormalTrb;
 use crate::xhci::trb::TrbType;
@@ -15,6 +17,7 @@ use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::rc::Weak;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::ptr::null_mut;
@@ -284,6 +287,7 @@ pub struct EventRing {
     erdp: Option<*mut u64>,
     events_per_slot: BTreeMap<u8, VecDeque<GenericTrbEntry>>,
     events_per_trb: BTreeMap<u64, GenericTrbEntry>,
+    wait_list: VecDeque<Weak<EventWaitInfo>>,
 }
 impl EventRing {
     pub fn new() -> Result<Self> {
@@ -297,6 +301,7 @@ impl EventRing {
             erdp: None,
             events_per_slot: BTreeMap::new(),
             events_per_trb: BTreeMap::new(),
+            wait_list: Default::default(),
         })
     }
     pub fn set_erdp(&mut self, erdp: *mut u64) {
@@ -312,7 +317,7 @@ impl EventRing {
         self.ring.as_ref().current().cycle_state() == self.cycle_state_ours
     }
     /// Non-blocking
-    fn pop(&mut self) -> Result<Option<GenericTrbEntry>> {
+    pub fn pop(&mut self) -> Result<Option<GenericTrbEntry>> {
         if !self.has_next_event() {
             return Ok(None);
         }
@@ -381,6 +386,12 @@ impl EventRing {
             self.events_per_trb.insert(trb_addr, e);
         }
         Ok(None)
+    }
+    async fn poll(&mut self) -> Result<()> {
+        if let Some(e) = self.pop()? {
+            info!("poll: {e:?}");
+        }
+        Ok(())
     }
 }
 
