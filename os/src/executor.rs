@@ -66,7 +66,7 @@ fn dummy_raw_waker() -> RawWaker {
 pub fn dummy_waker() -> Waker {
     unsafe { Waker::from_raw(dummy_raw_waker()) }
 }
-pub static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default(), "ROOT_EXECUTOR");
+pub static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default());
 pub fn spawn_global(future: impl Future<Output = Result<()>> + 'static) {
     let task = Task::new(future);
     ROOT_EXECUTOR.lock().spawn(task);
@@ -160,8 +160,8 @@ pub struct SelectFuture<T: Future, U: Future> {
 }
 impl<T: Future, U: Future> SelectFuture<T, U> {
     pub fn new(left: T, right: U) -> Self {
-        let left = Mutex::new(Box::pin(left), "SelectFuture::left");
-        let right = Mutex::new(Box::pin(right), "SelectFuture::right");
+        let left = Mutex::new(Box::pin(left));
+        let right = Mutex::new(Box::pin(right));
         Self { left, right }
     }
 }

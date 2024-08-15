@@ -255,7 +255,7 @@ pub struct TransferRing {
 impl TransferRing {
     pub fn new(transfer_size: usize) -> Result<Self> {
         let inner = TransferRingInner::new(transfer_size)?;
-        let inner = Mutex::new(inner, "TransferRing");
+        let inner = Mutex::new(inner);
         Ok(Self { inner })
     }
     pub fn fill_ring(&self) -> Result<()> {

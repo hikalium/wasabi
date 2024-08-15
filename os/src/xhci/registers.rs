@@ -93,7 +93,7 @@ impl PortScWrapper {
     const BIT_PORT_RESET_CHANGE: u32 = 1 << 21;
     fn new(ptr: *mut u32) -> Self {
         Self {
-            ptr: Mutex::new(ptr, "portsc"),
+            ptr: Mutex::new(ptr),
         }
     }
     pub fn value(&self) -> u32 {
@@ -455,7 +455,7 @@ pub struct Doorbell {
 impl Doorbell {
     pub fn new(ptr: *mut u32) -> Self {
         Self {
-            ptr: Mutex::new(ptr, "Doorbell"),
+            ptr: Mutex::new(ptr),
         }
     }
     // [xhci] 5.6 Doorbell Registers

@@ -66,8 +66,8 @@ pub struct UdpSocket {
 impl Default for UdpSocket {
     fn default() -> Self {
         Self {
-            tx_queue: Mutex::new(VecDeque::new(), "UdpSocket::tx_queue"),
-            rx_queue: Mutex::new(VecDeque::new(), "UdpSocket::rx_queue"),
+            tx_queue: Mutex::new(VecDeque::new()),
+            rx_queue: Mutex::new(VecDeque::new()),
         }
     }
 }

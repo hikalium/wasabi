@@ -58,7 +58,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 trigger_debug_interrupt();
             }
             "deadlock" => {
-                let mutex: Mutex<()> = Mutex::new((), "deadlock testing");
+                let mutex: Mutex<()> = Mutex::new(());
                 let a = mutex.lock();
                 let b = mutex.lock();
                 println!("{a:?}, {b:?}");

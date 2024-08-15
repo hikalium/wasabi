@@ -146,8 +146,8 @@ impl Debug for TcpSocket {
 impl TcpSocket {
     pub fn new(state: TcpSocketState) -> Self {
         Self {
-            my_next_seq: Mutex::new(0, "TcpSocket::my_next_seq"),
-            state: Mutex::new(state, "TcpSocket::state"),
+            my_next_seq: Mutex::new(0),
+            state: Mutex::new(state),
         }
     }
     pub fn open(_dst_ip: IpV4Addr, dst_port: u16) -> Result<Rc<Self>> {

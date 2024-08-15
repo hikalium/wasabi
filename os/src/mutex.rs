@@ -65,15 +65,18 @@ pub struct Mutex<T> {
     data: SyncUnsafeCell<T>,
     is_taken: AtomicBool,
     taker_line_num: AtomicU32,
-    name: &'static str,
+    created_at_file: &'static str,
+    created_at_line: u32,
 }
 impl<T: Sized> Mutex<T> {
-    pub const fn new(data: T, name: &'static str) -> Self {
+    #[track_caller]
+    pub const fn new(data: T) -> Self {
         Self {
             data: SyncUnsafeCell::new(data),
             is_taken: AtomicBool::new(false),
             taker_line_num: AtomicU32::new(0),
-            name,
+            created_at_file: Location::caller().file(),
+            created_at_line: Location::caller().line(),
         }
     }
     #[track_caller]
@@ -98,8 +101,9 @@ impl<T: Sized> Mutex<T> {
             }
         }
         panic!(
-            "lock failed! name = {}, caller: {:?}, taker_line_num: {}",
-            self.name,
+            "Failed to lock Mutex at {}:{}, caller: {:?}, taker_line_num: {}",
+            self.created_at_file,
+            self.created_at_line,
             Location::caller(),
             self.taker_line_num.load(Ordering::SeqCst),
         )

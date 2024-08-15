@@ -162,8 +162,8 @@ pub async fn usb_hid_keyboard_mainloop(ddc: UsbDeviceDriverContext) -> Result<()
 pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
     init_usb_hid_keyboard(&mut ddc).await?;
     // Note: this message is used by e2etest - please keep this as is!
-    info!("usb_hid_keyboard starts running");
+    info!("usb_hid_keyboard is ready");
     let e = usb_hid_keyboard_mainloop(ddc).await;
-    info!("usb_hid_keyboard quit: {e:?}");
+    info!("usb_hid_keyboard exited: {e:?}");
     e
 }

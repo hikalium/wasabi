@@ -104,10 +104,10 @@ impl Controller {
             rt_regs,
             portsc,
             doorbell_regs,
-            command_ring: Mutex::new(CommandRing::default(), "Xhci.command_ring"),
-            primary_event_ring: Mutex::new(EventRing::new()?, "Xhci.primary_event_ring"),
+            command_ring: Mutex::new(CommandRing::default()),
+            primary_event_ring: Mutex::new(EventRing::new()?),
             device_context_base_array,
-            device_futures: Mutex::new(LinkedList::new(), "Xhci.device_futures"),
+            device_futures: Mutex::new(LinkedList::new()),
         };
         xhc.init_primary_event_ring()?;
         xhc.init_slots_and_contexts()?;

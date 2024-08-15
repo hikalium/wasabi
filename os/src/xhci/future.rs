@@ -1,14 +1,19 @@
+extern crate alloc;
+
 use crate::error::Result;
 use crate::hpet::Hpet;
 use crate::mutex::Mutex;
 use crate::xhci::ring::EventRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::TrbType;
+//use alloc::collections::VecDeque;
 use core::future::Future;
 use core::marker::PhantomPinned;
 use core::pin::Pin;
 use core::task::Context;
 use core::task::Poll;
+
+//static EVENT_QUEUE: Mutex<VecDeque<GenericTrbEntry>> = Mutex::new(VecDeque::new());
 
 pub enum EventFutureWaitType {
     TrbAddr(u64),

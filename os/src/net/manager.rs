@@ -75,16 +75,16 @@ pub struct Network {
 impl Network {
     fn new() -> Self {
         Self {
-            interfaces: Mutex::new(Vec::new(), "Network.interfaces"),
+            interfaces: Mutex::new(Vec::new()),
             interface_has_added: AtomicBool::new(false),
-            netmask: Mutex::new(None, "Network.netmask"),
-            router: Mutex::new(None, "Network.router"),
-            dns: Mutex::new(None, "Network.dns"),
-            self_ip: Mutex::new(None, "Network.self_ip"),
-            ip_tx_queue: Mutex::new(VecDeque::new(), "Network.ip_tx_queue"),
-            tcp_socket_table: Mutex::new(BTreeMap::new(), "Network.tcp_socket"),
-            udp_socket_table: Mutex::new(BTreeMap::new(), "Network.udp_socket"),
-            arp_table: Mutex::new(BTreeMap::new(), "Network.arp_table"),
+            netmask: Mutex::new(None),
+            router: Mutex::new(None),
+            dns: Mutex::new(None),
+            self_ip: Mutex::new(None),
+            ip_tx_queue: Mutex::new(VecDeque::new()),
+            tcp_socket_table: Mutex::new(BTreeMap::new()),
+            udp_socket_table: Mutex::new(BTreeMap::new()),
+            arp_table: Mutex::new(BTreeMap::new()),
         }
     }
     pub fn take() -> Rc<Network> {
@@ -161,7 +161,7 @@ impl Network {
         self.arp_table.lock().get(&ip_addr).map(|e| e.0)
     }
 }
-static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None, "NETWORK");
+static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None);
 
 fn handle_rx_dhcp_client(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> {
     let network = Network::take();

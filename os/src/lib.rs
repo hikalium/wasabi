@@ -23,6 +23,8 @@
 #![feature(linked_list_cursors)]
 #![feature(offset_of)]
 #![feature(slice_from_ptr_range)]
+#![feature(const_location_fields)]
+#![feature(const_caller_location)]
 
 mod acpi;
 pub mod allocator;

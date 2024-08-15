@@ -5,7 +5,7 @@ use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use sabi::MouseEvent;
 
-static INPUT_MANAGER: Mutex<Option<Rc<InputManager>>> = Mutex::new(None, "INPUT_MANAGER");
+static INPUT_MANAGER: Mutex<Option<Rc<InputManager>>> = Mutex::new(None);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyEvent {
@@ -31,8 +31,8 @@ pub struct InputManager {
 impl InputManager {
     fn new() -> Self {
         Self {
-            input_queue: Mutex::new(VecDeque::new(), "InputManager.input_queue"),
-            cursor_queue: Mutex::new(VecDeque::new(), "InputManager.cursor_queue"),
+            input_queue: Mutex::new(VecDeque::new()),
+            cursor_queue: Mutex::new(VecDeque::new()),
         }
     }
     pub fn take() -> Rc<Self> {

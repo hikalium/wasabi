@@ -21,8 +21,7 @@ use noli::args::serialize_args;
 
 // To take ROOT_SCHEDULER, use Scheduler::root()
 static ROOT_SCHEDULER: Scheduler = Scheduler::new();
-pub static CURRENT_PROCESS: Mutex<Option<Box<ProcessContext>>> =
-    Mutex::new(None, "CURRENT_PROCESS");
+pub static CURRENT_PROCESS: Mutex<Option<Box<ProcessContext>>> = Mutex::new(None);
 
 pub fn init() {
     ROOT_SCHEDULER.clear_queue();
@@ -40,7 +39,7 @@ impl Default for ProcessContext {
         Self {
             args_region: None,
             stack_region: None,
-            context: Mutex::new(ExecutionContext::default(), "ProcessContext::context"),
+            context: Mutex::new(ExecutionContext::default()),
             exited: Rc::new(AtomicBool::new(false)),
         }
     }
@@ -65,7 +64,7 @@ impl ProcessContext {
         Ok(Self {
             args_region,
             stack_region,
-            context: Mutex::new(ExecutionContext::default(), "ProcessContext::context"),
+            context: Mutex::new(ExecutionContext::default()),
             exited: Rc::new(AtomicBool::new(false)),
         })
     }
@@ -104,7 +103,7 @@ impl Scheduler {
     }
     pub const fn new() -> Self {
         Self {
-            queue: Mutex::new(VecDeque::new(), "Scheduler::wait_queue"),
+            queue: Mutex::new(VecDeque::new()),
         }
     }
     pub fn schedule(&self, proc: ProcessContext) {
@@ -204,7 +203,7 @@ impl<'a> Future for ProcessCompletionFuture<'a> {
 mod test {
     use super::*;
     use crate::executor::block_on;
-    pub static ANOTHER_FUNC_COUNT: Mutex<usize> = Mutex::new(0, "ANOTHER_FUNC_COUNT");
+    pub static ANOTHER_FUNC_COUNT: Mutex<usize> = Mutex::new(0);
     pub static TEST_SCHEDULER: Scheduler = Scheduler::new();
     extern "sysv64" fn another_proc_func(_: u64) {
         crate::info!("another_proc_func entry");

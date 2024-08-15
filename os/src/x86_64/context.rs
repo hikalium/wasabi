@@ -14,10 +14,8 @@ use core::mem::size_of;
 use core::mem::swap;
 use core::mem::MaybeUninit;
 
-pub static CONTEXT_OS: Mutex<ExecutionContext> =
-    Mutex::new(ExecutionContext::default(), "CONTEXT_OS");
-pub static CONTEXT_APP: Mutex<ExecutionContext> =
-    Mutex::new(ExecutionContext::default(), "CONTEXT_APP");
+pub static CONTEXT_OS: Mutex<ExecutionContext> = Mutex::new(ExecutionContext::default());
+pub static CONTEXT_APP: Mutex<ExecutionContext> = Mutex::new(ExecutionContext::default());
 
 #[repr(C)]
 #[derive(Clone, Debug)]
@@ -178,11 +176,9 @@ pub unsafe fn switch_context(from: &Mutex<ExecutionContext>, to: &Mutex<Executio
 #[cfg(test)]
 mod test {
     use super::*;
-    pub static CONTEXT_MAIN: Mutex<ExecutionContext> =
-        Mutex::new(ExecutionContext::default(), "CONTEXT_MAIN");
-    pub static CONTEXT_TEST: Mutex<ExecutionContext> =
-        Mutex::new(ExecutionContext::default(), "CONTEXT_TEST");
-    pub static ANOTHER_FUNC_COUNT: Mutex<usize> = Mutex::new(0, "ANOTHER_FUNC_COUNT");
+    pub static CONTEXT_MAIN: Mutex<ExecutionContext> = Mutex::new(ExecutionContext::default());
+    pub static CONTEXT_TEST: Mutex<ExecutionContext> = Mutex::new(ExecutionContext::default());
+    pub static ANOTHER_FUNC_COUNT: Mutex<usize> = Mutex::new(0);
     fn another_func() {
         *ANOTHER_FUNC_COUNT.lock() *= 2;
         loop {

@@ -81,8 +81,7 @@ pub fn create_host_controller(bdf: BusDeviceFunction) -> Result<Controller> {
     let portsc = PortSc::new(&bar0, cap_regs.as_ref());
     let scratchpad_buffers = alloc_scratch_pad_buffers(cap_regs.as_ref().num_scratch_pad_bufs())?;
     let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
-    let device_context_base_array =
-        Mutex::new(device_context_base_array, "Xhci.device_context_base_array");
+    let device_context_base_array = Mutex::new(device_context_base_array);
     Controller::new(
         cap_regs,
         op_regs,

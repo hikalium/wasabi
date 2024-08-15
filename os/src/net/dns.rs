@@ -99,7 +99,7 @@ pub fn create_dns_query_packet(query_host_name: &str) -> Result<Vec<u8>> {
 }
 
 static PENDING_QUERIES: Mutex<BTreeMap<u16, Option<Vec<DnsResponseEntry>>>> =
-    Mutex::new(BTreeMap::new(), "PENDING_QUERIES");
+    Mutex::new(BTreeMap::new());
 static NEXT_TRANSACTION_ID: AtomicU16 = AtomicU16::new(1);
 
 pub fn parse_dns_response(dns_packet: &[u8]) -> Result<()> {
