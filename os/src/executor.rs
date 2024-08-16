@@ -3,8 +3,8 @@ extern crate alloc;
 use crate::error::Error;
 use crate::error::Result;
 use crate::hpet::Hpet;
+use crate::info;
 use crate::mutex::Mutex;
-use crate::println;
 use crate::process::Scheduler;
 use crate::x86_64::busy_loop_hint;
 use alloc::boxed::Box;
@@ -123,7 +123,7 @@ impl Executor {
             let mut context = Context::from_waker(&waker);
             match task.poll(&mut context) {
                 Poll::Ready(result) => {
-                    println!("Task done! {:?}", result);
+                    info!("Task completed: {:?}", result);
                 }
                 Poll::Pending => {
                     executor.lock().task_queue().push_back(task);

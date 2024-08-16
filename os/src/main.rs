@@ -34,7 +34,6 @@ use os::info;
 use os::init;
 use os::input::InputManager;
 use os::print;
-use os::println;
 use os::serial::SerialPort;
 use os::x86_64;
 use os::x86_64::read_rsp;
@@ -267,7 +266,7 @@ fn stack_switched() -> ! {
 #[no_mangle]
 fn efi_main(image_handle: EfiHandle, efi_system_table: Pin<&'static os::efi::EfiSystemTable>) {
     os::init::init_basic_runtime(image_handle, efi_system_table);
-    println!("rsp on boot: {:#018X}", read_rsp());
+    info!("rsp on boot: {:#018X}", read_rsp());
     let new_rsp = BootInfo::take().kernel_stack().as_ptr() as usize + os::init::KERNEL_STACK_SIZE;
     unsafe { x86_64::switch_rsp(new_rsp as u64, stack_switched) }
 }

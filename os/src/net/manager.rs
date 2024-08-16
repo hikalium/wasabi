@@ -191,7 +191,6 @@ fn handle_rx_dhcp_client(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Res
                 break;
             }
             let data: Vec<u8> = it.clone().take(len as usize).cloned().collect();
-            info!("op = {op}, data = {data:?}");
             match op {
                 DHCP_OPT_MESSAGE_TYPE => match data[0] {
                     DHCP_OPT_MESSAGE_TYPE_ACK => {
@@ -276,7 +275,6 @@ fn handle_rx_icmp(packet: &[u8]) -> Result<()> {
 }
 fn handle_rx_arp(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Result<()> {
     if let Ok(arp) = ArpPacket::from_slice(packet) {
-        info!("net: rx: ARP: {arp:?}");
         if arp.is_response() {
             Network::take().arp_table_register(
                 arp.sender_ip_addr(),
@@ -367,7 +365,6 @@ fn process_tx() -> Result<()> {
                     for iface in &*interfaces {
                         if let Some(iface) = iface.upgrade() {
                             let arp_req = ArpPacket::request(iface.ethernet_addr(), src_ip, dst_ip);
-                            info!("Sending ARP request: {arp_req:?}");
                             iface.push_packet(arp_req.copy_into_slice())?;
                         }
                     }

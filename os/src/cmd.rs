@@ -51,7 +51,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
     let network = Network::take();
     let args = cmdline.trim();
     let args: Vec<&str> = args.split(' ').collect();
-    println!("\n{args:?}");
+    info!("Executing cmd: {args:?}");
     if let Some(&cmd) = args.first() {
         match cmd {
             "panic" => {
@@ -88,7 +88,6 @@ pub async fn run(cmdline: &str) -> Result<()> {
             "wait_until_dns_ready" => loop {
                 if let Some(dns_ip) = network.dns() {
                     if let Some(eth) = network.arp_table_get(dns_ip) {
-                        info!("DNS server eth: {eth}");
                         break;
                     } else {
                         yield_execution().await;
@@ -132,7 +131,6 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 if let Some(query) = args.get(1) {
                     let res = query_dns(query).await?;
                     println!("{res:?}");
-                    info!("nslookup done");
                 } else {
                     println!("usage: nslookup <query>")
                 }

@@ -83,7 +83,7 @@ impl BusDeviceFunction {
     pub fn fmt_common(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "(bus: {:#04X}, device: {:#04X}, function: {:#03X})",
+            "/pci/bus/{:#04X}/device/{:#04X}/function/{:#03X})",
             self.bus(),
             self.device(),
             self.function()
@@ -341,7 +341,7 @@ impl Pci {
                     if d.supports(vd) {
                         match d.attach(bdf) {
                             Ok(di) => {
-                                info!("{:?} driver is loaded for {:?}", di, bdf);
+                                info!("Driver loaded: {:?}: {}", bdf, di.name());
                                 self.devices.borrow_mut().insert(bdf, Rc::new(di));
                             }
                             Err(e) => {

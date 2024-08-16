@@ -1,6 +1,7 @@
 use crate::acpi::Acpi;
 use crate::efi::fs::EfiFileName;
 use crate::error::Error;
+use crate::info;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::vram::VRAMBufferInfo;
 use crate::x86_64::apic::LocalApic;
@@ -110,13 +111,13 @@ impl CpuFeatures {
     fn inspect() -> Self {
         let query = |q: CpuidRequest| -> CpuidResponse {
             let r = read_cpuid(q);
-            crate::println!("{} -> {}", q, r);
+            info!("{} -> {}", q, r);
             r
         };
         let c = query(CpuidRequest { eax: 0, ecx: 0 });
         let max_basic_cpuid = c.eax();
         let vendor_string = FixedString::<3>::new(&[c.ebx(), c.edx(), c.ecx()]);
-        crate::println!("cpuid(0, 0).vendor = {:?}", &vendor_string);
+        info!("cpuid(0, 0).vendor = {:?}", &vendor_string);
 
         let leaf01 = query(CpuidRequest { eax: 1, ecx: 0 });
 
@@ -164,7 +165,7 @@ impl CpuFeatures {
                 c4.ecx(),
                 c4.edx(),
             ]);
-            crate::println!("cpu_brand_string = {:?}", cpu_brand_string);
+            info!("cpu_brand_string = {:?}", cpu_brand_string);
             Some(cpu_brand_string)
         } else {
             None
@@ -245,7 +246,7 @@ impl BootInfo {
     /// lifetime
     pub unsafe fn set(boot_info: BootInfo) {
         assert!(BOOT_INFO.is_none());
-        crate::println!("BOOT_INFO populated!");
+        info!("BOOT_INFO populated!");
         BOOT_INFO = Some(boot_info);
     }
 }
