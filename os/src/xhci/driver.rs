@@ -290,9 +290,6 @@ impl XhciDriverForPci {
                 info!("Port {}: Device detached: {:?}", port, portsc);
             }
         }
-        while let Some(e) = xhc.primary_event_ring().lock().pop()? {
-            info!("xhci/event: {e:?}");
-        }
         let waker = dummy_waker();
         let mut ctx = Context::from_waker(&waker);
         let mut device_futures = xhc.device_futures().lock();

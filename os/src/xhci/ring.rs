@@ -17,7 +17,9 @@ use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::rc::Rc;
 use alloc::rc::Weak;
+use alloc::vec::Vec;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 use core::ptr::null_mut;
@@ -387,9 +389,42 @@ impl EventRing {
         }
         Ok(None)
     }
+    pub fn register_waiter(&mut self, wait: &Rc<EventWaitInfo>) {
+        let wait = Rc::downgrade(wait);
+        self.wait_list.push_back(wait);
+    }
     pub async fn poll(&mut self) -> Result<()> {
         if let Some(e) = self.pop()? {
-            info!("poll: {e:?}");
+            let mut consumed = false;
+            for w in &self.wait_list {
+                if let Some(w) = w.upgrade() {
+                    let w: &EventWaitInfo = w.as_ref();
+                    if w.matches(&e) {
+                        w.resolve(&e);
+                        consumed = true;
+                    }
+                }
+            }
+            if !consumed {
+                info!("unhandled event: {e:?}");
+            }
+            // cleanup stale waiters
+            let stale_waiter_indices = self
+                .wait_list
+                .iter()
+                .enumerate()
+                .rev()
+                .filter_map(|e| -> Option<usize> {
+                    if e.1.strong_count() == 0 {
+                        Some(e.0)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<usize>>();
+            for k in stale_waiter_indices {
+                self.wait_list.remove(k);
+            }
         }
         Ok(())
     }

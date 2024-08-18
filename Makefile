@@ -149,6 +149,7 @@ spellcheck :
 	@scripts/spellcheck.sh faild failed
 	@scripts/spellcheck.sh mappng mapping
 	@scripts/spellcheck.sh priviledged privileged
+	@scripts/spellcheck.sh fullfill fulfill
 
 .PHONY : rustcheck
 rustcheck :

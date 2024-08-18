@@ -24,7 +24,7 @@ impl<T: Default> Default for Volatile<T> {
 }
 impl<T: Clone> Clone for Volatile<T> {
     fn clone(&self) -> Self {
-        let mut this = MaybeUninit::uninit();
+        let this = MaybeUninit::uninit();
         let mut this: Self = unsafe { this.assume_init() };
         this.write(self.read());
         this

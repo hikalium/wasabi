@@ -3,7 +3,6 @@ extern crate alloc;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::spawn_global;
-use crate::executor::Task;
 use crate::executor::TimeoutFuture;
 use crate::info;
 use crate::mutex::Mutex;

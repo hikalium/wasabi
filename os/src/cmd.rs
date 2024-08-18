@@ -87,11 +87,8 @@ pub async fn run(cmdline: &str) -> Result<()> {
             }
             "wait_until_dns_ready" => loop {
                 if let Some(dns_ip) = network.dns() {
-                    if let Some(eth) = network.arp_table_get(dns_ip) {
-                        break;
-                    } else {
-                        yield_execution().await;
-                    }
+                    info!("DNS server address is set up! ip = {dns_ip}");
+                    break;
                 } else {
                     yield_execution().await;
                 }

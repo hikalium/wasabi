@@ -35,7 +35,6 @@ use crate::xhci::trb::SetupStageTrb;
 use crate::xhci::trb::StatusStageTrb;
 use alloc::boxed::Box;
 use alloc::collections::LinkedList;
-use alloc::collections::VecDeque;
 use alloc::fmt::Debug;
 use alloc::rc::Rc;
 use alloc::rc::Weak;

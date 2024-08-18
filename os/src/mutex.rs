@@ -68,6 +68,15 @@ pub struct Mutex<T> {
     created_at_file: &'static str,
     created_at_line: u32,
 }
+impl<T: Sized> Debug for Mutex<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Mutex @ {}:{}",
+            self.created_at_file, self.created_at_line
+        )
+    }
+}
 impl<T: Sized> Mutex<T> {
     #[track_caller]
     pub const fn new(data: T) -> Self {
