@@ -312,6 +312,15 @@ impl XhciDriverForPci {
             info!("Initializing the xHC");
             let xhc = create_host_controller(bdf)?;
             let xhc = Rc::new(xhc);
+            {
+                let xhc = xhc.clone();
+                spawn_global(async move {
+                    loop {
+                        xhc.primary_event_ring().lock().poll().await?;
+                        yield_execution().await;
+                    }
+                })
+            }
             info!("Checking if the ring works");
             Self::ensure_ring_is_working(xhc.clone()).await?;
             info!("Entering the main loop");

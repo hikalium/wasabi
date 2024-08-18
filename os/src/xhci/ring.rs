@@ -387,7 +387,7 @@ impl EventRing {
         }
         Ok(None)
     }
-    async fn poll(&mut self) -> Result<()> {
+    pub async fn poll(&mut self) -> Result<()> {
         if let Some(e) = self.pop()? {
             info!("poll: {e:?}");
         }
