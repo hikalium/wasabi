@@ -5,11 +5,9 @@ use crate::error;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::dummy_waker;
+use crate::executor::spawn_global;
 use crate::executor::yield_execution;
-use crate::executor::Task;
-use crate::executor::ROOT_EXECUTOR;
 use crate::info;
-use crate::mutex::Mutex;
 use crate::pci::BusDeviceFunction;
 use crate::pci::PciDeviceDriver;
 use crate::pci::PciDeviceDriverInstance;
@@ -310,10 +308,13 @@ impl XhciDriverForPci {
         Ok(())
     }
     fn spawn(bdf: BusDeviceFunction) -> Result<Self> {
-        let task = Task::new(async move {
+        spawn_global(async move {
+            info!("Initializing the xHC");
             let xhc = create_host_controller(bdf)?;
             let xhc = Rc::new(xhc);
+            info!("Checking if the ring works");
             Self::ensure_ring_is_working(xhc.clone()).await?;
+            info!("Entering the main loop");
             loop {
                 if let Err(e) = Self::poll(xhc.clone()).await {
                     break Err(e);
@@ -322,7 +323,6 @@ impl XhciDriverForPci {
                 }
             }
         });
-        ROOT_EXECUTOR.lock().spawn(task);
         Ok(Self::default())
     }
 }

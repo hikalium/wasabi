@@ -2,9 +2,8 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
-use crate::executor::Task;
+use crate::executor::spawn_global;
 use crate::executor::TimeoutFuture;
-use crate::executor::ROOT_EXECUTOR;
 use crate::info;
 use crate::mutex::Mutex;
 use crate::net::eth::EthernetAddr;
@@ -275,12 +274,11 @@ impl Rtl8139DriverInstance {
             let d = Rc::downgrade(&d);
             Network::take().register_interface(d);
         }
-        let task = Task::new(async move {
+        spawn_global(async move {
             loop {
                 d.poll().await?
             }
         });
-        ROOT_EXECUTOR.lock().spawn(task);
         Ok(Self {})
     }
 }

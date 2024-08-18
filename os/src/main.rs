@@ -25,11 +25,10 @@ use os::efi::types::EfiHandle;
 use os::error;
 use os::error::Error;
 use os::error::Result;
+use os::executor::run_global_poll_loop;
 use os::executor::spawn_global;
 use os::executor::yield_execution;
-use os::executor::Executor;
 use os::executor::TimeoutFuture;
-use os::executor::ROOT_EXECUTOR;
 use os::info;
 use os::init;
 use os::input::InputManager;
@@ -224,9 +223,7 @@ fn run_tasks() -> Result<()> {
     spawn_global(init_task);
     init::init_pci();
     // Start executing tasks
-    loop {
-        Executor::poll(&ROOT_EXECUTOR);
-    }
+    run_global_poll_loop();
 }
 
 fn main() -> Result<()> {

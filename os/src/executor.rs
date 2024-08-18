@@ -9,7 +9,9 @@ use crate::process::Scheduler;
 use crate::x86_64::busy_loop_hint;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use core::fmt::Debug;
 use core::future::Future;
+use core::panic::Location;
 use core::pin::Pin;
 use core::ptr::null;
 use core::sync::atomic::AtomicBool;
@@ -40,16 +42,26 @@ pub async fn yield_execution() {
 
 pub struct Task<T> {
     future: Pin<Box<dyn Future<Output = Result<T>>>>,
+    created_at_file: &'static str,
+    created_at_line: u32,
 }
 impl<T> Task<T> {
+    #[track_caller]
     pub fn new(future: impl Future<Output = Result<T>> + 'static) -> Task<T> {
         Task {
             // Pin the task here to avoid invalidating the self references used in  the future
             future: Box::pin(future),
+            created_at_file: Location::caller().file(),
+            created_at_line: Location::caller().line(),
         }
     }
     fn poll(&mut self, context: &mut Context) -> Poll<Result<T>> {
         self.future.as_mut().poll(context)
+    }
+}
+impl<T> Debug for Task<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Task({}:{})", self.created_at_file, self.created_at_line)
     }
 }
 // Do nothing, just no_ops.
@@ -66,10 +78,19 @@ fn dummy_raw_waker() -> RawWaker {
 pub fn dummy_waker() -> Waker {
     unsafe { Waker::from_raw(dummy_raw_waker()) }
 }
-pub static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default());
+static ROOT_EXECUTOR: Mutex<Executor> = Mutex::new(Executor::default());
+
+#[track_caller]
 pub fn spawn_global(future: impl Future<Output = Result<()>> + 'static) {
     let task = Task::new(future);
     ROOT_EXECUTOR.lock().spawn(task);
+}
+
+pub fn run_global_poll_loop() -> ! {
+    info!("Starting global poll loop");
+    loop {
+        Executor::poll(&ROOT_EXECUTOR);
+    }
 }
 
 pub fn block_on<T>(future: impl Future<Output = Result<T>> + 'static) -> Result<T> {
@@ -123,7 +144,7 @@ impl Executor {
             let mut context = Context::from_waker(&waker);
             match task.poll(&mut context) {
                 Poll::Ready(result) => {
-                    info!("Task completed: {:?}", result);
+                    info!("Task completed: {:?}: {:?}", task, result);
                 }
                 Poll::Pending => {
                     executor.lock().task_queue().push_back(task);

@@ -2,9 +2,9 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::executor::spawn_global;
 use crate::executor::Task;
 use crate::executor::TimeoutFuture;
-use crate::executor::ROOT_EXECUTOR;
 use crate::info;
 use crate::mutex::Mutex;
 use crate::net::arp::ArpPacket;
@@ -94,19 +94,13 @@ impl Network {
             network.register_tcp_socket(18080, Rc::new(TcpSocket::new(TcpSocketState::Listen)));
             let dns_client = Rc::new(UdpSocket::default());
             network.register_udp_socket(PORT_DNS_SERVER, dns_client.clone());
-            {
-                let task = Task::new(async { network_manager_thread().await });
-                ROOT_EXECUTOR.lock().spawn(task);
-            }
-            {
-                let task = Task::new(async move {
-                    loop {
-                        let dns_packet = dns_client.recv().await;
-                        parse_dns_response(&dns_packet)?;
-                    }
-                });
-                ROOT_EXECUTOR.lock().spawn(task);
-            }
+            spawn_global(async { network_manager_thread().await });
+            spawn_global(async move {
+                loop {
+                    let dns_packet = dns_client.recv().await;
+                    parse_dns_response(&dns_packet)?;
+                }
+            });
             Rc::new(network)
         });
         network.clone()
