@@ -14,7 +14,7 @@ use crate::usb::descriptor::InterfaceDescriptor;
 use crate::usb::descriptor::UsbDescriptor;
 use crate::xhci::device::UsbDeviceDriverContext;
 use crate::xhci::device::UsbHidProtocol;
-use crate::xhci::future::TransferEventFuture;
+use crate::xhci::future::EventFuture;
 use alloc::format;
 use alloc::vec::Vec;
 
@@ -104,7 +104,8 @@ pub async fn usb_hid_keyboard_mainloop(ddc: UsbDeviceDriverContext) -> Result<()
     let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut prev_pressed_keys = BitSet::<32>::new();
     loop {
-        let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
+        let event_trb =
+            EventFuture::new_transfer_event_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
             Ok(Some(trb)) => {
                 let transfer_trb_ptr = trb.data() as usize;

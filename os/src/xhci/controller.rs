@@ -17,8 +17,7 @@ use crate::xhci::context::EndpointContext;
 use crate::xhci::context::InputContext;
 use crate::xhci::context::InputControlContext;
 use crate::xhci::context::OutputContext;
-use crate::xhci::future::CommandCompletionEventFuture;
-use crate::xhci::future::TransferEventFuture;
+use crate::xhci::future::EventFuture;
 use crate::xhci::registers::CapabilityRegisters;
 use crate::xhci::registers::Doorbell;
 use crate::xhci::registers::OperationalRegisters;
@@ -160,7 +159,7 @@ impl Controller {
     pub async fn send_command(&self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.lock().push(cmd)?;
         self.notify_xhc();
-        CommandCompletionEventFuture::new_on_trb(&self.primary_event_ring, cmd_ptr)
+        EventFuture::new_on_trb(&self.primary_event_ring, cmd_ptr)
             .await?
             .ok_or(Error::Failed("Timed out"))
     }
@@ -216,7 +215,7 @@ impl Controller {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
+        EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
@@ -240,7 +239,7 @@ impl Controller {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
+        EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
@@ -267,7 +266,7 @@ impl Controller {
         )?;
         let trb_ptr_waiting = ctrl_ep_ring.push(StatusStageTrb::new_in().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
+        EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
@@ -294,7 +293,7 @@ impl Controller {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
+        EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()
@@ -321,7 +320,7 @@ impl Controller {
         let trb_ptr_waiting = ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
         ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
         self.notify_ep(slot, 1)?;
-        TransferEventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
+        EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .ok_or(Error::Failed("Timed out"))?
             .completed()

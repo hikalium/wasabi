@@ -8,7 +8,7 @@ use crate::usb::descriptor::UsbDescriptor;
 use crate::warn;
 use crate::xhci::context::InputContext;
 use crate::xhci::controller::Controller;
-use crate::xhci::future::TransferEventFuture;
+use crate::xhci::future::EventFuture;
 use crate::xhci::ring::CommandRing;
 use crate::xhci::ring::TransferRing;
 use crate::xhci::trb::GenericTrbEntry;
@@ -153,13 +153,9 @@ impl UsbDeviceDriverContext {
         self.xhci.notify_ep(self.slot, ep.dci())
     }
     pub async fn wait_transfer_event(&mut self) -> Result<()> {
-        TransferEventFuture::new_on_slot_with_timeout(
-            self.xhci.primary_event_ring(),
-            self.slot,
-            10 * 1000,
-        )
-        .await?
-        .ok_or(Error::Failed("Timed out"))?
-        .completed()
+        EventFuture::new_on_slot_with_timeout(self.xhci.primary_event_ring(), self.slot, 10 * 1000)
+            .await?
+            .ok_or(Error::Failed("Timed out"))?
+            .completed()
     }
 }

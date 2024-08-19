@@ -8,7 +8,7 @@ use crate::print::hexdump;
 use crate::println;
 use crate::xhci::controller::EndpointType;
 use crate::xhci::device::UsbDeviceDriverContext;
-use crate::xhci::future::TransferEventFuture;
+use crate::xhci::future::EventFuture;
 use crate::xhci::trb::DataStageTrb;
 use crate::xhci::trb::SetupStageTrb;
 use crate::xhci::trb::StatusStageTrb;
@@ -306,8 +306,11 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
         .upgrade()
         .ok_or("PORTSC was invalid")?;
     loop {
-        let event_trb =
-            TransferEventFuture::new_on_slot(ddc.xhci().primary_event_ring(), ddc.slot()).await;
+        let event_trb = EventFuture::new_command_completion_on_slot(
+            ddc.xhci().primary_event_ring(),
+            ddc.slot(),
+        )
+        .await;
         match event_trb {
             Ok(Some(trb)) => {
                 println!(

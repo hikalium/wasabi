@@ -18,7 +18,7 @@ use core::task::Poll;
 
 #[derive(Debug)]
 pub struct EventWaitCond {
-    trb_type: TrbType,
+    trb_type: Option<TrbType>,
     trb_addr: Option<u64>,
     slot: Option<u8>,
 }
@@ -31,8 +31,10 @@ pub struct EventWaitInfo {
 }
 impl EventWaitInfo {
     pub fn matches(&self, trb: &GenericTrbEntry) -> bool {
-        if trb.trb_type() != self.cond.trb_type as u32 {
-            return false;
+        if let Some(trb_type) = self.cond.trb_type {
+            if trb.trb_type() != trb_type as u32 {
+                return false;
+            }
         }
         if let Some(slot) = self.cond.slot {
             if trb.slot_id() != slot {
@@ -63,12 +65,12 @@ pub enum EventFutureWaitType {
     Slot(u8),
 }
 
-pub struct EventFuture<const E: TrbType> {
+pub struct EventFuture {
     wait_on: Rc<EventWaitInfo>,
     time_out: u64,
     _pinned: PhantomPinned,
 }
-impl<'a, const E: TrbType> EventFuture<E> {
+impl EventFuture {
     pub fn new_with_timeout(
         event_ring: &Mutex<EventRing>,
         wait_ms: u64,
@@ -88,8 +90,19 @@ impl<'a, const E: TrbType> EventFuture<E> {
             _pinned: PhantomPinned,
         }
     }
-    pub fn new_on_slot_with_timeout(
-        event_ring: &'a Mutex<EventRing>,
+    pub fn new_on_slot_with_timeout(event_ring: &Mutex<EventRing>, slot: u8, wait_ms: u64) -> Self {
+        Self::new_with_timeout(
+            event_ring,
+            wait_ms,
+            EventWaitCond {
+                trb_type: None,
+                trb_addr: None,
+                slot: Some(slot),
+            },
+        )
+    }
+    pub fn new_command_completion_on_slot_with_timeout(
+        event_ring: &Mutex<EventRing>,
         slot: u8,
         wait_ms: u64,
     ) -> Self {
@@ -97,17 +110,39 @@ impl<'a, const E: TrbType> EventFuture<E> {
             event_ring,
             wait_ms,
             EventWaitCond {
-                trb_type: E,
+                trb_type: Some(TrbType::CommandCompletionEvent),
                 trb_addr: None,
                 slot: Some(slot),
             },
         )
     }
-    pub fn new_on_slot(event_ring: &'a Mutex<EventRing>, slot: u8) -> Self {
+    pub fn new_command_completion_on_slot(event_ring: &Mutex<EventRing>, slot: u8) -> Self {
+        Self::new_with_timeout(
+            event_ring,
+            100,
+            EventWaitCond {
+                trb_type: Some(TrbType::CommandCompletionEvent),
+                trb_addr: None,
+                slot: Some(slot),
+            },
+        )
+    }
+    pub fn new_transfer_event_on_slot(event_ring: &Mutex<EventRing>, slot: u8) -> Self {
+        Self::new_with_timeout(
+            event_ring,
+            100,
+            EventWaitCond {
+                trb_type: Some(TrbType::TransferEvent),
+                trb_addr: None,
+                slot: Some(slot),
+            },
+        )
+    }
+    pub fn new_on_slot(event_ring: &Mutex<EventRing>, slot: u8) -> Self {
         Self::new_on_slot_with_timeout(event_ring, slot, 100)
     }
     pub fn new_on_trb_with_timeout(
-        event_ring: &'a Mutex<EventRing>,
+        event_ring: &Mutex<EventRing>,
         trb_addr: u64,
         wait_ms: u64,
     ) -> Self {
@@ -115,18 +150,18 @@ impl<'a, const E: TrbType> EventFuture<E> {
             event_ring,
             wait_ms,
             EventWaitCond {
-                trb_type: E,
+                trb_type: None,
                 trb_addr: Some(trb_addr),
                 slot: None,
             },
         )
     }
-    pub fn new_on_trb(event_ring: &'a Mutex<EventRing>, trb_addr: u64) -> Self {
+    pub fn new_on_trb(event_ring: &Mutex<EventRing>, trb_addr: u64) -> Self {
         Self::new_on_trb_with_timeout(event_ring, trb_addr, 100)
     }
 }
 /// Event
-impl<const E: TrbType> Future for EventFuture<E> {
+impl Future for EventFuture {
     type Output = Result<Option<GenericTrbEntry>>;
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<Option<GenericTrbEntry>>> {
         if self.time_out < Hpet::take().main_counter() {
@@ -140,5 +175,3 @@ impl<const E: TrbType> Future for EventFuture<E> {
         }
     }
 }
-pub type CommandCompletionEventFuture<'a> = EventFuture<{ TrbType::CommandCompletionEvent }>;
-pub type TransferEventFuture<'a> = EventFuture<{ TrbType::TransferEvent }>;

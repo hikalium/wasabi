@@ -12,7 +12,7 @@ use crate::usb::descriptor::InterfaceDescriptor;
 use crate::usb::descriptor::UsbDescriptor;
 use crate::xhci::device::UsbDeviceDriverContext;
 use crate::xhci::device::UsbHidProtocol;
-use crate::xhci::future::TransferEventFuture;
+use crate::xhci::future::EventFuture;
 use alloc::format;
 use alloc::vec::Vec;
 use noli::bitmap::Bitmap;
@@ -94,7 +94,8 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
     let max_y = h - 1.0;
 
     loop {
-        let event_trb = TransferEventFuture::new_on_slot(xhci.primary_event_ring(), slot).await;
+        let event_trb =
+            EventFuture::new_transfer_event_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
             Ok(Some(trb)) => {
                 let transfer_trb_ptr = trb.data() as usize;
