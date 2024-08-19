@@ -400,7 +400,7 @@ impl EventRing {
                 if let Some(w) = w.upgrade() {
                     let w: &EventWaitInfo = w.as_ref();
                     if w.matches(&e) {
-                        w.resolve(&e);
+                        w.resolve(&e)?;
                         consumed = true;
                     }
                 }

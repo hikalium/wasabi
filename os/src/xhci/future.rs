@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::error::Result;
 use crate::hpet::Hpet;
 use crate::mutex::Mutex;
+use crate::warn;
 use crate::xhci::ring::EventRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::TrbType;
@@ -45,9 +46,15 @@ impl EventWaitInfo {
         }
         true
     }
-    pub fn resolve(&self, trb: &GenericTrbEntry) {
-        *self.event_trb.lock() = trb.clone();
-        self.fulfilled.store(true, Ordering::SeqCst);
+    pub fn resolve(&self, trb: &GenericTrbEntry) -> Result<()> {
+        self.event_trb.under_locked(&|event_trb| -> Result<()> {
+            if self.fulfilled.load(Ordering::SeqCst) {
+                warn!("tried to resolve event wait while the event is fulfilled");
+            }
+            *event_trb = trb.clone();
+            self.fulfilled.store(true, Ordering::SeqCst);
+            Ok(())
+        })
     }
 }
 
