@@ -312,34 +312,35 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
         )
         .await;
         match event_trb {
-            Ok(Some(trb)) => {
-                println!(
-                    "slot = {}, dci = {}, length = {}",
-                    ddc.slot(),
-                    trb.dci(),
-                    trb.transfer_length()
-                );
-                if trb.dci() != 1 {
-                    if let Some(ref mut tring) = ddc.ep_ring(trb.dci())?.as_ref() {
-                        let cmd = tring.current();
-                        let data = unsafe {
-                            Mmio::<[u8; 8]>::from_raw(*(cmd.data() as *const usize) as *mut [u8; 8])
-                        };
-                        hexdump(data.as_ref());
-                        let transfer_trb_ptr = trb.data() as usize;
-                        tring.dequeue_trb(transfer_trb_ptr)?;
-                        println!("{:#018X}", transfer_trb_ptr);
-                        ddc.xhci().notify_ep(ddc.slot(), trb.dci())?;
-                        println!("{:?}", tring)
+            Ok(trbs) => {
+                for trb in trbs {
+                    println!(
+                        "slot = {}, dci = {}, length = {}",
+                        ddc.slot(),
+                        trb.dci(),
+                        trb.transfer_length()
+                    );
+                    if trb.dci() != 1 {
+                        if let Some(ref mut tring) = ddc.ep_ring(trb.dci())?.as_ref() {
+                            let cmd = tring.current();
+                            let data = unsafe {
+                                Mmio::<[u8; 8]>::from_raw(
+                                    *(cmd.data() as *const usize) as *mut [u8; 8],
+                                )
+                            };
+                            hexdump(data.as_ref());
+                            let transfer_trb_ptr = trb.data() as usize;
+                            tring.dequeue_trb(transfer_trb_ptr)?;
+                            println!("{:#018X}", transfer_trb_ptr);
+                            ddc.xhci().notify_ep(ddc.slot(), trb.dci())?;
+                            println!("{:?}", tring)
+                        }
                     }
+                    let status = read_mac_reg_u16(&mut ddc, MAC_REG_MEDIUM_STATUS_MODE).await?;
+                    println!("status: {:#06X}", status);
+                    let gmii_phy_status = read_phy_reg(&mut ddc, GMII_PHY_PHYSR).await?;
+                    println!("gmii_phys_link: {:#04X}", gmii_phy_status);
                 }
-                let status = read_mac_reg_u16(&mut ddc, MAC_REG_MEDIUM_STATUS_MODE).await?;
-                println!("status: {:#06X}", status);
-                let gmii_phy_status = read_phy_reg(&mut ddc, GMII_PHY_PHYSR).await?;
-                println!("gmii_phys_link: {:#04X}", gmii_phy_status);
-            }
-            Ok(None) => {
-                // Timed out. Do nothing.
             }
             Err(e) => {
                 println!("Error: {:?}", e);

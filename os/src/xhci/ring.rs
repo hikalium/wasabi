@@ -17,6 +17,7 @@ use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::fmt;
 use alloc::fmt::Debug;
+use alloc::format;
 use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::vec::Vec;
@@ -215,8 +216,9 @@ impl TransferRingInner {
         Ok(())
     }
     pub fn dequeue_trb(&mut self, trb_ptr: usize) -> Result<()> {
-        if self.ring.as_ref().trb_ptr(self.dequeue_index) != trb_ptr {
-            return Err(Error::Failed("unexpected trb ptr"));
+        let trb_ptr_expected = self.ring.as_ref().trb_ptr(self.dequeue_index);
+        if trb_ptr_expected != trb_ptr {
+            return Err(Error::FailedString(format!("expected trb ptr {trb_ptr_expected:#018X} but got {trb_ptr:#018X}. dequeue_index = {}", self.dequeue_index)));
         }
         let mut_ring = unsafe { self.ring.get_unchecked_mut() };
         // Dequeue the trb
@@ -407,6 +409,8 @@ impl EventRing {
             }
             if !consumed {
                 info!("unhandled event: {e:?}");
+            } else {
+                info!("ok        event: {e:?}");
             }
             // cleanup stale waiters
             let stale_waiter_indices = self

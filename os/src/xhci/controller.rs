@@ -161,6 +161,8 @@ impl Controller {
         self.notify_xhc();
         EventFuture::new_on_trb(&self.primary_event_ring, cmd_ptr)
             .await?
+            .get(0)
+            .cloned()
             .ok_or(Error::Failed("Timed out"))
     }
     pub async fn request_initial_device_descriptor(
@@ -217,6 +219,7 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .get(0)
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
@@ -241,6 +244,7 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .get(0)
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
@@ -268,6 +272,7 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .get(0)
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
@@ -295,6 +300,7 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .get(0)
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
@@ -322,6 +328,7 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
+            .get(0)
             .ok_or(Error::Failed("Timed out"))?
             .completed()
     }

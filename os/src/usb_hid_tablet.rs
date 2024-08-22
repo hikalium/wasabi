@@ -97,46 +97,46 @@ pub async fn attach_usb_device(mut ddc: UsbDeviceDriverContext) -> Result<()> {
         let event_trb =
             EventFuture::new_transfer_event_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
-            Ok(Some(trb)) => {
-                let transfer_trb_ptr = trb.data() as usize;
-                let mut report = [0u8; 8];
-                report.copy_from_slice(
-                    unsafe {
-                        Mmio::<[u8; 8]>::from_raw(
-                            *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
-                        )
+            Ok(trbs) => {
+                for trb in trbs {
+                    let transfer_trb_ptr = trb.data() as usize;
+                    let mut report = [0u8; 8];
+                    report.copy_from_slice(
+                        unsafe {
+                            Mmio::<[u8; 8]>::from_raw(
+                                *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
+                            )
+                        }
+                        .as_ref(),
+                    );
+                    if let Some(ref mut tring) = ddc.ep_ring(trb.dci())?.as_ref() {
+                        tring.dequeue_trb(transfer_trb_ptr)?;
+                        xhci.notify_ep(slot, trb.dci())?;
                     }
-                    .as_ref(),
-                );
-                if let Some(ref mut tring) = ddc.ep_ring(trb.dci())?.as_ref() {
-                    tring.dequeue_trb(transfer_trb_ptr)?;
-                    xhci.notify_ep(slot, trb.dci())?;
+
+                    let b = report[0];
+                    let l = b & 1 != 0;
+                    let r = b & 2 != 0;
+                    let c = b & 4 != 0;
+                    let button = MouseButtonState::from_lcr(l, c, r);
+
+                    // 0~32767, top left origin (on QEMU)
+                    let px = [report[1], report[2]];
+                    let py = [report[3], report[4]];
+                    let px = u16::from_le_bytes(px);
+                    let py = u16::from_le_bytes(py);
+                    let px = px as f64 / 32768f64;
+                    let py = py as f64 / 32768f64;
+                    // convert to the screen corrdinates
+                    let px = px * w;
+                    let py = py * h;
+                    let px = unsafe { px.clamp(0.0, max_x).to_int_unchecked() };
+                    let py = unsafe { py.clamp(0.0, max_y).to_int_unchecked() };
+                    let position = PointerPosition::from_xy(px, py);
+
+                    InputManager::take()
+                        .push_cursor_input_absolute(MouseEvent { button, position });
                 }
-
-                let b = report[0];
-                let l = b & 1 != 0;
-                let r = b & 2 != 0;
-                let c = b & 4 != 0;
-                let button = MouseButtonState::from_lcr(l, c, r);
-
-                // 0~32767, top left origin (on QEMU)
-                let px = [report[1], report[2]];
-                let py = [report[3], report[4]];
-                let px = u16::from_le_bytes(px);
-                let py = u16::from_le_bytes(py);
-                let px = px as f64 / 32768f64;
-                let py = py as f64 / 32768f64;
-                // convert to the screen corrdinates
-                let px = px * w;
-                let py = py * h;
-                let px = unsafe { px.clamp(0.0, max_x).to_int_unchecked() };
-                let py = unsafe { py.clamp(0.0, max_y).to_int_unchecked() };
-                let position = PointerPosition::from_xy(px, py);
-
-                InputManager::take().push_cursor_input_absolute(MouseEvent { button, position });
-            }
-            Ok(None) => {
-                // Timed out. Do nothing.
             }
             Err(e) => {
                 error!("e: {:?}", e);

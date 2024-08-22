@@ -3,16 +3,14 @@ extern crate alloc;
 use crate::error::Result;
 use crate::hpet::Hpet;
 use crate::mutex::Mutex;
-use crate::warn;
 use crate::xhci::ring::EventRing;
 use crate::xhci::trb::GenericTrbEntry;
 use crate::xhci::trb::TrbType;
+use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use core::future::Future;
 use core::marker::PhantomPinned;
 use core::pin::Pin;
-use core::sync::atomic::AtomicBool;
-use core::sync::atomic::Ordering;
 use core::task::Context;
 use core::task::Poll;
 
@@ -26,8 +24,7 @@ pub struct EventWaitCond {
 #[derive(Debug)]
 pub struct EventWaitInfo {
     cond: EventWaitCond,
-    fulfilled: AtomicBool,
-    event_trb: Mutex<GenericTrbEntry>,
+    trbs: Mutex<VecDeque<GenericTrbEntry>>,
 }
 impl EventWaitInfo {
     pub fn matches(&self, trb: &GenericTrbEntry) -> bool {
@@ -49,12 +46,8 @@ impl EventWaitInfo {
         true
     }
     pub fn resolve(&self, trb: &GenericTrbEntry) -> Result<()> {
-        self.event_trb.under_locked(&|event_trb| -> Result<()> {
-            if self.fulfilled.load(Ordering::SeqCst) {
-                warn!("tried to resolve event wait while the event is fulfilled");
-            }
-            *event_trb = trb.clone();
-            self.fulfilled.store(true, Ordering::SeqCst);
+        self.trbs.under_locked(&|trbs| -> Result<()> {
+            trbs.push_back(trb.clone());
             Ok(())
         })
     }
@@ -79,8 +72,7 @@ impl EventFuture {
         let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * wait_ms;
         let wait_on = EventWaitInfo {
             cond,
-            fulfilled: Default::default(),
-            event_trb: Default::default(),
+            trbs: Default::default(),
         };
         let wait_on = Rc::new(wait_on);
         event_ring.lock().register_waiter(&wait_on);
@@ -162,14 +154,14 @@ impl EventFuture {
 }
 /// Event
 impl Future for EventFuture {
-    type Output = Result<Option<GenericTrbEntry>>;
-    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<Option<GenericTrbEntry>>> {
+    type Output = Result<VecDeque<GenericTrbEntry>>;
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<VecDeque<GenericTrbEntry>>> {
         if self.time_out < Hpet::take().main_counter() {
-            return Poll::Ready(Ok(None));
+            return Poll::Ready(Ok(Default::default()));
         }
         let mut_self = unsafe { self.get_unchecked_mut() };
-        if mut_self.wait_on.fulfilled.load(Ordering::SeqCst) {
-            Poll::Ready(Ok(Some((*mut_self.wait_on.event_trb.lock()).clone())))
+        if mut_self.wait_on.trbs.lock().len() > 0 {
+            Poll::Ready(Ok(mut_self.wait_on.trbs.lock().clone()))
         } else {
             Poll::Pending
         }
