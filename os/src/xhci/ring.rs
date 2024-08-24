@@ -409,8 +409,6 @@ impl EventRing {
             }
             if !consumed {
                 info!("unhandled event: {e:?}");
-            } else {
-                info!("ok        event: {e:?}");
             }
             // cleanup stale waiters
             let stale_waiter_indices = self
