@@ -103,52 +103,49 @@ pub async fn usb_hid_keyboard_mainloop(ddc: UsbDeviceDriverContext) -> Result<()
     let xhci = ddc.xhci();
     let portsc = xhci.portsc(port)?.upgrade().ok_or("PORTSC was invalid")?;
     let mut prev_pressed_keys = BitSet::<32>::new();
+    let event_trb = EventFuture::new_transfer_event_on_slot(xhci.primary_event_ring(), slot);
     loop {
-        let event_trb =
-            EventFuture::new_transfer_event_on_slot(xhci.primary_event_ring(), slot).await;
+        let event_trb = event_trb.clone().await;
         match event_trb {
-            Ok(trbs) => {
-                info!("kbd trbs: {trbs:?}");
-                for trb in trbs {
-                    let transfer_trb_ptr = trb.data() as usize;
-                    let mut report = [0u8; 8];
-                    report.copy_from_slice(
-                        unsafe {
-                            Mmio::<[u8; 8]>::from_raw(
-                                *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
-                            )
-                        }
-                        .as_ref(),
-                    );
-                    if let Some(ref mut tring) = ddc.ep_ring(trb.dci())?.as_ref() {
-                        tring.dequeue_trb(transfer_trb_ptr)?;
-                        xhci.notify_ep(slot, trb.dci())?;
+            Ok(trb) => {
+                let transfer_trb_ptr = trb.data() as usize;
+                let mut report = [0u8; 8];
+                report.copy_from_slice(
+                    unsafe {
+                        Mmio::<[u8; 8]>::from_raw(
+                            *(transfer_trb_ptr as *const usize) as *mut [u8; 8],
+                        )
                     }
-                    let mut next_pressed_keys = BitSet::<32>::new();
-                    // First two bytes are modifiers, so skip them
-                    let keycodes = report.iter().skip(2);
-                    for value in keycodes {
-                        next_pressed_keys.insert(*value as usize).unwrap();
-                    }
-                    let change = prev_pressed_keys.symmetric_difference(&next_pressed_keys);
-                    for id in change.iter() {
-                        let c = usage_id_to_char(id as u8);
-                        if let Ok(c) = c {
-                            if !prev_pressed_keys.get(id).unwrap_or(false) {
-                                // the key state was changed from released to pressed
-                                if c == KeyEvent::None {
-                                    continue;
-                                }
-                                if let Some(c) = c.to_char() {
-                                    InputManager::take().push_input(c);
-                                }
-                            }
-                        } else {
-                            error!("{c:?}");
-                        }
-                    }
-                    prev_pressed_keys = next_pressed_keys;
+                    .as_ref(),
+                );
+                if let Some(ref mut tring) = ddc.ep_ring(trb.dci())?.as_ref() {
+                    tring.dequeue_trb(transfer_trb_ptr)?;
+                    xhci.notify_ep(slot, trb.dci())?;
                 }
+                let mut next_pressed_keys = BitSet::<32>::new();
+                // First two bytes are modifiers, so skip them
+                let keycodes = report.iter().skip(2);
+                for value in keycodes {
+                    next_pressed_keys.insert(*value as usize).unwrap();
+                }
+                let change = prev_pressed_keys.symmetric_difference(&next_pressed_keys);
+                for id in change.iter() {
+                    let c = usage_id_to_char(id as u8);
+                    if let Ok(c) = c {
+                        if !prev_pressed_keys.get(id).unwrap_or(false) {
+                            // the key state was changed from released to pressed
+                            if c == KeyEvent::None {
+                                continue;
+                            }
+                            if let Some(c) = c.to_char() {
+                                InputManager::take().push_input(c);
+                            }
+                        }
+                    } else {
+                        error!("{c:?}");
+                    }
+                }
+                prev_pressed_keys = next_pressed_keys;
             }
             Err(e) => {
                 error!("e: {:?}", e);

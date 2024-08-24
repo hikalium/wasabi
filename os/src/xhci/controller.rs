@@ -159,11 +159,7 @@ impl Controller {
     pub async fn send_command(&self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
         let cmd_ptr = self.command_ring.lock().push(cmd)?;
         self.notify_xhc();
-        EventFuture::new_on_trb(&self.primary_event_ring, cmd_ptr)
-            .await?
-            .get(0)
-            .cloned()
-            .ok_or(Error::Failed("Timed out"))
+        EventFuture::new_on_trb(&self.primary_event_ring, cmd_ptr).await
     }
     pub async fn request_initial_device_descriptor(
         &self,
@@ -219,8 +215,6 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .get(0)
-            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_set_interface(
@@ -244,8 +238,6 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .get(0)
-            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_set_protocol(
@@ -272,8 +264,6 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .get(0)
-            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_report_bytes(
@@ -300,8 +290,6 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .get(0)
-            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     async fn request_descriptor<T: Sized>(
@@ -328,8 +316,6 @@ impl Controller {
         self.notify_ep(slot, 1)?;
         EventFuture::new_on_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .get(0)
-            .ok_or(Error::Failed("Timed out"))?
             .completed()
     }
     pub async fn request_config_descriptor_and_rest(

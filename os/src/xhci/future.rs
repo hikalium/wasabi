@@ -58,12 +58,27 @@ pub enum EventFutureWaitType {
     Slot(u8),
 }
 
+// TODO: Remove time_out
+#[derive(Clone)]
 pub struct EventFuture {
     wait_on: Rc<EventWaitInfo>,
-    time_out: u64,
+    time_out: Option<u64>,
     _pinned: PhantomPinned,
 }
 impl EventFuture {
+    pub fn new(event_ring: &Mutex<EventRing>, cond: EventWaitCond) -> Self {
+        let wait_on = EventWaitInfo {
+            cond,
+            trbs: Default::default(),
+        };
+        let wait_on = Rc::new(wait_on);
+        event_ring.lock().register_waiter(&wait_on);
+        Self {
+            wait_on,
+            time_out: None,
+            _pinned: PhantomPinned,
+        }
+    }
     pub fn new_with_timeout(
         event_ring: &Mutex<EventRing>,
         wait_ms: u64,
@@ -78,7 +93,7 @@ impl EventFuture {
         event_ring.lock().register_waiter(&wait_on);
         Self {
             wait_on,
-            time_out,
+            time_out: Some(time_out),
             _pinned: PhantomPinned,
         }
     }
@@ -86,6 +101,16 @@ impl EventFuture {
         Self::new_with_timeout(
             event_ring,
             wait_ms,
+            EventWaitCond {
+                trb_type: None,
+                trb_addr: None,
+                slot: Some(slot),
+            },
+        )
+    }
+    pub fn new_on_slot(event_ring: &Mutex<EventRing>, slot: u8) -> Self {
+        Self::new(
+            event_ring,
             EventWaitCond {
                 trb_type: None,
                 trb_addr: None,
@@ -120,18 +145,14 @@ impl EventFuture {
         )
     }
     pub fn new_transfer_event_on_slot(event_ring: &Mutex<EventRing>, slot: u8) -> Self {
-        Self::new_with_timeout(
+        Self::new(
             event_ring,
-            100,
             EventWaitCond {
                 trb_type: Some(TrbType::TransferEvent),
                 trb_addr: None,
                 slot: Some(slot),
             },
         )
-    }
-    pub fn new_on_slot(event_ring: &Mutex<EventRing>, slot: u8) -> Self {
-        Self::new_on_slot_with_timeout(event_ring, slot, 100)
     }
     pub fn new_on_trb_with_timeout(
         event_ring: &Mutex<EventRing>,
@@ -154,14 +175,16 @@ impl EventFuture {
 }
 /// Event
 impl Future for EventFuture {
-    type Output = Result<VecDeque<GenericTrbEntry>>;
-    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<VecDeque<GenericTrbEntry>>> {
-        if self.time_out < Hpet::take().main_counter() {
-            return Poll::Ready(Ok(Default::default()));
+    type Output = Result<GenericTrbEntry>;
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<GenericTrbEntry>> {
+        if let Some(time_out) = self.time_out {
+            if time_out < Hpet::take().main_counter() {
+                return Poll::Ready(Ok(Default::default()));
+            }
         }
         let mut_self = unsafe { self.get_unchecked_mut() };
-        if mut_self.wait_on.trbs.lock().len() > 0 {
-            Poll::Ready(Ok(mut_self.wait_on.trbs.lock().clone()))
+        if let Some(trb) = mut_self.wait_on.trbs.lock().pop_front() {
+            Poll::Ready(Ok(trb))
         } else {
             Poll::Pending
         }
