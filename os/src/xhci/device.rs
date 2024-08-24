@@ -152,7 +152,7 @@ impl UsbDeviceDriverContext {
         self.xhci.notify_ep(self.slot, ep.dci())
     }
     pub async fn wait_transfer_event(&mut self) -> Result<()> {
-        EventFuture::new_on_slot_with_timeout(self.xhci.primary_event_ring(), self.slot, 10 * 1000)
+        EventFuture::new_on_slot(self.xhci.primary_event_ring(), self.slot)
             .await?
             .completed()
     }

@@ -1,7 +1,6 @@
 extern crate alloc;
 
 use crate::error::Result;
-use crate::hpet::Hpet;
 use crate::mutex::Mutex;
 use crate::xhci::ring::EventRing;
 use crate::xhci::trb::GenericTrbEntry;
@@ -58,11 +57,9 @@ pub enum EventFutureWaitType {
     Slot(u8),
 }
 
-// TODO: Remove time_out
 #[derive(Clone)]
 pub struct EventFuture {
     wait_on: Rc<EventWaitInfo>,
-    time_out: Option<u64>,
     _pinned: PhantomPinned,
 }
 impl EventFuture {
@@ -75,38 +72,8 @@ impl EventFuture {
         event_ring.lock().register_waiter(&wait_on);
         Self {
             wait_on,
-            time_out: None,
             _pinned: PhantomPinned,
         }
-    }
-    pub fn new_with_timeout(
-        event_ring: &Mutex<EventRing>,
-        wait_ms: u64,
-        cond: EventWaitCond,
-    ) -> Self {
-        let time_out = Hpet::take().main_counter() + Hpet::take().freq() / 1000 * wait_ms;
-        let wait_on = EventWaitInfo {
-            cond,
-            trbs: Default::default(),
-        };
-        let wait_on = Rc::new(wait_on);
-        event_ring.lock().register_waiter(&wait_on);
-        Self {
-            wait_on,
-            time_out: Some(time_out),
-            _pinned: PhantomPinned,
-        }
-    }
-    pub fn new_on_slot_with_timeout(event_ring: &Mutex<EventRing>, slot: u8, wait_ms: u64) -> Self {
-        Self::new_with_timeout(
-            event_ring,
-            wait_ms,
-            EventWaitCond {
-                trb_type: None,
-                trb_addr: None,
-                slot: Some(slot),
-            },
-        )
     }
     pub fn new_on_slot(event_ring: &Mutex<EventRing>, slot: u8) -> Self {
         Self::new(
@@ -118,25 +85,9 @@ impl EventFuture {
             },
         )
     }
-    pub fn new_command_completion_on_slot_with_timeout(
-        event_ring: &Mutex<EventRing>,
-        slot: u8,
-        wait_ms: u64,
-    ) -> Self {
-        Self::new_with_timeout(
-            event_ring,
-            wait_ms,
-            EventWaitCond {
-                trb_type: Some(TrbType::CommandCompletionEvent),
-                trb_addr: None,
-                slot: Some(slot),
-            },
-        )
-    }
     pub fn new_command_completion_on_slot(event_ring: &Mutex<EventRing>, slot: u8) -> Self {
-        Self::new_with_timeout(
+        Self::new(
             event_ring,
-            100,
             EventWaitCond {
                 trb_type: Some(TrbType::CommandCompletionEvent),
                 trb_addr: None,
@@ -154,14 +105,9 @@ impl EventFuture {
             },
         )
     }
-    pub fn new_on_trb_with_timeout(
-        event_ring: &Mutex<EventRing>,
-        trb_addr: u64,
-        wait_ms: u64,
-    ) -> Self {
-        Self::new_with_timeout(
+    pub fn new_on_trb(event_ring: &Mutex<EventRing>, trb_addr: u64) -> Self {
+        Self::new(
             event_ring,
-            wait_ms,
             EventWaitCond {
                 trb_type: None,
                 trb_addr: Some(trb_addr),
@@ -169,19 +115,11 @@ impl EventFuture {
             },
         )
     }
-    pub fn new_on_trb(event_ring: &Mutex<EventRing>, trb_addr: u64) -> Self {
-        Self::new_on_trb_with_timeout(event_ring, trb_addr, 100)
-    }
 }
 /// Event
 impl Future for EventFuture {
     type Output = Result<GenericTrbEntry>;
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<GenericTrbEntry>> {
-        if let Some(time_out) = self.time_out {
-            if time_out < Hpet::take().main_counter() {
-                return Poll::Ready(Ok(Default::default()));
-            }
-        }
         let mut_self = unsafe { self.get_unchecked_mut() };
         if let Some(trb) = mut_self.wait_on.trbs.lock().pop_front() {
             Poll::Ready(Ok(trb))
