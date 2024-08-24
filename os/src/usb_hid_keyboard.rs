@@ -108,9 +108,7 @@ pub async fn usb_hid_keyboard_mainloop(ddc: UsbDeviceDriverContext) -> Result<()
             EventFuture::new_transfer_event_on_slot(xhci.primary_event_ring(), slot).await;
         match event_trb {
             Ok(trbs) => {
-                if trbs.len() > 1 {
-                    info!("trbs: {trbs:?}")
-                }
+                info!("kbd trbs: {trbs:?}");
                 for trb in trbs {
                     let transfer_trb_ptr = trb.data() as usize;
                     let mut report = [0u8; 8];
