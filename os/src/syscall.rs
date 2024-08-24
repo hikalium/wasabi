@@ -55,23 +55,21 @@ fn sys_draw_point(args: &[u64; 5]) -> u64 {
 }
 
 fn sys_read_key(_args: &[u64; 5]) -> u64 {
-    loop {
-        if let Some(c) = InputManager::take().pop_input() {
-            return c as u64;
-        } else {
-            Scheduler::root().switch_process()
-        }
+    if let Some(c) = InputManager::take().pop_input() {
+        c as u64
+    } else {
+        Scheduler::root().switch_process();
+        0
     }
 }
 
 fn sys_get_mouse_cursor_position(args: &[u64; 5]) -> u64 {
-    loop {
-        if let Some(e) = InputManager::take().pop_cursor_input_absolute() {
-            unsafe { write_volatile(args[0] as *mut MouseEvent, e) }
-            return 0;
-        } else {
-            Scheduler::root().switch_process()
-        }
+    if let Some(e) = InputManager::take().pop_cursor_input_absolute() {
+        unsafe { write_volatile(args[0] as *mut MouseEvent, e) }
+        0
+    } else {
+        Scheduler::root().switch_process();
+        1
     }
 }
 

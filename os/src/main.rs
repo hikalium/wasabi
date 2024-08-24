@@ -12,10 +12,7 @@ use alloc::string::String;
 use core::pin::Pin;
 use core::str::FromStr;
 use noli::bitmap::bitmap_draw_line;
-use noli::bitmap::bitmap_draw_point;
-use noli::bitmap::bitmap_draw_rect;
 use noli::bitmap::Bitmap;
-use noli::bitmap::BitmapBuffer;
 use os::boot_info::BootInfo;
 use os::boot_info::File;
 use os::cmd;
@@ -37,7 +34,6 @@ use os::serial::SerialPort;
 use os::x86_64;
 use os::x86_64::read_rsp;
 use os::x86_64::syscall::init_syscall;
-use sabi::MouseEvent;
 
 fn paint_wasabi_logo() {
     const SIZE: i64 = 256;
@@ -179,47 +175,49 @@ fn run_tasks() -> Result<()> {
             yield_execution().await;
         }
     };
-    let mouse_cursor_task = async {
-        const CURSOR_SIZE: i64 = 16;
-        let mut cursor_bitmap = BitmapBuffer::new(CURSOR_SIZE, CURSOR_SIZE, CURSOR_SIZE);
-        for y in 0..CURSOR_SIZE {
-            for x in 0..(CURSOR_SIZE - y) {
-                if x <= y {
-                    bitmap_draw_point(&mut cursor_bitmap, 0x00ff00, x, y)
-                        .expect("Failed to paint cursor");
+    /*
+        let mouse_cursor_task = async {
+            const CURSOR_SIZE: i64 = 16;
+            let mut cursor_bitmap = BitmapBuffer::new(CURSOR_SIZE, CURSOR_SIZE, CURSOR_SIZE);
+            for y in 0..CURSOR_SIZE {
+                for x in 0..(CURSOR_SIZE - y) {
+                    if x <= y {
+                        bitmap_draw_point(&mut cursor_bitmap, 0x00ff00, x, y)
+                            .expect("Failed to paint cursor");
+                    }
                 }
             }
-        }
-        let mut vram = BootInfo::take().vram();
+            let mut vram = BootInfo::take().vram();
 
-        noli::bitmap::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)
-            .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
+            noli::bitmap::draw_bmp_clipped(&mut vram, &cursor_bitmap, 100, 100)
+                .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
 
-        loop {
-            if let Some(MouseEvent {
-                position: p,
-                button: b,
-            }) = InputManager::take().pop_cursor_input_absolute()
-            {
-                let color = (b.l() as u32) * 0xff0000;
-                let color = !color;
+            loop {
+                if let Some(MouseEvent {
+                    position: p,
+                    button: b,
+                }) = InputManager::take().pop_cursor_input_absolute()
+                {
+                    let color = (b.l() as u32) * 0xff0000;
+                    let color = !color;
 
-                bitmap_draw_rect(&mut vram, color, p.x, p.y, 1, 1)?;
-                /*
-                crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, p.x, p.y)
-                    .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
-                */
+                    bitmap_draw_rect(&mut vram, color, p.x, p.y, 1, 1)?;
+                    /*
+                    crate::graphics::draw_bmp_clipped(&mut vram, &cursor_bitmap, p.x, p.y)
+                        .ok_or(Error::Failed("Failed to draw mouse cursor"))?;
+                    */
+                }
+                TimeoutFuture::new_ms(15).await;
+                yield_execution().await;
             }
-            TimeoutFuture::new_ms(15).await;
-            yield_execution().await;
-        }
-    };
+        };
+    spawn_global(mouse_cursor_task);
+    */
     // Enqueue tasks
     spawn_global(task0);
     spawn_global(task1);
     spawn_global(serial_task);
     spawn_global(console_task);
-    spawn_global(mouse_cursor_task);
     spawn_global(init_task);
     init::init_pci();
     // Start executing tasks
