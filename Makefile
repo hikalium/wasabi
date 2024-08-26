@@ -15,6 +15,7 @@ APPS=$(shell ls $(PROJECT_ROOT)/app)
 APP_PACKAGES=$(addprefix  -p , $(APPS))
 BIN_DIR=$(PROJECT_ROOT)/generated/bin/
 TCP_FORWARD_PORT?=18080
+HOST_HTTP_SERVER_PORT?=18081
 
 QEMU_ARGS=\
 		-machine q35 -cpu qemu64 -smp 4 \
@@ -287,7 +288,7 @@ tcp_echo_server:
 
 .PHONY : tcp_http_server
 tcp_http_server:
-	( printf "HTTP/1.1 200 OK\nContent-Length: 14\n\nHello, World!\n" ) | nc -l 18080
+	( printf "HTTP/1.1 200 OK\nContent-Length: 14\n\nHello, World!\n" ) | nc -l $(HOST_HTTP_SERVER_PORT)
 
 .PHONY : curl_with_header
 curl_with_header:
@@ -295,7 +296,7 @@ curl_with_header:
 		-H 'User-Agent:' \
 		-H 'Host:' \
 		-H 'Accept:' \
-		-v localhost:18080
+		-v localhost:$(HOST_HTTP_SERVER_PORT)
 
 .PHONY : vnc
 vnc: generated/noVNC-$(NOVNC_VERSION)
