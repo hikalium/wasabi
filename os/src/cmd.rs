@@ -18,6 +18,7 @@ use crate::net::manager::Network;
 use crate::net::tcp::TcpSocket;
 use crate::println;
 use crate::x86_64::trigger_debug_interrupt;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::str::FromStr;
 use noli::mem::Sliceable;
@@ -119,7 +120,9 @@ pub async fn run(cmdline: &str) -> Result<()> {
                     return Ok(());
                 };
                 let sock = TcpSocket::new_client(ip, port);
-                println!("{sock:?}")
+                println!("{sock:?}");
+                let sock = Rc::new(sock);
+                network.register_tcp_socket(sock.clone())?;
             }
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())

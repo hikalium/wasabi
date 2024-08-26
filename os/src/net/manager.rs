@@ -6,6 +6,7 @@ use crate::executor::spawn_global;
 use crate::executor::TimeoutFuture;
 use crate::info;
 use crate::mutex::Mutex;
+use crate::mutex::MutexGuard;
 use crate::net::arp::ArpPacket;
 use crate::net::checksum::InternetChecksum;
 use crate::net::dhcp::DhcpPacket;
@@ -34,6 +35,7 @@ use crate::net::udp::UDP_PORT_DHCP_CLIENT;
 use crate::net::udp::UDP_PORT_DHCP_SERVER;
 use crate::warn;
 use alloc::boxed::Box;
+use alloc::collections::btree_map;
 use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
@@ -66,6 +68,7 @@ pub struct Network {
     dns: Mutex<Option<IpV4Addr>>,
     self_ip: Mutex<Option<IpV4Addr>>,
     ip_tx_queue: Mutex<VecDeque<Box<[u8]>>>,
+    tcp_dynamic_port_hint: Mutex<u16>,
     tcp_socket_table: Mutex<TcpSocketTable>,
     udp_socket_table: Mutex<UdpSocketTable>,
     arp_table: Mutex<ArpTable>,
@@ -80,6 +83,7 @@ impl Network {
             dns: Mutex::new(None),
             self_ip: Mutex::new(None),
             ip_tx_queue: Mutex::new(VecDeque::new()),
+            tcp_dynamic_port_hint: Mutex::new(0),
             tcp_socket_table: Mutex::new(BTreeMap::new()),
             udp_socket_table: Mutex::new(BTreeMap::new()),
             arp_table: Mutex::new(BTreeMap::new()),
@@ -89,7 +93,9 @@ impl Network {
         let mut network = NETWORK.lock();
         let network = network.get_or_insert_with(|| {
             let network = Self::new();
-            network.register_tcp_socket(Rc::new(TcpSocket::new_server(18080)));
+            network
+                .register_tcp_socket(Rc::new(TcpSocket::new_server(18080)))
+                .expect("builtin tcp socket registration should succeed");
             let dns_client = Rc::new(UdpSocket::default());
             network.register_udp_socket(PORT_DNS_SERVER, dns_client.clone());
             spawn_global(async { network_manager_thread().await });
@@ -108,11 +114,48 @@ impl Network {
         interfaces.push(iface);
         self.interface_has_added.store(true, Ordering::SeqCst);
     }
-    pub fn register_tcp_socket(&self, s: Rc<TcpSocket>) {
-        if let Some(self_port) = s.self_port() {
-            self.tcp_socket_table.lock().insert(self_port, s);
+    fn pick_unused_dynamic_tcp_port(&self) -> Result<(u16, MutexGuard<TcpSocketTable>)> {
+        // https://datatracker.ietf.org/doc/html/rfc6335#section-6
+        // the Dynamic Ports, also known as the Private or Ephemeral Ports, from 49152-65535
+        const PORT_RANGE: core::ops::Range<u16> = 49152..65535;
+        let mut port = *self.tcp_dynamic_port_hint.lock();
+        if !PORT_RANGE.contains(&port) {
+            port = PORT_RANGE.start;
+        }
+        let locked_table = self.tcp_socket_table.lock();
+        // First scan
+        while PORT_RANGE.contains(&port) && locked_table.contains_key(&port) {
+            port += 1;
+        }
+        if PORT_RANGE.contains(&port) {
+            return Ok((port, locked_table));
+        }
+        // Second scan
+        port = PORT_RANGE.start;
+        while PORT_RANGE.contains(&port) && locked_table.contains_key(&port) {
+            port += 1;
+        }
+        if PORT_RANGE.contains(&port) {
+            Ok((port, locked_table))
         } else {
-            warn!("No ports are assigned for {s:?}")
+            Err(Error::Failed("No more available TCP port"))
+        }
+    }
+    pub fn register_tcp_socket(&self, s: Rc<TcpSocket>) -> Result<()> {
+        if let Some(self_port) = s.self_port() {
+            let mut locked_table = self.tcp_socket_table.lock();
+            if let btree_map::Entry::Vacant(e) = locked_table.entry(self_port) {
+                e.insert(s);
+                Ok(())
+            } else {
+                Err(Error::Failed("TCP port is already in use"))
+            }
+        } else {
+            let (port, mut locked_table) = self.pick_unused_dynamic_tcp_port()?;
+            info!("dynamic TCP port {port} is picked");
+            s.set_self_port(port);
+            locked_table.insert(port, s);
+            Ok(())
         }
     }
     pub fn register_udp_socket(&self, port: u16, s: Rc<UdpSocket>) {

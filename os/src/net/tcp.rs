@@ -176,6 +176,9 @@ impl TcpSocket {
     pub fn self_port(&self) -> Option<u16> {
         *self.self_port.lock()
     }
+    pub fn set_self_port(&self, port: u16) {
+        *self.self_port.lock() = Some(port)
+    }
     pub fn another_ip(&self) -> Option<IpV4Addr> {
         *self.another_ip.lock()
     }
