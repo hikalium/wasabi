@@ -102,7 +102,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 let port = if let Some(port) = args.get(2) {
                     port
                 } else {
-                    "18080"
+                    "18081"
                 };
                 let port = if let Ok(port) = u16::from_str(port) {
                     port
@@ -118,7 +118,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 } else {
                     return Ok(());
                 };
-                let sock = TcpSocket::open(ip, port);
+                let sock = TcpSocket::new_client(ip, port);
                 println!("{sock:?}")
             }
             "arp" => {

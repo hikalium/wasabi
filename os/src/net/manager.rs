@@ -28,7 +28,6 @@ use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
 use crate::net::tcp::TcpPacket;
 use crate::net::tcp::TcpSocket;
-use crate::net::tcp::TcpSocketState;
 use crate::net::udp::UdpPacket;
 use crate::net::udp::UdpSocket;
 use crate::net::udp::UDP_PORT_DHCP_CLIENT;
@@ -90,7 +89,7 @@ impl Network {
         let mut network = NETWORK.lock();
         let network = network.get_or_insert_with(|| {
             let network = Self::new();
-            network.register_tcp_socket(18080, Rc::new(TcpSocket::new(TcpSocketState::Listen)));
+            network.register_tcp_socket(Rc::new(TcpSocket::new_server(18080)));
             let dns_client = Rc::new(UdpSocket::default());
             network.register_udp_socket(PORT_DNS_SERVER, dns_client.clone());
             spawn_global(async { network_manager_thread().await });
@@ -109,8 +108,12 @@ impl Network {
         interfaces.push(iface);
         self.interface_has_added.store(true, Ordering::SeqCst);
     }
-    pub fn register_tcp_socket(&self, port: u16, s: Rc<TcpSocket>) {
-        self.tcp_socket_table.lock().insert(port, s);
+    pub fn register_tcp_socket(&self, s: Rc<TcpSocket>) {
+        if let Some(self_port) = s.self_port() {
+            self.tcp_socket_table.lock().insert(self_port, s);
+        } else {
+            warn!("No ports are assigned for {s:?}")
+        }
     }
     pub fn register_udp_socket(&self, port: u16, s: Rc<UdpSocket>) {
         self.udp_socket_table.lock().insert(port, s);
