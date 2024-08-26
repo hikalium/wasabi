@@ -102,7 +102,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 let port = if let Some(port) = args.get(2) {
                     port
                 } else {
-                    "15000"
+                    "18080"
                 };
                 let port = if let Ok(port) = u16::from_str(port) {
                     port

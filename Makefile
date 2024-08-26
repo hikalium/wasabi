@@ -285,6 +285,18 @@ tcp_hello:
 tcp_echo_server:
 	socat -v tcp-l:15000,reuseaddr,fork exec:'/bin/cat'
 
+.PHONY : tcp_http_server
+tcp_http_server:
+	( printf "HTTP/1.1 200 OK\nContent-Length: 14\n\nHello, World!\n" ) | nc -l 18080
+
+.PHONY : curl_with_header
+curl_with_header:
+	curl \
+		-H 'User-Agent:' \
+		-H 'Host:' \
+		-H 'Accept:' \
+		-v localhost:18080
+
 .PHONY : vnc
 vnc: generated/noVNC-$(NOVNC_VERSION)
 	( echo 'change vnc password $(VNC_PASSWORD)' | while ! nc localhost $(PORT_MONITOR) ; do sleep 1 ; done ) &
