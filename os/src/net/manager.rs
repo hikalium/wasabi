@@ -170,6 +170,9 @@ impl Network {
     pub fn dns(&self) -> Option<IpV4Addr> {
         *self.dns.lock()
     }
+    pub fn self_ip(&self) -> Option<IpV4Addr> {
+        *self.self_ip.lock()
+    }
     pub fn set_netmask(&self, value: Option<IpV4Addr>) {
         *self.netmask.lock() = value;
     }
@@ -198,6 +201,15 @@ impl Network {
     }
     pub fn arp_table_get(&self, ip_addr: IpV4Addr) -> Option<EthernetAddr> {
         self.arp_table.lock().get(&ip_addr).map(|e| e.0)
+    }
+    pub fn open_tcp_socket(&self, ip: IpV4Addr, port: u16) -> Result<Rc<TcpSocket>> {
+        let sock = TcpSocket::new_client(ip, port);
+        info!("socket created: {sock:?}");
+        let sock = Rc::new(sock);
+        self.register_tcp_socket(sock.clone())?;
+        sock.set_self_ip(self.self_ip());
+        sock.open()?;
+        Ok(sock)
     }
 }
 static NETWORK: Mutex<Option<Rc<Network>>> = Mutex::new(None);

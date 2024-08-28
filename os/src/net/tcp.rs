@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::error::Error;
 use crate::error::Result;
 use crate::info;
 use crate::mutex::Mutex;
@@ -84,6 +85,9 @@ impl TcpPacket {
     pub fn set_syn(&mut self) {
         self.flags[1] |= 1 << 1;
     }
+    pub fn is_rst(&self) -> bool {
+        (self.flags[1] & (1 << 2)) != 0
+    }
     pub fn is_ack(&self) -> bool {
         (self.flags[1] & (1 << 4)) != 0
     }
@@ -102,7 +106,7 @@ impl Debug for TcpPacket {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b}{}{}{}",
+            "TCP :{} -> :{}, seq = {}, ack = {}, flags = {:#018b}{}{}{}{}",
             self.src_port(),
             self.dst_port(),
             self.seq_num(),
@@ -110,6 +114,7 @@ impl Debug for TcpPacket {
             self.flags(),
             if self.is_fin() { " FIN" } else { "" },
             if self.is_syn() { " SYN" } else { "" },
+            if self.is_rst() { " RST" } else { "" },
             if self.is_ack() { " ACK" } else { "" },
         )
     }
@@ -129,8 +134,6 @@ pub enum TcpSocketState {
     LastAck,
     TimeWait,
     Closed,
-    //
-    PendingSynToBeSent,
 }
 
 // Step 1: Just receive (no error handling)
@@ -167,11 +170,15 @@ impl TcpSocket {
             another_ip: Mutex::new(Some(dst_ip)),
             another_port: Mutex::new(Some(dst_port)),
             my_next_seq: Mutex::new(0),
-            state: Mutex::new(TcpSocketState::PendingSynToBeSent),
+            // Syn will be sent in TcpSocket::open()
+            state: Mutex::new(TcpSocketState::SynSent),
         }
     }
     pub fn self_ip(&self) -> Option<IpV4Addr> {
         *self.self_ip.lock()
+    }
+    pub fn set_self_ip(&self, ip: Option<IpV4Addr>) {
+        *self.self_ip.lock() = ip
     }
     pub fn self_port(&self) -> Option<u16> {
         *self.self_port.lock()
@@ -184,6 +191,25 @@ impl TcpSocket {
     }
     pub fn another_port(&self) -> Option<u16> {
         *self.another_port.lock()
+    }
+    fn gen_syn_packet(
+        to_ip: IpV4Addr,
+        to_port: u16,
+        from_ip: IpV4Addr,
+        from_port: u16,
+        seq: u32,
+    ) -> Result<Vec<u8>> {
+        Self::gen_tcp_packet(
+            to_ip,
+            to_port,
+            from_ip,
+            from_port,
+            seq,
+            None,
+            true,
+            false,
+            &[],
+        )
     }
     #[allow(clippy::too_many_arguments)]
     fn gen_tcp_packet(
@@ -281,9 +307,33 @@ impl TcpSocket {
                 *self.my_next_seq.lock() = seq.wrapping_add(1);
                 *self.state.lock() = TcpSocketState::SynReceived;
             }
+            TcpSocketState::SynSent => {
+                // If SYN+ACK is received, reply ACK and transition to Established state
+                if !in_tcp.is_syn() || !in_tcp.is_ack() {
+                    warn!(
+                        "net: tcp: recv: SYN+ACK was expected in {prev_state:?} but got {in_tcp:?}"
+                    );
+                    return Ok(());
+                }
+                if in_tcp.ack_num() != (*self.my_next_seq.lock()) {
+                    warn!(
+                        "net: tcp: recv: unexpected ACK received while in {prev_state:?}: {in_tcp:?}"
+                    );
+                    return Ok(());
+                }
+                // Reply ACK
+                // SYN consumes 1 byte in the seq number space.
+                seq_to_ack = Some(in_tcp.seq_num().wrapping_add(1));
+                // Now the socket is established
+                *self.state.lock() = TcpSocketState::Established;
+                info!("net: tcp: recv: TCP connection established");
+            }
             TcpSocketState::SynReceived => {
                 if !in_tcp.is_ack() || in_tcp.ack_num() != (*self.my_next_seq.lock()) {
-                    warn!("net: tcp: recv: unexpected packet received while in TcpSocketState::SynReceived: {in_tcp:?}");
+                    warn!(
+                        "net: tcp: recv: unexpected packet received while in {prev_state:?}: {in_tcp:?}"
+                    );
+                    return Ok(());
                 }
                 *self.state.lock() = TcpSocketState::Established;
                 info!("net: tcp: recv: TCP connection established");
@@ -336,6 +386,26 @@ impl TcpSocket {
             &tcp_payload_data,
         )?;
         Network::take().send_ip_packet(out_bytes.into_boxed_slice());
+        Ok(())
+    }
+    pub fn open(&self) -> Result<()> {
+        let to_ip = self
+            .another_ip()
+            .ok_or(Error::Failed("another_ip should be populated"))?;
+        let to_port = self
+            .another_port()
+            .ok_or(Error::Failed("another_port should be populated"))?;
+        let from_ip = self
+            .self_ip()
+            .ok_or(Error::Failed("self_ip should be populated"))?;
+        let from_port = self
+            .self_port()
+            .ok_or(Error::Failed("self_port should be populated"))?;
+        info!("Trying to open a socket with {to_ip}:{to_port}");
+        let seq = 1234;
+        let syn_packet = Self::gen_syn_packet(to_ip, to_port, from_ip, from_port, seq)?;
+        *self.my_next_seq.lock() = seq.wrapping_add(1);
+        Network::take().send_ip_packet(syn_packet.into_boxed_slice());
         Ok(())
     }
 }

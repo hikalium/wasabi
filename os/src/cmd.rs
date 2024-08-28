@@ -15,10 +15,8 @@ use crate::net::dns::query_dns;
 use crate::net::dns::DnsResponseEntry;
 use crate::net::icmp::IcmpPacket;
 use crate::net::manager::Network;
-use crate::net::tcp::TcpSocket;
 use crate::println;
 use crate::x86_64::trigger_debug_interrupt;
-use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::str::FromStr;
 use noli::mem::Sliceable;
@@ -119,10 +117,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 } else {
                     return Ok(());
                 };
-                let sock = TcpSocket::new_client(ip, port);
-                println!("{sock:?}");
-                let sock = Rc::new(sock);
-                network.register_tcp_socket(sock.clone())?;
+                let _sock = network.open_tcp_socket(ip, port)?;
             }
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())
