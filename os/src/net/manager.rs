@@ -93,9 +93,6 @@ impl Network {
         let mut network = NETWORK.lock();
         let network = network.get_or_insert_with(|| {
             let network = Self::new();
-            network
-                .register_tcp_socket(Rc::new(TcpSocket::new_server(18080)))
-                .expect("builtin tcp socket registration should succeed");
             let dns_client = Rc::new(UdpSocket::default());
             network.register_udp_socket(PORT_DNS_SERVER, dns_client.clone());
             spawn_global(async { network_manager_thread().await });

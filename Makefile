@@ -312,3 +312,6 @@ generated/noVNC-% :
 
 list_structs:
 	git grep -o 'struct [A-Z][A-Za-z0-9]* ' | sed -e 's#/src/#::#' -e 's#main\.rs:##' -e 's#lib\.rs:##' -e 's#struct ##' -e 's/\.rs:/::/' -e 's#/#::#' | sort -u
+
+list_e2etests:
+	cargo test -p e2etest -- --list

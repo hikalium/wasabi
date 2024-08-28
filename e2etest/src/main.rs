@@ -190,21 +190,26 @@ mod test {
         qemu.kill().await?;
         Ok(())
     }
+    fn assert_tcp_echo_client_is_working(test_string: &str) -> Result<()> {
+        eprintln!("sending {test_string}...");
+        let cmd = format!("sleep 1 ; echo {test_string} | nc -w 3 localhost 18080");
+        let (stdout, _) = run_shell_cmd(&cmd)?;
+        eprintln!("got {stdout}");
+        assert!(stdout.contains(test_string));
+        Ok(())
+    }
     #[tokio::test]
     async fn tcp_echo_server_is_working() -> Result<()> {
-        // cargo test -p e2etest -- tcp
-        const TEST_STRING: &str = "hello_from_tcp";
+        // cargo test -p e2etest -- --nocapture tcp
         let dev_env = DevEnv::new()?;
         let mut qemu = Qemu::new(dev_env.ovmf_path())?;
         let _rootfs = qemu.launch_with_wasabi_os(dev_env.wasabi_efi_path())?;
         qemu.wait_until_serial_output_contains(
             "net: rx: DHCP: SERVER -> CLIENT yiaddr = 10.0.2.15 chaddr = 52:54:00:12:34:56",
         )?;
-        let cmd = format!("echo {TEST_STRING} | nc -w 1 localhost 18080");
-        let (stdout, _) = run_shell_cmd(&cmd)?;
-        eprintln!("{stdout}");
-        println!("{stdout}");
-        assert!(stdout.contains(TEST_STRING));
+
+        assert_tcp_echo_client_is_working("hello_from_tcp1")?;
+        assert_tcp_echo_client_is_working("hello_from_tcp2")?;
 
         qemu.kill().await?;
         Ok(())
