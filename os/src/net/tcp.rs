@@ -362,8 +362,8 @@ impl TcpSocket {
                     }
                     seq_to_ack = Some(in_tcp.seq_num().wrapping_add(in_tcp_data.len() as u32));
                     self.rx_data.lock().extend_from_slice(in_tcp_data);
-                    tcp_payload_data.extend_from_slice(in_tcp_data);
-                    *self.my_next_seq.lock() = seq.wrapping_add(in_tcp_data.len() as u32);
+                    //tcp_payload_data.extend_from_slice(in_tcp_data);
+                    //*self.my_next_seq.lock() = seq.wrapping_add(in_tcp_data.len() as u32);
                 }
             }
             TcpSocketState::LastAck => {
