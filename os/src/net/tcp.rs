@@ -13,6 +13,7 @@ use crate::net::ip::IpV4Packet;
 use crate::net::ip::IpV4Protocol;
 use crate::net::manager::Network;
 use crate::warn;
+use alloc::collections::VecDeque;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::vec;
@@ -145,8 +146,10 @@ pub struct TcpSocket {
     another_ip: Mutex<Option<IpV4Addr>>,
     another_port: Mutex<Option<u16>>,
     my_next_seq: Mutex<u32>,
+    last_seq_to_ack: Mutex<u32>,
     state: Mutex<TcpSocketState>,
-    rx_data: Mutex<Vec<u8>>,
+    rx_data: Mutex<VecDeque<u8>>,
+    tx_data: Mutex<VecDeque<u8>>,
 }
 impl Debug for TcpSocket {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -161,8 +164,10 @@ impl TcpSocket {
             another_ip: Default::default(),
             another_port: Default::default(),
             my_next_seq: Mutex::new(0),
+            last_seq_to_ack: Mutex::new(0),
             state: Mutex::new(TcpSocketState::Listen),
             rx_data: Default::default(),
+            tx_data: Default::default(),
         }
     }
     pub fn new_client(dst_ip: IpV4Addr, dst_port: u16) -> Self {
@@ -172,9 +177,11 @@ impl TcpSocket {
             another_ip: Mutex::new(Some(dst_ip)),
             another_port: Mutex::new(Some(dst_port)),
             my_next_seq: Mutex::new(0),
+            last_seq_to_ack: Mutex::new(0),
             // Syn will be sent in TcpSocket::open()
             state: Mutex::new(TcpSocketState::SynSent),
             rx_data: Default::default(),
+            tx_data: Default::default(),
         }
     }
     pub fn self_ip(&self) -> Option<IpV4Addr> {
@@ -195,8 +202,11 @@ impl TcpSocket {
     pub fn another_port(&self) -> Option<u16> {
         *self.another_port.lock()
     }
-    pub fn rx_data(&self) -> &Mutex<Vec<u8>> {
+    pub fn rx_data(&self) -> &Mutex<VecDeque<u8>> {
         &self.rx_data
+    }
+    pub fn tx_data(&self) -> &Mutex<VecDeque<u8>> {
+        &self.tx_data
     }
     fn gen_syn_packet(
         to_ip: IpV4Addr,
@@ -298,7 +308,6 @@ impl TcpSocket {
         let mut seq_to_ack = None;
         let mut fin = false;
         let mut syn = false;
-        let mut tcp_payload_data = Vec::new();
         let prev_state = *self.state.lock();
         match prev_state {
             TcpSocketState::Listen => {
@@ -343,6 +352,10 @@ impl TcpSocket {
                 }
                 *self.state.lock() = TcpSocketState::Established;
                 info!("net: tcp: recv: TCP connection established");
+                *self.another_ip.lock() = Some(to_ip);
+                *self.another_port.lock() = Some(to_port);
+                *self.self_ip.lock() = Some(from_ip);
+                *self.self_port.lock() = Some(from_port);
                 return Ok(());
             }
             TcpSocketState::Established => {
@@ -361,9 +374,7 @@ impl TcpSocket {
                         );
                     }
                     seq_to_ack = Some(in_tcp.seq_num().wrapping_add(in_tcp_data.len() as u32));
-                    self.rx_data.lock().extend_from_slice(in_tcp_data);
-                    //tcp_payload_data.extend_from_slice(in_tcp_data);
-                    //*self.my_next_seq.lock() = seq.wrapping_add(in_tcp_data.len() as u32);
+                    self.rx_data.lock().extend(in_tcp_data);
                 }
             }
             TcpSocketState::LastAck => {
@@ -381,6 +392,9 @@ impl TcpSocket {
         }
 
         //
+        if let Some(seq_to_ack) = seq_to_ack {
+            *self.last_seq_to_ack.lock() = seq_to_ack;
+        }
         let out_bytes = Self::gen_tcp_packet(
             to_ip,
             to_port,
@@ -390,7 +404,51 @@ impl TcpSocket {
             seq_to_ack,
             syn,
             fin,
-            &tcp_payload_data,
+            &[],
+        )?;
+        Network::take().send_ip_packet(out_bytes.into_boxed_slice());
+        Ok(())
+    }
+    pub fn poll_tx(&self) -> Result<()> {
+        let to_ip = self
+            .another_ip()
+            .ok_or(Error::Failed("another_ip should be populated"))?;
+        let to_port = self
+            .another_port()
+            .ok_or(Error::Failed("another_port should be populated"))?;
+        let from_ip = self
+            .self_ip()
+            .ok_or(Error::Failed("self_ip should be populated"))?;
+        let from_port = self
+            .self_port()
+            .ok_or(Error::Failed("self_port should be populated"))?;
+        //
+        let seq = *self.my_next_seq.lock();
+        let tcp_data_to_send = Vec::from_iter(self.tx_data.lock().drain(..));
+        info!("Trying to send data {tcp_data_to_send:?} to {to_ip}:{to_port}");
+        let prev_state = *self.state.lock();
+        match prev_state {
+            TcpSocketState::Established => {
+                *self.my_next_seq.lock() = seq.wrapping_add(tcp_data_to_send.len() as u32);
+            }
+            _ => {
+                return Err(Error::Failed("The socket is not ready"));
+            }
+        }
+
+        let seq_to_ack = *self.last_seq_to_ack.lock();
+        let fin = false;
+        let syn = false;
+        let out_bytes = Self::gen_tcp_packet(
+            to_ip,
+            to_port,
+            from_ip,
+            from_port,
+            seq,
+            Some(seq_to_ack),
+            syn,
+            fin,
+            &tcp_data_to_send,
         )?;
         Network::take().send_ip_packet(out_bytes.into_boxed_slice());
         Ok(())

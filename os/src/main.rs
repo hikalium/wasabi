@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -189,11 +190,16 @@ fn run_tasks() -> Result<()> {
                 if rx_data_locked.is_empty() {
                     None
                 } else {
-                    Some(Vec::from_iter(rx_data_locked.drain(..)))
+                    Some(VecDeque::from_iter(rx_data_locked.drain(..)))
                 }
             };
-            if let Some(data) = data {
+            if let Some(data) = &data {
                 info!("tcp_echo_task: received: {data:?}");
+                {
+                    let mut tx_data_locked = sock.tx_data().lock();
+                    tx_data_locked.extend(data.iter());
+                }
+                sock.poll_tx()?;
             }
             yield_execution().await;
         }
