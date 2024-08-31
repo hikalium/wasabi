@@ -367,12 +367,6 @@ impl TcpSocket {
                     fin = true;
                     *self.state.lock() = TcpSocketState::LastAck;
                 }
-                if let Ok(s) = core::str::from_utf8(in_tcp_data) {
-                    info!(
-                        "net: tcp: recv: data(str) size = {}: {s}",
-                        in_tcp_data.len()
-                    );
-                }
                 seq_to_ack = seq_to_ack.wrapping_add(in_tcp_data.len() as u32);
                 self.rx_data.lock().extend(in_tcp_data);
                 // Send ACK
@@ -478,5 +472,13 @@ impl TcpSocket {
         while *self.state.lock() != TcpSocketState::Established {
             yield_execution().await;
         }
+    }
+    pub async fn wait_on_rx(&self) {
+        while *self.state.lock() == TcpSocketState::Established && self.rx_data.lock().is_empty() {
+            yield_execution().await;
+        }
+    }
+    pub fn is_established(&self) -> bool {
+        *self.state.lock() == TcpSocketState::Established
     }
 }

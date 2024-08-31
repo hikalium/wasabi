@@ -123,6 +123,15 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 sock.tx_data()
                     .lock()
                     .extend(format!("GET / HTTP/1.0\nHost: {host}\n\n").bytes());
+                let mut received = Vec::new();
+                while sock.is_established() {
+                    sock.wait_on_rx().await;
+                    let mut rx_data_locked = sock.rx_data().lock();
+                    received.extend(rx_data_locked.drain(..))
+                }
+                if let Ok(received) = core::str::from_utf8(&received) {
+                    println!("{received}");
+                }
             }
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())

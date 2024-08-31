@@ -199,7 +199,6 @@ fn run_tasks() -> Result<()> {
                     let mut tx_data_locked = sock.tx_data().lock();
                     tx_data_locked.extend(data.iter());
                 }
-                sock.poll_tx()?;
             }
             yield_execution().await;
         }
