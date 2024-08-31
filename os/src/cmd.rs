@@ -17,6 +17,7 @@ use crate::net::icmp::IcmpPacket;
 use crate::net::manager::Network;
 use crate::println;
 use crate::x86_64::trigger_debug_interrupt;
+use alloc::format;
 use alloc::vec::Vec;
 use core::str::FromStr;
 use noli::mem::Sliceable;
@@ -117,7 +118,12 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 } else {
                     return Ok(());
                 };
-                let _sock = network.open_tcp_socket(ip, port)?;
+                let sock = network.open_tcp_socket(ip, port)?;
+                sock.wait_until_connection_is_established().await;
+                sock.tx_data()
+                    .lock()
+                    .extend(format!("GET / HTTP/1.0\nHost: {host}\n\n").bytes());
+                sock.poll_tx()?;
             }
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())

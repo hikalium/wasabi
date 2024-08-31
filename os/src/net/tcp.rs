@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::executor::yield_execution;
 use crate::info;
 use crate::mutex::Mutex;
 use crate::net::checksum::InternetChecksum;
@@ -472,5 +473,10 @@ impl TcpSocket {
         *self.my_next_seq.lock() = seq.wrapping_add(1);
         Network::take().send_ip_packet(syn_packet.into_boxed_slice());
         Ok(())
+    }
+    pub async fn wait_until_connection_is_established(&self) {
+        while *self.state.lock() != TcpSocketState::Established {
+            yield_execution().await;
+        }
     }
 }
