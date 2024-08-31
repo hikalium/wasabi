@@ -272,7 +272,8 @@ fn handle_rx_dhcp_client(packet: &[u8], iface: &Rc<dyn NetworkInterface>) -> Res
                 DHCP_OPT_DNS => {
                     if let Ok(dns) = IpV4Addr::from_slice(&data) {
                         info!("dns: {dns}");
-                        network.set_dns(Some(*dns));
+                        //network.set_dns(Some(*dns));
+                        network.set_dns(Some(IpV4Addr::new([8, 8, 8, 8])));
                         let arp_req = ArpPacket::request(iface.ethernet_addr(), new_self_ip, *dns);
                         iface.push_packet(arp_req.copy_into_slice())?;
                     }
