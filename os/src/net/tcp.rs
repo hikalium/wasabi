@@ -146,6 +146,7 @@ pub struct TcpSocket {
     another_port: Mutex<Option<u16>>,
     my_next_seq: Mutex<u32>,
     state: Mutex<TcpSocketState>,
+    rx_data: Mutex<Vec<u8>>,
 }
 impl Debug for TcpSocket {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -161,6 +162,7 @@ impl TcpSocket {
             another_port: Default::default(),
             my_next_seq: Mutex::new(0),
             state: Mutex::new(TcpSocketState::Listen),
+            rx_data: Default::default(),
         }
     }
     pub fn new_client(dst_ip: IpV4Addr, dst_port: u16) -> Self {
@@ -172,6 +174,7 @@ impl TcpSocket {
             my_next_seq: Mutex::new(0),
             // Syn will be sent in TcpSocket::open()
             state: Mutex::new(TcpSocketState::SynSent),
+            rx_data: Default::default(),
         }
     }
     pub fn self_ip(&self) -> Option<IpV4Addr> {
@@ -191,6 +194,9 @@ impl TcpSocket {
     }
     pub fn another_port(&self) -> Option<u16> {
         *self.another_port.lock()
+    }
+    pub fn rx_data(&self) -> &Mutex<Vec<u8>> {
+        &self.rx_data
     }
     fn gen_syn_packet(
         to_ip: IpV4Addr,
@@ -355,6 +361,7 @@ impl TcpSocket {
                         );
                     }
                     seq_to_ack = Some(in_tcp.seq_num().wrapping_add(in_tcp_data.len() as u32));
+                    self.rx_data.lock().extend_from_slice(in_tcp_data);
                     tcp_payload_data.extend_from_slice(in_tcp_data);
                     *self.my_next_seq.lock() = seq.wrapping_add(in_tcp_data.len() as u32);
                 }

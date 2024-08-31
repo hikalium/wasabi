@@ -10,6 +10,7 @@ extern crate alloc;
 
 use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::pin::Pin;
 use core::str::FromStr;
 use noli::bitmap::bitmap_draw_line;
@@ -133,8 +134,7 @@ fn run_tasks() -> Result<()> {
         info!("running init");
         let boot_info = BootInfo::take();
         let root_files = boot_info.root_files();
-        let root_files: alloc::vec::Vec<&File> =
-            root_files.iter().filter_map(|e| e.as_ref()).collect();
+        let root_files: Vec<&File> = root_files.iter().filter_map(|e| e.as_ref()).collect();
         let init_txt = EfiFileName::from_str("init.txt")?;
         let init_txt = root_files
             .iter()
@@ -181,9 +181,20 @@ fn run_tasks() -> Result<()> {
     let tcp_echo_task = async {
         let network = Network::take();
         let sock = Rc::new(TcpSocket::new_server(18080));
-        network.register_tcp_socket(sock)?;
+        network.register_tcp_socket(sock.clone())?;
         info!("tcp_echo_task has started");
         loop {
+            let data = {
+                let mut rx_data_locked = sock.rx_data().lock();
+                if rx_data_locked.is_empty() {
+                    None
+                } else {
+                    Some(Vec::from_iter(rx_data_locked.drain(..)))
+                }
+            };
+            if let Some(data) = data {
+                info!("tcp_echo_task: received: {data:?}");
+            }
             yield_execution().await;
         }
     };
