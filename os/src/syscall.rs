@@ -107,9 +107,14 @@ fn sys_nslookup(args: &[u64; 5]) -> i64 {
     }
     let r = block_on_and_schedule(query_dns(host));
     if let Ok(r) = &r {
-        let DnsResponseEntry::A { name: _, addr } = &r[0];
-        result[0] = addr.bytes();
-        return 1;
+        if let Some(r) = r.first() {
+            let DnsResponseEntry::A { name: _, addr } = &r;
+            result[0] = addr.bytes();
+            return 1;
+        } else {
+            error!("empty response so return NXDOMAIN");
+            return -2;
+        }
     } else {
         error!("{r:?}")
     }
