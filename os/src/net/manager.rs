@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::error::Error;
 use crate::error::Result;
 use crate::executor::spawn_global;
+use crate::executor::yield_execution;
 use crate::executor::TimeoutFuture;
 use crate::info;
 use crate::mutex::Mutex;
@@ -206,6 +207,22 @@ impl Network {
         self.register_tcp_socket(sock.clone())?;
         sock.set_self_ip(self.self_ip());
         sock.open()?;
+        {
+            // Launch a thread to process tx data
+            let sock = Rc::downgrade(&sock);
+            spawn_global(async move {
+                loop {
+                    if let Some(sock) = sock.upgrade() {
+                        let _ = sock.poll_tx();
+                    } else {
+                        info!("tcp: socket tx handler exiting");
+                        break;
+                    }
+                    yield_execution().await;
+                }
+                Ok(())
+            })
+        }
         Ok(sock)
     }
 }

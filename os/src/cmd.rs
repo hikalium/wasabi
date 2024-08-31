@@ -123,7 +123,6 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 sock.tx_data()
                     .lock()
                     .extend(format!("GET / HTTP/1.0\nHost: {host}\n\n").bytes());
-                sock.poll_tx()?;
             }
             "arp" => {
                 println!("{:?}", network.arp_table_cloned())

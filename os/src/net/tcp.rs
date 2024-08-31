@@ -408,6 +408,9 @@ impl TcpSocket {
         Ok(())
     }
     pub fn poll_tx(&self) -> Result<()> {
+        if self.tx_data.lock().is_empty() {
+            return Ok(());
+        }
         let to_ip = self
             .another_ip()
             .ok_or(Error::Failed("another_ip should be populated"))?;
