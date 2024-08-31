@@ -121,6 +121,11 @@ fn sys_nslookup(args: &[u64; 5]) -> i64 {
     -1
 }
 
+fn sys_tcp_connect(_args: &[u64; 5]) -> i64 {
+    info!("sys_tcp_connect!");
+    -1
+}
+
 pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
     match op {
         0 => sys_exit(args),
@@ -131,6 +136,7 @@ pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
         5 => sys_get_mouse_cursor_position(args),
         6 => sys_get_args_region(args),
         7 => sys_nslookup(args) as u64,
+        8 => sys_tcp_connect(args) as u64,
         op => {
             println!("syscall: unimplemented syscall: {}", op);
             1

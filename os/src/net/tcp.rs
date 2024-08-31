@@ -279,6 +279,7 @@ impl TcpSocket {
         let ip_data_size = out_tcp.header_len() + tcp_payload_data.len();
         out_tcp.ip.set_data_length(ip_data_size);
         let mut out_bytes = vec![0; (size_of::<IpV4Packet>() + ip_data_size).next_multiple_of(2)];
+        info!("net: tcp: send: {out_tcp:?}",);
         out_bytes[0..size_of::<TcpPacket>()].copy_from_slice(out_tcp.as_slice());
         out_bytes[size_of::<TcpPacket>()..][..tcp_payload_data.len()]
             .copy_from_slice(tcp_payload_data);
@@ -306,7 +307,7 @@ impl TcpSocket {
         let to_port = in_tcp.src_port();
         //
         let seq = *self.my_next_seq.lock();
-        let mut seq_to_ack = None;
+        let mut seq_to_ack = in_tcp.seq_num();
         let mut fin = false;
         let mut syn = false;
         let prev_state = *self.state.lock();
@@ -317,7 +318,7 @@ impl TcpSocket {
                     return Ok(());
                 }
                 info!("net: tcp: recv: TCP SYN received");
-                seq_to_ack = Some(in_tcp.seq_num().wrapping_add(1));
+                seq_to_ack = seq_to_ack.wrapping_add(1);
                 // SYN consumes 1 byte in the seq number space.
                 syn = true;
                 *self.my_next_seq.lock() = seq.wrapping_add(1);
@@ -339,7 +340,7 @@ impl TcpSocket {
                 }
                 // Reply ACK
                 // SYN consumes 1 byte in the seq number space.
-                seq_to_ack = Some(in_tcp.seq_num().wrapping_add(1));
+                seq_to_ack = seq_to_ack.wrapping_add(1);
                 // Now the socket is established
                 *self.state.lock() = TcpSocketState::Established;
                 info!("net: tcp: recv: TCP connection established");
@@ -361,22 +362,20 @@ impl TcpSocket {
             }
             TcpSocketState::Established => {
                 if in_tcp.is_fin() {
-                    seq_to_ack = Some(in_tcp.seq_num().wrapping_add(1));
+                    seq_to_ack = seq_to_ack.wrapping_add(1);
                     // FIN consumes 1 byte in the seq number space.
                     fin = true;
                     *self.state.lock() = TcpSocketState::LastAck;
-                } else if in_tcp_data.is_empty() {
-                    return Ok(());
-                } else {
-                    if let Ok(s) = core::str::from_utf8(in_tcp_data) {
-                        info!(
-                            "net: tcp: recv: data(str) size = {}: {s}",
-                            in_tcp_data.len()
-                        );
-                    }
-                    seq_to_ack = Some(in_tcp.seq_num().wrapping_add(in_tcp_data.len() as u32));
-                    self.rx_data.lock().extend(in_tcp_data);
                 }
+                if let Ok(s) = core::str::from_utf8(in_tcp_data) {
+                    info!(
+                        "net: tcp: recv: data(str) size = {}: {s}",
+                        in_tcp_data.len()
+                    );
+                }
+                seq_to_ack = seq_to_ack.wrapping_add(in_tcp_data.len() as u32);
+                self.rx_data.lock().extend(in_tcp_data);
+                // Send ACK
             }
             TcpSocketState::LastAck => {
                 if in_tcp.is_ack() {
@@ -393,16 +392,14 @@ impl TcpSocket {
         }
 
         //
-        if let Some(seq_to_ack) = seq_to_ack {
-            *self.last_seq_to_ack.lock() = seq_to_ack;
-        }
+        *self.last_seq_to_ack.lock() = seq_to_ack;
         let out_bytes = Self::gen_tcp_packet(
             to_ip,
             to_port,
             from_ip,
             from_port,
             seq,
-            seq_to_ack,
+            Some(seq_to_ack),
             syn,
             fin,
             &[],
