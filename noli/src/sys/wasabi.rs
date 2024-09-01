@@ -165,12 +165,10 @@ impl SystemApi for Api {
         if addr == 0 {
             None
         } else {
-            println!("addr = {addr:#X}");
             let addr = addr as *const u8;
             let mut size = [0u8; 8];
             size.copy_from_slice(unsafe { slice::from_raw_parts(addr, 8) });
             let size = usize::from_le_bytes(size);
-            println!("size = {size:#X}");
             Some(unsafe { slice::from_raw_parts(addr, size) })
         }
     }

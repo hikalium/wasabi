@@ -162,7 +162,6 @@ pub unsafe fn unchecked_switch_context(from: *mut ExecutionContext, to: *mut Exe
 /// # Safety
 /// `to` should be a valid ExecutionContext, and both contexts should not be locked on the call.
 pub unsafe fn unchecked_load_context(to: *mut ExecutionContext) {
-    crate::info!("unchecked_load_context");
     asm_restore_context(to as *mut u8);
 }
 

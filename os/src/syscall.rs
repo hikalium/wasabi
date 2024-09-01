@@ -81,8 +81,10 @@ fn sys_get_args_region(_args: &[u64; 5]) -> u64 {
     }
 }
 
+/// sys_nslookup provides DNS resolution for applications.
+/// As written in [RFC2606](https://datatracker.ietf.org/doc/html/rfc2606#section-2),
+/// this function handles some hard-coded hostnames for testing purpose.
 fn sys_nslookup(args: &[u64; 5]) -> i64 {
-    info!("sys_nslookup!");
     let host = {
         let host = args[0] as *const u8;
         let len = args[1] as usize;
@@ -97,6 +99,12 @@ fn sys_nslookup(args: &[u64; 5]) -> i64 {
     };
     if host == "wasabitest.example.com" {
         result[0] = [127, 0, 0, 1];
+        return 1;
+    } else if host == "host.test" {
+        // Host (=default gateway) in the QEMU user network.
+        // The host machine's exposed ports will be accessible via this address.
+        // It also responds to ICMP ping request.
+        result[0] = [10, 0, 2, 2];
         return 1;
     } else if host == "wasabitest.example.invalid" {
         // c.f. https://www.rfc-editor.org/rfc/rfc6761.html

@@ -3,7 +3,6 @@ extern crate alloc;
 use crate::error::Result;
 use crate::memory::ContiguousPhysicalMemoryPages;
 use crate::mutex::Mutex;
-use crate::println;
 use crate::x86_64::context::unchecked_load_context;
 use crate::x86_64::context::unchecked_switch_context;
 use crate::x86_64::context::ExecutionContext;
@@ -52,7 +51,6 @@ impl ProcessContext {
         let args_region = match args {
             Some(args) => {
                 let args = serialize_args(args);
-                println!("Serialized args: {args:?}");
                 let mut args_region = ContiguousPhysicalMemoryPages::alloc_bytes(args.len())?;
                 args_region.fill_with_bytes(0);
                 args_region.as_mut_slice()[0..args.len()].copy_from_slice(&args);
@@ -114,9 +112,7 @@ impl Scheduler {
     }
     pub fn exit_current_process(&self) -> ! {
         let to = {
-            crate::info!("lock the queue");
             let mut queue = self.queue.lock();
-            crate::info!("queue lock held");
             if queue.len() <= 1 {
                 // No process to switch
                 panic!("No more process to schedule!");
@@ -125,7 +121,6 @@ impl Scheduler {
                 .pop_front()
                 .expect("queue should have a process to exit");
             from.exited.store(true, Ordering::SeqCst);
-            crate::info!("getting to");
             let to = unsafe {
                 queue
                     .front_mut()
@@ -134,10 +129,8 @@ impl Scheduler {
                     .lock()
                     .as_mut_ptr()
             };
-            crate::info!("got to");
             to
         };
-        crate::info!("Loading next context");
         unsafe { unchecked_load_context(to) };
         unreachable!("Nothing should come back here");
     }

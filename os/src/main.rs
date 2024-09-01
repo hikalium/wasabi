@@ -153,18 +153,23 @@ fn run_tasks() -> Result<()> {
         // Note: this message is used by e2e_test. Please do not remove.
         info!("console_task has started");
         let mut s = String::new();
+        print!("> ");
         loop {
             if let Some(c) = InputManager::take().pop_input() {
                 if c == '\r' || c == '\n' {
+                    println!();
                     if let Err(e) = cmd::run(&s).await {
                         error!("{e:?}");
                     };
                     s.clear();
+                    print!("> ");
                 }
                 match c {
                     '\x7f' | '\x08' => {
-                        print!("{0} {0}", 0x08 as char);
-                        s.pop();
+                        if !s.is_empty() {
+                            print!("{0} {0}", 0x08 as char);
+                            s.pop();
+                        }
                     }
                     '\n' => {
                         // Do nothing
