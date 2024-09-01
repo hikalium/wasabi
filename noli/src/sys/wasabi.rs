@@ -20,11 +20,15 @@ macro_rules! entry_point {
     ($path:path) => {
         #[no_mangle]
         pub unsafe extern "C" fn entry() -> ! {
-            // Using this trait to accept multiple return types.
+            // Using [crate::error::MainReturn] to accept multiple return types.
             // c.f. https://github.com/rust-lang/rfcs/issues/1176#issuecomment-115058364
-            use $crate::prelude::*;
-            let ret = $path().into_error_code();
-            Api::exit(ret);
+            use noli::prelude::*;
+            let ret = $path();
+            let code = ret.as_return_code();
+            if code != 0 {
+                println!("{ret:?}")
+            }
+            Api::exit(code)
         }
     };
 }
@@ -180,5 +184,8 @@ impl SystemApi for Api {
             result.as_ptr() as u64,
             result.len() as u64,
         ) as i64
+    }
+    fn open_tcp_socket(ip: RawIpV4Addr, port: u16) -> i64 {
+        syscall_2(8, u32::from_le_bytes(ip) as u64, port as u64) as i64
     }
 }

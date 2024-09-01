@@ -621,13 +621,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nc"
-version = "0.1.0"
-dependencies = [
- "noli",
-]
-
-[[package]]
 name = "noli"
 version = "0.1.0"
 dependencies = [

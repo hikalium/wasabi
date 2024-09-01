@@ -93,7 +93,7 @@ pub async fn run(cmdline: &str) -> Result<()> {
                     yield_execution().await;
                 }
             },
-            "httpget" => {
+            "cmdhttpget" => {
                 let host = if let Some(host) = args.get(1) {
                     host
                 } else {

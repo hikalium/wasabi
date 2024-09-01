@@ -50,4 +50,9 @@ pub trait SystemApi {
         }
         unimplemented!()
     }
+    /// Returns non-negative handle for the socket.
+    /// -1: OPEN_FAILED
+    fn open_tcp_socket(_ip: RawIpV4Addr, _port: u16) -> i64 {
+        unimplemented!()
+    }
 }

@@ -13,6 +13,7 @@ use alloc::rc::Rc;
 use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::AtomicBool;
+use core::sync::atomic::AtomicI64;
 use core::sync::atomic::Ordering;
 use core::task::Context;
 use core::task::Poll;
@@ -32,6 +33,7 @@ pub struct ProcessContext {
     stack_region: Option<ContiguousPhysicalMemoryPages>,
     context: Mutex<ExecutionContext>,
     exited: Rc<AtomicBool>,
+    exit_code: Rc<AtomicI64>,
 }
 impl Default for ProcessContext {
     fn default() -> Self {
@@ -40,6 +42,7 @@ impl Default for ProcessContext {
             stack_region: None,
             context: Mutex::new(ExecutionContext::default()),
             exited: Rc::new(AtomicBool::new(false)),
+            exit_code: Rc::new(AtomicI64::new(0)),
         }
     }
 }
@@ -62,8 +65,7 @@ impl ProcessContext {
         Ok(Self {
             args_region,
             stack_region,
-            context: Mutex::new(ExecutionContext::default()),
-            exited: Rc::new(AtomicBool::new(false)),
+            ..Default::default()
         })
     }
     pub fn new_with_fn(f: extern "sysv64" fn(u64), arg1: u64) -> Result<ProcessContext> {
@@ -110,7 +112,7 @@ impl Scheduler {
     pub fn clear_queue(&self) {
         self.queue.lock().clear();
     }
-    pub fn exit_current_process(&self) -> ! {
+    pub fn exit_current_process(&self, exit_code: i64) -> ! {
         let to = {
             let mut queue = self.queue.lock();
             if queue.len() <= 1 {
@@ -120,6 +122,7 @@ impl Scheduler {
             let from = queue
                 .pop_front()
                 .expect("queue should have a process to exit");
+            from.exit_code.store(exit_code, Ordering::SeqCst);
             from.exited.store(true, Ordering::SeqCst);
             let to = unsafe {
                 queue
@@ -170,21 +173,23 @@ impl Scheduler {
 
 pub struct ProcessCompletionFuture<'a> {
     exited: Rc<AtomicBool>,
+    exit_code: Rc<AtomicI64>,
     scheduler: &'a Scheduler,
 }
 impl<'a> ProcessCompletionFuture<'a> {
     pub fn new(target: &ProcessContext, scheduler: &'a Scheduler) -> Self {
         Self {
             exited: target.exited.clone(),
+            exit_code: target.exit_code.clone(),
             scheduler,
         }
     }
 }
 impl<'a> Future for ProcessCompletionFuture<'a> {
-    type Output = Result<usize>;
+    type Output = Result<i64>;
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
         if self.exited.load(Ordering::SeqCst) {
-            Poll::Ready(Ok(0))
+            Poll::Ready(Ok(self.exit_code.load(Ordering::SeqCst)))
         } else {
             self.scheduler.switch_process();
             Poll::Pending
@@ -238,7 +243,7 @@ mod test {
             }
         }
         crate::info!("proc_func_exit_after_two loop exit");
-        TEST_SCHEDULER.exit_current_process()
+        TEST_SCHEDULER.exit_current_process(0)
     }
     #[test_case]
     fn await_process_exit() {
@@ -258,7 +263,7 @@ mod test {
     }
     extern "sysv64" fn proc_func_with_arg(arg1: u64) {
         assert!(arg1 == 42);
-        TEST_SCHEDULER.exit_current_process()
+        TEST_SCHEDULER.exit_current_process(0)
     }
     #[test_case]
     fn await_process_with_param() {

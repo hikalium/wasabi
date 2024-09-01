@@ -65,8 +65,8 @@ impl<'a> LoadedElf<'a> {
         let scheduler = Scheduler::root();
         let wait = ProcessCompletionFuture::new(&proc, scheduler);
         scheduler.schedule(proc);
-        wait.await?;
-        Ok(0)
+        let exit_code = wait.await?;
+        Ok(exit_code)
     }
     pub fn slice_of_vaddr_range(&self, range_on_vaddr: AddressRange) -> Result<&[u8]> {
         let range = range_on_vaddr.to_range_in(&self.app_vaddr_range)?;

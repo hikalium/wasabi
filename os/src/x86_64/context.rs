@@ -210,8 +210,8 @@ mod test {
 
 pub extern "sysv64" fn exec_app_context_proc_func(proc_ctx_ptr: u64) {
     let proc_ctx = unsafe { Box::from_raw(proc_ctx_ptr as *mut ProcessContext) };
-    let _ = block_on(exec_app_context(proc_ctx));
-    Scheduler::root().exit_current_process();
+    let exit_code = block_on(exec_app_context(proc_ctx)).unwrap_or(-1);
+    Scheduler::root().exit_current_process(exit_code);
 }
 
 pub async fn exec_app_context(proc_context: Box<ProcessContext>) -> Result<i64> {

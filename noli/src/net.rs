@@ -70,13 +70,14 @@ unsafe impl Sliceable for IpV4Addr {}
 
 /// Socket is an abstruction of "connection" between two components.
 #[derive(Debug)]
-pub enum SocketAddr {
-    IpV4 { addr: IpV4Addr, port: u16 },
+pub struct SocketAddr {
+    addr: IpV4Addr,
+    port: u16,
 }
 impl From<(IpV4Addr, u16)> for SocketAddr {
     fn from(addr: (IpV4Addr, u16)) -> Self {
         let (addr, port) = addr;
-        Self::IpV4 { addr, port }
+        Self { addr, port }
     }
 }
 
@@ -105,14 +106,23 @@ Content-Length: 433
 
 #[derive(Debug)]
 pub struct TcpStream {
-    addr: SocketAddr,
+    sock_addr: SocketAddr,
+    _handle: i64,
 }
 impl TcpStream {
-    pub fn addr(&self) -> &SocketAddr {
-        &self.addr
+    pub fn sock_addr(&self) -> &SocketAddr {
+        &self.sock_addr
     }
-    pub fn connect(addr: SocketAddr) -> Result<Self> {
-        Ok(Self { addr })
+    pub fn connect(sa: SocketAddr) -> Result<Self> {
+        let handle = Api::open_tcp_socket(sa.addr.0, sa.port);
+        if handle >= 0 {
+            Ok(Self {
+                sock_addr: sa,
+                _handle: handle,
+            })
+        } else {
+            Err(Error::Failed("Failed to open TCP socket"))
+        }
     }
     pub fn write(&mut self, buf: &[u8]) -> Result<usize> {
         // There's no core::io::Write trait so implement this directly.
@@ -120,12 +130,10 @@ impl TcpStream {
         hexdump(buf);
         Ok(buf.len())
     }
-    pub fn flush(&mut self) -> Result<()> {
-        // There's no core::io::Write trait so implement this directly.
-        // Do nothing for now.
-        println!("TcpStream::flush: {self:?}");
-        Ok(())
-    }
+    /// Reads data received so far with this stream up to the size of `buf`.
+    /// Returns the size of the data read by this call.
+    /// This function blocks the execution until there are some data available.
+    /// This function returns 0 once the connection is closed.
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         // There's no core::io::Read trait so implement this directly.
         println!("TcpStream::read: {self:?}");

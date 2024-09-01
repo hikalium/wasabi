@@ -2,35 +2,57 @@
 #![cfg_attr(not(target_os = "linux"), no_main)]
 
 extern crate alloc;
+use alloc::format;
+use alloc::vec::Vec;
+use noli::args;
 use noli::entry_point;
 use noli::error::Result;
-use noli::net::IpV4Addr;
+use noli::net::lookup_host;
 use noli::net::SocketAddr;
 use noli::net::TcpStream;
-use noli::print::hexdump;
+use noli::prelude::*;
 use noli::println;
 
-// printf "\nGET / HTTP/1.1\nHost: example.com\n\n" | nc example.com 80
-static SAMPLE_HTTP_GET_REQUEST: &str = "
-GET / HTTP/1.1
-Host: example.com
-
-";
-
 fn main() -> Result<()> {
-    // c.f. https://github.com/d0iasm/toybr/blob/main/net/std/src/http.rs
-    println!("httpget");
-    let ip_addr = IpV4Addr::new([127, 0, 0, 1]);
+    let args = args::from_env();
+    if args.len() <= 1 {
+        println!("Usage: httpget <host>");
+        return Ok(());
+    }
+    let host = &args[1];
+
+    let host = match lookup_host(host) {
+        Ok(results) => {
+            if let Some(host) = results.first() {
+                *host
+            } else {
+                Api::exit(1);
+            }
+        }
+        e => {
+            println!("  {e:?}");
+            Api::exit(1);
+        }
+    };
     let port = 80;
-    let socket_addr: SocketAddr = (ip_addr, port).into();
+    let socket_addr: SocketAddr = (host, port).into();
     let mut stream = TcpStream::connect(socket_addr)?;
-    let bytes_written = stream.write(SAMPLE_HTTP_GET_REQUEST.as_bytes())?;
+    println!("stream: {stream:?}");
+    let bytes_written = stream.write(format!("GET / HTTP/1.1\nHost: {host}\n\n").as_bytes())?;
     println!("bytes_written = {bytes_written}");
-    let mut buf = [0u8; 4096];
-    let bytes_read = stream.read(&mut buf)?;
-    let data = &buf[..bytes_read];
-    println!("bytes_read = {bytes_read}");
-    hexdump(data);
+    let mut received = Vec::new();
+    loop {
+        let mut buf = [0u8; 4096];
+        let bytes_read = stream.read(&mut buf)?;
+        println!("bytes_read = {bytes_read}");
+        if bytes_read == 0 {
+            break;
+        }
+        received.extend_from_slice(&buf[..bytes_read]);
+    }
+    if let Ok(received) = core::str::from_utf8(&received) {
+        println!("{received}");
+    }
     Ok(())
 }
 
