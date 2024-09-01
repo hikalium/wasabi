@@ -73,12 +73,18 @@ APP_CARGO=RUSTFLAGS='$(APP_RUSTFLAGS)' cargo
 APP_BUILD_ARG=-v --target $(APP_TARGET) --release
 
 .PHONY : default
-default: os
+default: os app
 
 .PHONY : os
 os:
 	rustup component add rust-src --toolchain `rustup show active-toolchain | cut -d ' ' -f 1`
 	cd os && cargo build --all-targets --all-features
+
+.PHONY : doc
+doc:
+	# `cargo doc -p os --open` to open os doc.
+	# `cargo doc -p noli --open` to open noli doc.
+	cargo doc --all
 
 .PHONY : clippy
 clippy:
@@ -116,6 +122,7 @@ run_app_unit_test:
 
 .PHONY : pre_upload_test
 pre_upload_test:
+	make doc
 	cargo test --package noli
 	make run_os_test
 	make run_os_lib_test

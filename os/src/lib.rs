@@ -45,6 +45,7 @@ mod memory;
 mod memory_map_holder;
 pub mod mutex;
 pub mod net;
+#[cfg(target_os = "uefi")]
 mod panic;
 pub mod pci;
 pub mod print;

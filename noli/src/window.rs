@@ -50,14 +50,14 @@ pub struct Window {
     _active: bool,
 }
 
-/// https://docs.rs/embedded-graphics/latest/embedded_graphics/geometry/trait.OriginDimensions.html
+/// <https://docs.rs/embedded-graphics/latest/embedded_graphics/geometry/trait.OriginDimensions.html>
 impl OriginDimensions for Window {
     fn size(&self) -> Size {
         Size::new(self.sheet.width() as u32, self.sheet.height() as u32)
     }
 }
 
-/// https://docs.rs/embedded-graphics/latest/embedded_graphics/draw_target/trait.DrawTarget.html
+/// <https://docs.rs/embedded-graphics/latest/embedded_graphics/draw_target/trait.DrawTarget.html>
 impl DrawTarget for Window {
     type Color = embedded_graphics::pixelcolor::Rgb888;
     type Error = Error;

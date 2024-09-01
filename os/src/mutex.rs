@@ -1,8 +1,8 @@
 //! Simple thread-safe mutex
 //!
 //! As the doc of SyncUnsafeCell says,
-//! SyncUnsafeCell::get() can be used to get
-//! *mut T from &SyncUnsafeCell<T> but we must
+//! `SyncUnsafeCell::get()` can be used to get
+//! `*mut T` from `&SyncUnsafeCell<T>` but we must
 //! ensure that the access to the object pointed
 //! is unique before dereferencing it.
 //!

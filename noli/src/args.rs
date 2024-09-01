@@ -17,9 +17,9 @@ use alloc::vec::Vec;
 /// - total_size = 77
 /// - num_args = 3
 /// - ofs_and_len:
-///   [0]: (ofs = 64, len = 4)
-///   [1]: (ofs = 69, len = 3)
-///   [2]: (ofs = 73, len = 3)
+///   index 0: (ofs = 64, len = 4)
+///   index 1: (ofs = 69, len = 3)
+///   index 2: (ofs = 73, len = 3)
 /// - data = "zero\0one\0two\0"
 pub fn serialize_args(args: &[&str]) -> Vec<u8> {
     let args: Vec<&[u8]> = args.iter().map(|e| e.as_bytes()).collect();

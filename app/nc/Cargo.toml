@@ -1,0 +1,7 @@
+[package]
+name = "nc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+noli = { path = "../../noli", version = "0.1.0" }
