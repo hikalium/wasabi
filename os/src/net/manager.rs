@@ -139,11 +139,27 @@ impl Network {
             Err(Error::Failed("No more available TCP port"))
         }
     }
-    pub fn register_tcp_socket(&self, s: Rc<TcpSocket>) -> Result<()> {
-        if let Some(self_port) = s.self_port() {
+    pub fn register_tcp_socket(&self, sock: Rc<TcpSocket>) -> Result<()> {
+        {
+            // Launch a thread to process tx data
+            let sock = Rc::downgrade(&sock);
+            spawn_global(async move {
+                loop {
+                    if let Some(sock) = sock.upgrade() {
+                        let _ = sock.poll_tx();
+                    } else {
+                        info!("tcp: socket tx handler exiting");
+                        break;
+                    }
+                    yield_execution().await;
+                }
+                Ok(())
+            })
+        }
+        if let Some(self_port) = sock.self_port() {
             let mut locked_table = self.tcp_socket_table.lock();
             if let btree_map::Entry::Vacant(e) = locked_table.entry(self_port) {
-                e.insert(s);
+                e.insert(sock);
                 Ok(())
             } else {
                 Err(Error::Failed("TCP port is already in use"))
@@ -151,8 +167,8 @@ impl Network {
         } else {
             let (port, mut locked_table) = self.pick_unused_dynamic_tcp_port()?;
             info!("dynamic TCP port {port} is picked");
-            s.set_self_port(port);
-            locked_table.insert(port, s);
+            sock.set_self_port(port);
+            locked_table.insert(port, sock);
             Ok(())
         }
     }
@@ -207,22 +223,6 @@ impl Network {
         self.register_tcp_socket(sock.clone())?;
         sock.set_self_ip(self.self_ip());
         sock.open()?;
-        {
-            // Launch a thread to process tx data
-            let sock = Rc::downgrade(&sock);
-            spawn_global(async move {
-                loop {
-                    if let Some(sock) = sock.upgrade() {
-                        let _ = sock.poll_tx();
-                    } else {
-                        info!("tcp: socket tx handler exiting");
-                        break;
-                    }
-                    yield_execution().await;
-                }
-                Ok(())
-            })
-        }
         Ok(sock)
     }
 }

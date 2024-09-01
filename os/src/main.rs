@@ -8,7 +8,6 @@
 
 extern crate alloc;
 
-use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -35,6 +34,7 @@ use os::input::InputManager;
 use os::net::manager::Network;
 use os::net::tcp::TcpSocket;
 use os::print;
+use os::println;
 use os::serial::SerialPort;
 use os::x86_64;
 use os::x86_64::read_rsp;
@@ -185,19 +185,13 @@ fn run_tasks() -> Result<()> {
         network.register_tcp_socket(sock.clone())?;
         info!("tcp_echo_task has started");
         loop {
-            let data = {
-                let mut rx_data_locked = sock.rx_data().lock();
-                if rx_data_locked.is_empty() {
-                    None
-                } else {
-                    Some(VecDeque::from_iter(rx_data_locked.drain(..)))
-                }
-            };
-            if let Some(data) = &data {
-                info!("tcp_echo_task: received: {data:?}");
-                {
-                    let mut tx_data_locked = sock.tx_data().lock();
-                    tx_data_locked.extend(data.iter());
+            while sock.is_established() {
+                sock.wait_on_rx().await;
+                let mut data = Vec::new();
+                data.extend(sock.rx_data().lock().drain(..));
+                sock.tx_data().lock().extend(data.iter());
+                if let Ok(data) = core::str::from_utf8(&data) {
+                    println!("tcp_echo_task: {data:?}");
                 }
             }
             yield_execution().await;
