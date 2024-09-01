@@ -169,8 +169,9 @@ mod test {
     fn create_socket_addr() {
         let ip_addr = IpV4Addr::new([127, 0, 0, 1]);
         let port = 80;
-        let socket_addr: SocketAddr = (ip_addr, port).into();
-        assert!(TcpStream::connect(socket_addr).is_ok());
+        let sa: SocketAddr = (ip_addr, port).into();
+        assert_eq!(sa.addr, ip_addr);
+        assert_eq!(sa.port, 80);
     }
     #[test]
     fn lookup_example_com() {
