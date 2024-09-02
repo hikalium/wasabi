@@ -18,7 +18,7 @@ pub static CONTEXT_OS: Mutex<ExecutionContext> = Mutex::new(ExecutionContext::de
 pub static CONTEXT_APP: Mutex<ExecutionContext> = Mutex::new(ExecutionContext::default());
 
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ExecutionContext {
     pub fpu: FpuContext,
     pub cpu: CpuContext,
@@ -54,10 +54,16 @@ pub struct FpuContext {
     // Should be aligned on 16-byte boundary
     pub data: [u8; 512],
 }
+impl Default for FpuContext {
+    fn default() -> Self {
+        // SAFETY: zeroed FpuContext is safe from the Rust's memory layout perspective
+        unsafe { MaybeUninit::<Self>::zeroed().assume_init() }
+    }
+}
 const _: () = assert!(size_of::<FpuContext>() == 512);
 
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CpuContext {
     pub rip: u64,    // set by CPU
     pub rflags: u64, // set by CPU

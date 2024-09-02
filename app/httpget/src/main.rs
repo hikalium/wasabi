@@ -21,7 +21,7 @@ fn main() -> Result<()> {
     }
     let host = &args[1];
 
-    let host = match lookup_host(host) {
+    let ip = match lookup_host(host) {
         Ok(results) => {
             if let Some(host) = results.first() {
                 *host
@@ -35,10 +35,11 @@ fn main() -> Result<()> {
         }
     };
     let port = 80;
-    let socket_addr: SocketAddr = (host, port).into();
+    let socket_addr: SocketAddr = (ip, port).into();
     let mut stream = TcpStream::connect(socket_addr)?;
     println!("stream: {stream:?}");
-    let bytes_written = stream.write(format!("GET / HTTP/1.1\nHost: {host}\n\n").as_bytes())?;
+    let bytes_written =
+        stream.write(format!("GET / HTTP/1.1\nHost: {host}\nConnection: Close\n\n").as_bytes())?;
     println!("bytes_written = {bytes_written}");
     let mut received = Vec::new();
     loop {
@@ -49,9 +50,9 @@ fn main() -> Result<()> {
             break;
         }
         received.extend_from_slice(&buf[..bytes_read]);
-    }
-    if let Ok(received) = core::str::from_utf8(&received) {
-        println!("{received}");
+        if let Ok(received) = core::str::from_utf8(&received) {
+            println!("{received}");
+        }
     }
     Ok(())
 }

@@ -4,14 +4,11 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::mem::Sliceable;
 use crate::prelude::*;
-use crate::print::hexdump;
-use crate::println;
 use alloc::fmt;
 use alloc::fmt::Debug;
 use alloc::fmt::Display;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cmp::min;
 use core::convert::From;
 use core::str::FromStr;
 use sabi::RawIpV4Addr;
@@ -81,33 +78,10 @@ impl From<(IpV4Addr, u16)> for SocketAddr {
     }
 }
 
-static FAKE_TCP_DATA: &str = r#"
-HTTP/1.1 200 OK
-Content-Type: text/html; charset=UTF-8
-Date: Mon, 15 Jan 2024 10:05:49 GMT
-Content-Length: 433
-
-<!doctype html>
-<html>
-<head>
-    <title>Example Domain Response</title>
-    <meta charset="utf-8" />
-</head>
-<body>
-<div>
-    <h1>Example Domain Response</h1>
-    <p>This domain is for use in illustrative examples in documents. You may use this
-    domain in literature without prior coordination or asking for permission.</p>
-    <p><a href="https://www.iana.org/domains/example">More information...</a></p>
-</div>
-</body>
-</html>
-"#;
-
 #[derive(Debug)]
 pub struct TcpStream {
     sock_addr: SocketAddr,
-    _handle: i64,
+    handle: i64,
 }
 impl TcpStream {
     pub fn sock_addr(&self) -> &SocketAddr {
@@ -118,7 +92,7 @@ impl TcpStream {
         if handle >= 0 {
             Ok(Self {
                 sock_addr: sa,
-                _handle: handle,
+                handle,
             })
         } else {
             Err(Error::Failed("Failed to open TCP socket"))
@@ -126,9 +100,17 @@ impl TcpStream {
     }
     pub fn write(&mut self, buf: &[u8]) -> Result<usize> {
         // There's no core::io::Write trait so implement this directly.
-        println!("TcpStream::write: {self:?}");
-        hexdump(buf);
-        Ok(buf.len())
+        let bytes_written = Api::write_to_tcp_socket(self.handle, buf);
+        if bytes_written >= 0 {
+            Ok(bytes_written as usize)
+        } else {
+            let err = bytes_written;
+            match err {
+                -1 => Err(Error::Failed("NO_SUCH_SOCKET")),
+                -2 => Err(Error::Failed("WRITE_ERROR")),
+                _ => Err(Error::Failed("UNDEFINED")),
+            }
+        }
     }
     /// Reads data received so far with this stream up to the size of `buf`.
     /// Returns the size of the data read by this call.
@@ -136,10 +118,17 @@ impl TcpStream {
     /// This function returns 0 once the connection is closed.
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         // There's no core::io::Read trait so implement this directly.
-        println!("TcpStream::read: {self:?}");
-        let copy_size = min(buf.len(), FAKE_TCP_DATA.len());
-        buf[..copy_size].copy_from_slice(&FAKE_TCP_DATA.as_bytes()[..copy_size]);
-        Ok(copy_size)
+        let bytes_written = Api::read_from_tcp_socket(self.handle, buf);
+        if bytes_written >= 0 {
+            Ok(bytes_written as usize)
+        } else {
+            let err = bytes_written;
+            match err {
+                -1 => Err(Error::Failed("NO_SUCH_SOCKET")),
+                -2 => Err(Error::Failed("READ_ERROR")),
+                _ => Err(Error::Failed("UNDEFINED")),
+            }
+        }
     }
 }
 

@@ -186,6 +186,12 @@ impl SystemApi for Api {
         ) as i64
     }
     fn open_tcp_socket(ip: RawIpV4Addr, port: u16) -> i64 {
-        syscall_2(8, u32::from_le_bytes(ip) as u64, port as u64) as i64
+        syscall_2(8, u32::from_be_bytes(ip) as u64, port as u64) as i64
+    }
+    fn write_to_tcp_socket(handle: i64, buf: &[u8]) -> i64 {
+        syscall_3(9, handle as u64, buf.as_ptr() as u64, buf.len() as u64) as i64
+    }
+    fn read_from_tcp_socket(handle: i64, buf: &mut [u8]) -> i64 {
+        syscall_3(10, handle as u64, buf.as_mut_ptr() as u64, buf.len() as u64) as i64
     }
 }

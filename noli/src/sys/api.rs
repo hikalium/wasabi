@@ -50,9 +50,21 @@ pub trait SystemApi {
         }
         unimplemented!()
     }
-    /// Returns non-negative handle for the socket.
+    /// Returns a non-negative handle for the socket.
     /// -1: OPEN_FAILED
     fn open_tcp_socket(_ip: RawIpV4Addr, _port: u16) -> i64 {
+        unimplemented!()
+    }
+    /// Returns a non-negative byte size that is queued to be sent.
+    /// -1: NO_SUCH_SOCKET
+    /// -2: WRITE_ERROR
+    fn write_to_tcp_socket(_handle: i64, _buf: &[u8]) -> i64 {
+        unimplemented!()
+    }
+    /// Returns a non-negative byte size that is written to the given buffer.
+    /// -1: NO_SUCH_SOCKET
+    /// -2: READ_ERROR
+    fn read_from_tcp_socket(_handle: i64, _buf: &mut [u8]) -> i64 {
         unimplemented!()
     }
 }

@@ -1,13 +1,18 @@
 extern crate alloc;
 
+use crate::error::Error;
 use crate::error::Result;
 use crate::memory::ContiguousPhysicalMemoryPages;
 use crate::mutex::Mutex;
+use crate::net::manager::Network;
+use crate::net::tcp::TcpSocket;
 use crate::x86_64::context::unchecked_load_context;
 use crate::x86_64::context::unchecked_switch_context;
 use crate::x86_64::context::ExecutionContext;
 use crate::x86_64::paging::PageAttr;
 use alloc::boxed::Box;
+use alloc::collections::btree_map;
+use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use core::future::Future;
@@ -18,6 +23,7 @@ use core::sync::atomic::Ordering;
 use core::task::Context;
 use core::task::Poll;
 use noli::args::serialize_args;
+use noli::net::IpV4Addr;
 
 // To take ROOT_SCHEDULER, use Scheduler::root()
 static ROOT_SCHEDULER: Scheduler = Scheduler::new();
@@ -28,23 +34,15 @@ pub fn init() {
     ROOT_SCHEDULER.schedule(ProcessContext::default()); // context for current
 }
 
+#[derive(Default)]
 pub struct ProcessContext {
     args_region: Option<ContiguousPhysicalMemoryPages>,
     stack_region: Option<ContiguousPhysicalMemoryPages>,
     context: Mutex<ExecutionContext>,
     exited: Rc<AtomicBool>,
     exit_code: Rc<AtomicI64>,
-}
-impl Default for ProcessContext {
-    fn default() -> Self {
-        Self {
-            args_region: None,
-            stack_region: None,
-            context: Mutex::new(ExecutionContext::default()),
-            exited: Rc::new(AtomicBool::new(false)),
-            exit_code: Rc::new(AtomicI64::new(0)),
-        }
-    }
+    tcp_sockets: BTreeMap<i64, Rc<TcpSocket>>,
+    next_tcp_socket_handle: i64,
 }
 impl ProcessContext {
     pub fn new(
@@ -90,6 +88,23 @@ impl ProcessContext {
     }
     pub fn args_region_start_addr(&self) -> Option<usize> {
         self.args_region.as_ref().map(|ar| ar.range().start())
+    }
+    // Create a new tcp socket and issue a handle for it
+    pub fn create_tcp_socket(&mut self, ip: IpV4Addr, port: u16) -> Result<i64> {
+        let network = Network::take();
+        let sock = network.open_tcp_socket(ip, port)?;
+        for handle in core::cmp::max(0, self.next_tcp_socket_handle)..=i64::MAX {
+            if let btree_map::Entry::Vacant(e) = self.tcp_sockets.entry(handle) {
+                e.insert(sock.clone());
+                self.next_tcp_socket_handle = self.next_tcp_socket_handle.wrapping_add(1);
+                assert!(handle >= 0);
+                return Ok(handle);
+            }
+        }
+        Err(Error::Failed("No more tcp_socket handle available"))
+    }
+    pub fn tcp_socket(&self, handle: i64) -> Option<Rc<TcpSocket>> {
+        self.tcp_sockets.get(&handle).cloned()
     }
 }
 

@@ -14,6 +14,7 @@ use crate::x86_64::syscall::write_exit_reason;
 use crate::x86_64::syscall::write_return_value;
 use core::ptr::write_volatile;
 use noli::bitmap::bitmap_draw_point;
+use noli::net::IpV4Addr;
 use sabi::MouseEvent;
 
 fn exit_to_os(retv: u64) -> ! {
@@ -129,9 +130,96 @@ fn sys_nslookup(args: &[u64; 5]) -> i64 {
     -1
 }
 
-fn sys_tcp_connect(_args: &[u64; 5]) -> i64 {
-    info!("sys_tcp_connect!");
-    -1
+fn sys_tcp_connect(args: &[u64; 5]) -> i64 {
+    let ip = IpV4Addr::new((args[0] as u32).to_be_bytes());
+    let port: u16 = args[1] as u16;
+
+    if let Some(proc) = CURRENT_PROCESS.lock().as_mut() {
+        if let Ok(handle) = proc.create_tcp_socket(ip, port) {
+            handle
+        } else {
+            -1
+        }
+    } else {
+        -1
+    }
+}
+
+fn sys_tcp_write(args: &[u64; 5]) -> i64 {
+    let handle = args[0] as i64;
+    let buf = {
+        let buf = args[1] as *const u8;
+        let len = args[2] as usize;
+        // TODO(hikalium): validate the buffer
+        unsafe { core::slice::from_raw_parts(buf, len) }
+    };
+    let sock = if let Some(proc) = CURRENT_PROCESS.lock().as_mut() {
+        if let Some(sock) = proc.tcp_socket(handle) {
+            Ok(sock)
+        } else {
+            Err(-1)
+        }
+    } else {
+        Err(-1)
+    };
+    match sock {
+        Ok(sock) => {
+            sock.tx_data().lock().extend(buf.iter());
+            // Flush the tx buffer
+            // TODO(hikalium): remove this (or make the flush operation optional) once preemptive
+            // multi-tasking is implemented.
+            info!("tx data enqueued. waiting...");
+            while sock.is_trying_to_connect()
+                || (sock.is_established() && sock.tx_data().lock().len() != 0)
+            {
+                Scheduler::root().switch_process();
+            }
+            info!("write done");
+            buf.len() as i64
+        }
+        Err(e) => e,
+    }
+}
+
+fn sys_tcp_read(args: &[u64; 5]) -> i64 {
+    let handle = args[0] as i64;
+    let buf = {
+        let buf = args[1] as *mut u8;
+        let len = args[2] as usize;
+        // TODO(hikalium): validate the buffer
+        unsafe { core::slice::from_raw_parts_mut(buf, len) }
+    };
+    let sock = if let Some(proc) = CURRENT_PROCESS.lock().as_mut() {
+        if let Some(sock) = proc.tcp_socket(handle) {
+            Ok(sock)
+        } else {
+            Err(-1)
+        }
+    } else {
+        Err(-1)
+    };
+    match sock {
+        Ok(sock) => {
+            while sock.is_trying_to_connect()
+                || (sock.is_established() && sock.rx_data().lock().len() == 0)
+            {
+                Scheduler::root().switch_process();
+            }
+            let mut rx_data_locked = sock.rx_data().lock();
+            let src_buf_size = rx_data_locked.len();
+            let dst_buf_size = buf.len();
+            let mut received = 0;
+            for (dst, src) in buf
+                .iter_mut()
+                .zip(rx_data_locked.drain(0..(core::cmp::min(dst_buf_size, src_buf_size))))
+            {
+                *dst = src;
+                received += 1;
+            }
+            received
+        }
+        Err(e) => e,
+    }
 }
 
 pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
@@ -145,9 +233,17 @@ pub fn syscall_handler(op: u64, args: &[u64; 5]) -> u64 {
         6 => sys_get_args_region(args),
         7 => sys_nslookup(args) as u64,
         8 => sys_tcp_connect(args) as u64,
+        9 => sys_tcp_write(args) as u64,
+        10 => sys_tcp_read(args) as u64,
         op => {
             println!("syscall: unimplemented syscall: {}", op);
-            1
+            // Return u64::MAX here as it may be the "most unexpected value" that can crash the
+            // program without keep going. For example, most of the syscalls uses negative values
+            // as an "error" value. Also, even if the value is treated as unsigned size of
+            // something, subsequent operations can fail with such a huge number anyways (e.g.
+            // allocating a buffer) so that the software developer can notice the issue easily
+            // (hopefully...)
+            u64::MAX
         }
     }
 }

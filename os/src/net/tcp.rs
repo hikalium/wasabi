@@ -151,6 +151,7 @@ pub struct TcpSocket {
     state: Mutex<TcpSocketState>,
     rx_data: Mutex<VecDeque<u8>>,
     tx_data: Mutex<VecDeque<u8>>,
+    keep_listening: bool,
 }
 impl Debug for TcpSocket {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -169,6 +170,7 @@ impl TcpSocket {
             state: Mutex::new(TcpSocketState::Listen),
             rx_data: Default::default(),
             tx_data: Default::default(),
+            keep_listening: true,
         }
     }
     pub fn new_client(dst_ip: IpV4Addr, dst_port: u16) -> Self {
@@ -183,6 +185,7 @@ impl TcpSocket {
             state: Mutex::new(TcpSocketState::SynSent),
             rx_data: Default::default(),
             tx_data: Default::default(),
+            keep_listening: false,
         }
     }
     pub fn self_ip(&self) -> Option<IpV4Addr> {
@@ -374,8 +377,11 @@ impl TcpSocket {
             TcpSocketState::LastAck => {
                 if in_tcp.is_ack() {
                     info!("net: tcp: recv: TCP connection closed");
-                    // Return to Listen state
-                    *self.state.lock() = TcpSocketState::Listen;
+                    if self.keep_listening {
+                        *self.state.lock() = TcpSocketState::Listen;
+                    } else {
+                        *self.state.lock() = TcpSocketState::Closed;
+                    }
                     return Ok(());
                 }
             }
@@ -402,7 +408,7 @@ impl TcpSocket {
         Ok(())
     }
     pub fn poll_tx(&self) -> Result<()> {
-        if self.tx_data.lock().is_empty() {
+        if self.tx_data.lock().is_empty() || !self.is_established() {
             return Ok(());
         }
         let to_ip = self
@@ -480,5 +486,11 @@ impl TcpSocket {
     }
     pub fn is_established(&self) -> bool {
         *self.state.lock() == TcpSocketState::Established
+    }
+    pub fn is_trying_to_connect(&self) -> bool {
+        matches!(
+            *self.state.lock(),
+            TcpSocketState::SynSent | TcpSocketState::SynReceived
+        )
     }
 }
