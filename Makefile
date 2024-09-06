@@ -204,6 +204,7 @@ run_deps : app
 	cp README.md mnt/
 	cp generated/bin/* mnt/
 	cp default/init.txt mnt/
+	[ -f "${WITH_APP_BIN}" ] && cp ${WITH_APP_BIN} mnt/
 
 .PHONY : watch_serial
 watch_serial:
