@@ -69,6 +69,19 @@ cargo add noli --git https://github.com/hikalium/wasabi.git
 rustup target add x86_64-unknown-none
 wget https://raw.githubusercontent.com/hikalium/wasabi/main/rust-toolchain.toml
 wget https://raw.githubusercontent.com/hikalium/wasabi/main/external_app_template/Makefile
+```
+
+Then, please make sure following lines are added at the beginning of src/main.rs:
+```rust
+#![no_std]
+#![cfg_attr(not(target_os = "linux"), no_main)]
+use noli::prelude::*;
+entry_point!(main);
+```
+
+Now, you can run apps with:
+
+```
 make
 /path/to/wasabi/scripts/run_with_app.sh ./target/x86_64-unknown-none/release/hello2
 ```
