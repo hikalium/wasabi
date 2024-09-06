@@ -68,6 +68,9 @@ cd hello2
 cargo add noli --git https://github.com/hikalium/wasabi.git
 rustup target add x86_64-unknown-none
 wget https://raw.githubusercontent.com/hikalium/wasabi/main/rust-toolchain.toml
+wget https://raw.githubusercontent.com/hikalium/wasabi/main/external_app_template/Makefile
+make
+/path/to/wasabi/scripts/run_with_app.sh ./target/x86_64-unknown-none/release/hello2
 ```
 
 ## Debugging tips
