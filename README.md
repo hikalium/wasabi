@@ -58,6 +58,18 @@ make run
 make internal_run_app_test INIT="app_name_here"
 ```
 
+## Build an app for WasabiOS
+
+For example, to create a "hello2" app, run following commands outside of WasabiOS checkout:
+
+```
+cargo new hello2
+cd hello2
+cargo add noli --git https://github.com/hikalium/wasabi.git
+rustup target add x86_64-unknown-none
+wget https://raw.githubusercontent.com/hikalium/wasabi/main/rust-toolchain.toml
+```
+
 ## Debugging tips
 
 ```
