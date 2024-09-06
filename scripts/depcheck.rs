@@ -24,8 +24,8 @@ fn get_git_root_path() -> Result<String> {
     Ok(git_root_path.to_string())
 }
 
-fn main() -> Result<()> {
-    let git_root_path = get_git_root_path()?;
+// <https://doc.rust-lang.org/book/ch07-02-defining-modules-to-control-scope-and-privacy.html>
+fn get_paths_to_the_code_per_files(git_root_path: &str) -> Result<HashSet<(String, String)>> {
     let result = Command::new("bash")
         .arg("-c")
         .arg(format!(
@@ -47,8 +47,9 @@ fn main() -> Result<()> {
             )
         })
         .collect();
-    eprintln!("{depset:?}");
-
+    Ok(depset)
+}
+fn get_struct_set(git_root_path: &str) -> Result<HashSet<String>> {
     let result = Command::new("bash")
         .arg("-c")
         .arg(format!(
@@ -59,10 +60,16 @@ fn main() -> Result<()> {
         .unwrap()
         .stdout;
     let grep_output = str::from_utf8(&result)?.trim();
-    let struct_set: HashSet<&str> = grep_output.split("\n").collect();
+    let struct_set: HashSet<String> = grep_output.split("\n").map(|s| s.to_string()).collect();
+    Ok(struct_set)
+}
+fn get_per_file_module_deps(
+    git_root_path: &str,
+    struct_set: &HashSet<String>,
+) -> Result<HashSet<(String, String)>> {
     let mut mod_dep_set: HashSet<(String, String)> = HashSet::new();
     let mut mod_set = HashSet::<String>::new();
-    for s in &struct_set {
+    for s in struct_set {
         let ss: Vec<&str> = s.split("::").collect();
         let mut prev = s.to_string();
         for t in (1..ss.len()).rev() {
@@ -72,6 +79,17 @@ fn main() -> Result<()> {
             prev = t;
         }
     }
+    Ok(mod_dep_set)
+}
+
+fn main() -> Result<()> {
+    let git_root_path = get_git_root_path()?;
+    let depset = get_paths_to_the_code_per_files(&git_root_path)?;
+    let struct_set = get_struct_set(&git_root_path)?;
+    let mod_dep_set = get_per_file_module_deps(&git_root_path, &struct_set)?;
+    //
+    eprintln!("{struct_set:?}");
+    return Ok(());
 
     let fset: HashSet<&str> = depset.iter().map(|e| e.0.as_str()).collect();
     let vset: HashSet<&str> = depset.iter().map(|e| e.1.as_str()).collect();
@@ -90,7 +108,7 @@ fn main() -> Result<()> {
             r#"{k:?} [shape="box", pin=false,pos="0,{y}", fontname="monospace"];"#
         )?;
     }
-    for (i, k) in mod_set.iter().enumerate() {
+    for (i, k) in mod_dep_set.iter().enumerate() {
         let y = i;
         writeln!(
             f,
