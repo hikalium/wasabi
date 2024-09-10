@@ -112,6 +112,10 @@ fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     for i in 0..256 {
         let _ = draw_point(&mut vram, 0x010101 * i as u32, i, i);
     }
+    for i in (0..=255).step_by(17) {
+        let _ = draw_line(&mut vram, 0x00ffff, 0, 255, 255, i);
+        let _ = draw_line(&mut vram, 0x00ffff, 255, 0, i, 255);
+    }
     //println!("Hello, world!");
     loop {
         hlt()
@@ -222,5 +226,48 @@ fn fill_rect<T: Bitmap>(buf: &mut T, color: u32, px: i64, py: i64, w: i64, h: i6
         }
     }
 
+    Ok(())
+}
+
+fn draw_line<T: Bitmap>(buf: &mut T, color: u32, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<()> {
+    if !buf.is_in_x_range(x0)
+        || !buf.is_in_x_range(x1)
+        || !buf.is_in_y_range(y0)
+        || !buf.is_in_y_range(y1)
+    {
+        return Err("Out of Range");
+    }
+
+    if x1 < x0 {
+        return draw_line(buf, color, x1, y1, x0, y0);
+    }
+    if x1 == x0 {
+        if y0 <= y1 {
+            for i in y0..=y1 {
+                draw_point(buf, color, x0, i)?;
+            }
+        } else {
+            for i in y1..=y0 {
+                draw_point(buf, color, x0, i)?;
+            }
+        }
+        return Ok(());
+    }
+    assert!(x0 < x1);
+    let lx = x1 - x0 + 1;
+    const MULTIPLIER: i64 = 1024 * 1024;
+    let a = (y1 - y0) * MULTIPLIER / lx;
+    for i in 0..lx {
+        draw_line(
+            buf,
+            color,
+            x0 + i,
+            y0 + (a * i / MULTIPLIER),
+            x0 + i,
+            y0 + (a * (i + 1) / MULTIPLIER),
+        )?;
+    }
+    draw_point(buf, color, x0, y0)?;
+    draw_point(buf, color, x1, y1)?;
     Ok(())
 }
