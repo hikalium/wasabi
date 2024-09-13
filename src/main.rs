@@ -331,15 +331,29 @@ fn draw_str_fg<T: Bitmap>(buf: &mut T, x: i64, y: i64, color: u32, s: &str) {
 
 struct VramTextWriter<'a> {
     vram: &'a mut VramBufferInfo,
+    cursor_x: i64,
+    cursor_y: i64,
 }
 impl<'a> VramTextWriter<'a> {
     fn new(vram: &'a mut VramBufferInfo) -> Self {
-        Self { vram }
+        Self {
+            vram,
+            cursor_x: 0,
+            cursor_y: 0,
+        }
     }
 }
 impl<'a> fmt::Write for VramTextWriter<'a> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        draw_str_fg(self.vram, 0, 0, 0xffffff, s);
+        for c in s.chars() {
+            if c == '\n' {
+                self.cursor_y += 16;
+                self.cursor_x = 0;
+                continue;
+            }
+            draw_font_fg(self.vram, self.cursor_x, self.cursor_y, 0xffffff, c);
+            self.cursor_x += 8;
+        }
         Ok(())
     }
 }
