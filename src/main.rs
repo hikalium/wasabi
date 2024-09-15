@@ -226,9 +226,20 @@ fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
         .boot_services
         .get_memory_map(&mut memory_map);
     writeln!(w, "{status:?}").unwrap();
+    let mut total_memory_pages = 0;
     for e in memory_map.iter() {
+        if e.memory_type != EfiMemoryType::CONVENTIONAL_MEMORY {
+            continue;
+        }
+        total_memory_pages += e.number_of_pages;
         writeln!(w, "{e:?}").unwrap();
     }
+    let total_memory_size_mib = total_memory_pages * 4096 / 1024 / 1024;
+    writeln!(
+        w,
+        "Total: {total_memory_pages} pages = {total_memory_size_mib} MiB"
+    )
+    .unwrap();
     //println!("Hello, world!");
     loop {
         hlt()
