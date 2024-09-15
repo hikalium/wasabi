@@ -196,6 +196,25 @@ pub fn hlt() {
     unsafe { asm!("hlt") }
 }
 
+fn draw_test_pattern<T: Bitmap>(buf: &mut T, px: i64, py: i64) -> Result<()> {
+    // 128x128
+    fill_rect(buf, 0x0000ff, px, py, 128, 128)?;
+    fill_rect(buf, 0x00ff00, px, py, 64, 64)?;
+    fill_rect(buf, 0xff0000, px, py, 32, 32)?;
+    for i in 0..128 {
+        let _ = draw_point(buf, 0x020200 * i as u32, px + i, py + i);
+    }
+    let px = px + 64;
+    let py = py + 64;
+    for i in (0..=63).step_by(9) {
+        let _ = draw_line(buf, 0x00ffff, px, py + 63, px + 63, py + i);
+        let _ = draw_line(buf, 0x00ffff, px + 63, py, px + i, py + 63);
+    }
+    let px = px - 24;
+    draw_str_fg(buf, px, py, 0xffffff, "ABCDEF");
+    Ok(())
+}
+
 #[no_mangle]
 fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     let mut vram = init_vram(efi_system_table).expect("init_vram failed");
@@ -203,24 +222,8 @@ fn efi_main(_image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     let vw = vram.width;
     let vh = vram.height;
     fill_rect(&mut vram, 0x000000, 0, 0, vw, vh).expect("fill_rect failed");
-    fill_rect(&mut vram, 0xff0000, 32, 32, 32, 32).expect("fill_rect failed");
-    fill_rect(&mut vram, 0x00ff00, 64, 64, 64, 64).expect("fill_rect failed");
-    fill_rect(&mut vram, 0x0000ff, 128, 128, 128, 128).expect("fill_rect failed");
-    for i in 0..256 {
-        let _ = draw_point(&mut vram, 0x010101 * i as u32, i, i);
-    }
-    for i in (0..=255).step_by(17) {
-        let _ = draw_line(&mut vram, 0x00ffff, 0, 255, 255, i);
-        let _ = draw_line(&mut vram, 0x00ffff, 255, 0, i, 255);
-    }
-    for (i, c) in "ABCDEF".chars().enumerate() {
-        draw_font_fg(&mut vram, i as i64 * 16 + 256, i as i64 * 16, 0xffffff, c)
-    }
-    draw_str_fg(&mut vram, 256, 256, 0xffffff, "Hello, world!");
+    draw_test_pattern(&mut vram, vw - 128, 0).unwrap();
     let mut w = VramTextWriter::new(&mut vram);
-    for i in 0..4 {
-        writeln!(w, "i = {i}").unwrap();
-    }
     let mut memory_map = MemoryMapHolder::new();
     let status = efi_system_table
         .boot_services
