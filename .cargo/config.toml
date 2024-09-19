@@ -2,9 +2,6 @@
 target = 'x86_64-unknown-uefi'
 rustflags = ["-Cforce-unwind-tables", "-Cforce-frame-pointers", "-Cno-redzone"]
 
-[lib]
-target = "x86_64-unknown-uefi"
-
 [unstable]
 build-std = ["core", "compiler_builtins", "alloc", "panic_abort"]
 build-std-features = ["compiler-builtins-mem"]
