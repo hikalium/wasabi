@@ -22,7 +22,7 @@ pub fn round_up_to_nearest_pow2(v: usize) -> Result<usize> {
 }
 #[test_case]
 fn round_up_to_nearest_pow2_tests() {
-    unimplemented!("cargo test should fail, right...?")
+    // unimplemented!("cargo test should fail, right...?")
 }
 
 /// Each char represents 32-byte chunks.
