@@ -20,6 +20,10 @@ pub fn round_up_to_nearest_pow2(v: usize) -> Result<usize> {
         .checked_shl(usize::BITS - v.wrapping_sub(1).leading_zeros())
         .ok_or("Out of range")
 }
+#[test_case]
+fn round_up_to_nearest_pow2_tests() {
+    unimplemented!("cargo test should fail, right...?")
+}
 
 /// Each char represents 32-byte chunks.
 /// Vertical bar `|` represents the chunk that has a Header
