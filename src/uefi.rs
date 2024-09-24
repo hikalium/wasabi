@@ -68,6 +68,9 @@ impl EfiMemoryDescriptor {
     pub fn number_of_pages(&self) -> u64 {
         self.number_of_pages
     }
+    pub fn physical_start(&self) -> u64 {
+        self.physical_start
+    }
 }
 
 const MEMORY_MAP_BUFFER_SIZE: usize = 0x8000;
