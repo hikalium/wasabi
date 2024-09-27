@@ -16,3 +16,18 @@ macro_rules! println {
         () => ($crate::print!("\n"));
             ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
+
+#[macro_export]
+macro_rules! info {
+            ($($arg:tt)*) => ($crate::print!("[INFO]  {}:{:<3}: {}\n", file!(), line!(), format_args!($($arg)*)));
+}
+
+#[macro_export]
+macro_rules! warn {
+            ($($arg:tt)*) => ($crate::print!("[WARN]  {}:{:<3}: {}\n", file!(), line!(), format_args!($($arg)*)));
+}
+
+#[macro_export]
+macro_rules! error {
+            ($($arg:tt)*) => ($crate::print!("[ERROR] {}:{:<3}: {}\n", file!(), line!(), format_args!($($arg)*)));
+}
