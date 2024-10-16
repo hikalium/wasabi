@@ -93,12 +93,21 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     }
     flush_tlb();
 
-    let task = Task::new(async {
-        info!("Hello from the async world!");
+    let task1 = Task::new(async {
+        for i in 100..=103 {
+            info!("{i}");
+        }
+        Ok(())
+    });
+    let task2 = Task::new(async {
+        for i in 200..=203 {
+            info!("{i}");
+        }
         Ok(())
     });
     let mut executor = Executor::new();
-    executor.enqueue(task);
+    executor.enqueue(task1);
+    executor.enqueue(task2);
     Executor::run(executor)
 }
 #[panic_handler]
