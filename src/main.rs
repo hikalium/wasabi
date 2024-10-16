@@ -5,7 +5,8 @@ use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::writeln;
 use wasabi::error;
-use wasabi::executor::block_on;
+use wasabi::executor::Executor;
+use wasabi::executor::Task;
 use wasabi::graphics::draw_test_pattern;
 use wasabi::graphics::fill_rect;
 use wasabi::graphics::Bitmap;
@@ -24,7 +25,6 @@ use wasabi::uefi::EfiSystemTable;
 use wasabi::uefi::VramTextWriter;
 use wasabi::warn;
 use wasabi::x86::flush_tlb;
-use wasabi::x86::hlt;
 use wasabi::x86::init_exceptions;
 use wasabi::x86::read_cr3;
 use wasabi::x86::trigger_debug_interrupt;
@@ -93,15 +93,13 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     }
     flush_tlb();
 
-    let result = block_on(async {
+    let task = Task::new(async {
         info!("Hello from the async world!");
         Ok(())
     });
-    info!("block_on completed! result = {result:?}");
-
-    loop {
-        hlt()
-    }
+    let mut executor = Executor::new();
+    executor.enqueue(task);
+    Executor::run(executor)
 }
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
