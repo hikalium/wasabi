@@ -32,6 +32,8 @@ use wasabi::x86::read_cr3;
 use wasabi::x86::trigger_debug_interrupt;
 use wasabi::x86::PageAttr;
 
+static mut GLOBAL_HPET: Option<Hpet> = None;
+
 #[no_mangle]
 fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     println!("Booting WasabiOS...");
@@ -102,7 +104,8 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
         hpet.base_address()
             .expect("Failed to get HPET base address"),
     );
-    let task1 = Task::new(async move {
+    let hpet = unsafe { GLOBAL_HPET.insert(hpet) };
+    let task1 = Task::new(async {
         for i in 100..=103 {
             info!("{i} hpet.main_counter = {}", hpet.main_counter());
             yield_execution().await;
@@ -111,7 +114,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     });
     let task2 = Task::new(async {
         for i in 200..=203 {
-            info!("{i}");
+            info!("{i} hpet.main_counter = {}", hpet.main_counter());
             yield_execution().await;
         }
         Ok(())
