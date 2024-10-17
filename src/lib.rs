@@ -1,5 +1,6 @@
 #![no_std]
 #![feature(custom_test_frameworks)]
+#![feature(sync_unsafe_cell)]
 #![test_runner(crate::test_runner::test_runner)]
 #![reexport_test_harness_main = "run_unit_tests"]
 #![no_main]
@@ -9,6 +10,7 @@ pub mod executor;
 pub mod graphics;
 pub mod hpet;
 pub mod init;
+pub mod mutex;
 pub mod print;
 pub mod qemu;
 pub mod result;

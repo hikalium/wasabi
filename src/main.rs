@@ -15,6 +15,7 @@ use wasabi::hpet::Hpet;
 use wasabi::info;
 use wasabi::init::init_basic_runtime;
 use wasabi::init::init_paging;
+use wasabi::mutex::Mutex;
 use wasabi::print::hexdump;
 use wasabi::println;
 use wasabi::qemu::exit_qemu;
@@ -32,7 +33,7 @@ use wasabi::x86::read_cr3;
 use wasabi::x86::trigger_debug_interrupt;
 use wasabi::x86::PageAttr;
 
-static mut GLOBAL_HPET: Option<Hpet> = None;
+static GLOBAL_HPET: Mutex<Option<Hpet>> = Mutex::new(None);
 
 #[no_mangle]
 fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
@@ -104,17 +105,31 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
         hpet.base_address()
             .expect("Failed to get HPET base address"),
     );
-    let hpet = unsafe { GLOBAL_HPET.insert(hpet) };
+    *GLOBAL_HPET.lock() = Some(hpet);
     let task1 = Task::new(async {
         for i in 100..=103 {
-            info!("{i} hpet.main_counter = {}", hpet.main_counter());
+            info!(
+                "{i} hpet.main_counter = {}",
+                GLOBAL_HPET
+                    .lock()
+                    .as_ref()
+                    .expect("HPET is not set")
+                    .main_counter()
+            );
             yield_execution().await;
         }
         Ok(())
     });
     let task2 = Task::new(async {
         for i in 200..=203 {
-            info!("{i} hpet.main_counter = {}", hpet.main_counter());
+            info!(
+                "{i} hpet.main_counter = {}",
+                GLOBAL_HPET
+                    .lock()
+                    .as_ref()
+                    .expect("HPET is not set")
+                    .main_counter()
+            );
             yield_execution().await;
         }
         Ok(())
