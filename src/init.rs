@@ -1,6 +1,9 @@
 extern crate alloc;
 
+use crate::acpi::AcpiRsdpStruct;
 use crate::allocator::ALLOCATOR;
+use crate::hpet::set_global_hpet;
+use crate::hpet::Hpet;
 use crate::uefi::exit_from_efi_boot_services;
 use crate::uefi::EfiHandle;
 use crate::uefi::EfiMemoryType::*;
@@ -43,4 +46,14 @@ pub fn init_paging(memory_map: &MemoryMapHolder) {
     unsafe {
         write_cr3(Box::into_raw(table));
     }
+}
+
+pub fn init_hpet(acpi: &AcpiRsdpStruct) {
+    let hpet = Hpet::new(
+        acpi.hpet()
+            .expect("Failed to get HPET from ACPI")
+            .base_address()
+            .expect("Failed to get HPET base address"),
+    );
+    set_global_hpet(hpet);
 }
