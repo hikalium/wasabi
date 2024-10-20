@@ -1,9 +1,11 @@
+use crate::mutex::Mutex;
 use core::fmt;
 use core::mem::size_of;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
+use core::time::Duration;
 
 const TIMER_CONFIG_LEVEL_TRIGGER: u64 = 1 << 1;
 const TIMER_CONFIG_INT_ENABLE: u64 = 1 << 2;
@@ -130,5 +132,19 @@ impl fmt::Debug for Hpet {
             self.main_counter(),
             self.registers.timers[0].comparator_value,
         )
+    }
+}
+
+static HPET: Mutex<Option<Hpet>> = Mutex::new(None);
+pub fn set_global_hpet(hpet: Hpet) {
+    assert!(HPET.lock().is_none());
+    *HPET.lock() = Some(hpet);
+}
+pub fn global_timestamp() -> Duration {
+    if let Some(hpet) = &*HPET.lock() {
+        let ns = hpet.main_counter() as u128 * 1_000_000_000 / hpet.freq() as u128;
+        Duration::from_nanos(ns as u64)
+    } else {
+        Duration::ZERO
     }
 }
