@@ -45,6 +45,15 @@ impl SerialPort {
             self.send_char(sc.next().unwrap());
         }
     }
+    pub fn try_read(&self) -> Option<u8> {
+        if read_io_port_u8(self.base + 5) & 0x01 == 0 {
+            None
+        } else {
+            let c = read_io_port_u8(self.base);
+            write_io_port_u8(self.base + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
+            Some(c)
+        }
+    }
 }
 impl fmt::Write for SerialPort {
     fn write_str(&mut self, s: &str) -> fmt::Result {
