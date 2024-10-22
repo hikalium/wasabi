@@ -1,15 +1,12 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::time::Duration;
-use core::writeln;
 use wasabi::error;
 use wasabi::executor::Executor;
 use wasabi::executor::Task;
 use wasabi::executor::TimeoutFuture;
-use wasabi::graphics::BitmapTextWriter;
 use wasabi::hpet::global_timestamp;
 use wasabi::info;
 use wasabi::init::init_allocator;
@@ -18,6 +15,7 @@ use wasabi::init::init_display;
 use wasabi::init::init_hpet;
 use wasabi::init::init_paging;
 use wasabi::print::hexdump;
+use wasabi::print::set_global_vram;
 use wasabi::println;
 use wasabi::qemu::exit_qemu;
 use wasabi::qemu::QemuExitCode;
@@ -43,11 +41,11 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     hexdump(efi_system_table);
     let mut vram = init_vram(efi_system_table).expect("init_vram failed");
     init_display(&mut vram);
-    let mut w = BitmapTextWriter::new(&mut vram);
+    set_global_vram(vram);
     let acpi = efi_system_table.acpi_table().expect("ACPI table not found");
 
     let memory_map = init_basic_runtime(image_handle, efi_system_table);
-    writeln!(w, "Hello, Non-UEFI world!").unwrap();
+    info!("Hello, Non-UEFI world!");
     init_allocator(&memory_map);
     let (_gdt, _idt) = init_exceptions();
     init_paging(&memory_map);
