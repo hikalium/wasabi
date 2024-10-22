@@ -45,6 +45,10 @@ pub fn init_paging(memory_map: &MemoryMapHolder) {
     table
         .create_mapping(0, end_of_mem, 0, PageAttr::ReadWriteKernel)
         .expect("Failed to create initial page mapping");
+    // Unmap page 0 to detect null ptr dereference
+    table
+        .create_mapping(0, 4096, 0, PageAttr::NotPresent)
+        .expect("Failed to unmap page 0");
     unsafe {
         write_cr3(Box::into_raw(table));
     }
