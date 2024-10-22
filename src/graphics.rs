@@ -1,5 +1,6 @@
 use crate::result::Result;
 use core::cmp::min;
+use core::fmt;
 
 pub trait Bitmap {
     fn bytes_per_pixel(&self) -> i64;
@@ -184,4 +185,33 @@ pub fn draw_test_pattern<T: Bitmap>(buf: &mut T, px: i64, py: i64) -> Result<()>
     let px = px - 24;
     draw_str_fg(buf, px, py, 0xffffff, "ABCDEF");
     Ok(())
+}
+
+pub struct BitmapTextWriter<'a, T> {
+    buf: &'a mut T,
+    cursor_x: i64,
+    cursor_y: i64,
+}
+impl<'a, T: Bitmap> BitmapTextWriter<'a, T> {
+    pub fn new(buf: &'a mut T) -> Self {
+        Self {
+            buf,
+            cursor_x: 0,
+            cursor_y: 0,
+        }
+    }
+}
+impl<'a, T: Bitmap> fmt::Write for BitmapTextWriter<'a, T> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        for c in s.chars() {
+            if c == '\n' {
+                self.cursor_y += 16;
+                self.cursor_x = 0;
+                continue;
+            }
+            draw_font_fg(self.buf, self.cursor_x, self.cursor_y, 0xffffff, c);
+            self.cursor_x += 8;
+        }
+        Ok(())
+    }
 }
