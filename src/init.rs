@@ -4,8 +4,10 @@ use crate::acpi::AcpiRsdpStruct;
 use crate::allocator::ALLOCATOR;
 use crate::hpet::set_global_hpet;
 use crate::hpet::Hpet;
+use crate::info;
 use crate::uefi::exit_from_efi_boot_services;
 use crate::uefi::EfiHandle;
+use crate::uefi::EfiMemoryType;
 use crate::uefi::EfiMemoryType::*;
 use crate::uefi::EfiSystemTable;
 use crate::uefi::MemoryMapHolder;
@@ -56,4 +58,17 @@ pub fn init_hpet(acpi: &AcpiRsdpStruct) {
             .expect("Failed to get HPET base address"),
     );
     set_global_hpet(hpet);
+}
+
+pub fn init_allocator(memory_map: &MemoryMapHolder) {
+    let mut total_memory_pages = 0;
+    for e in memory_map.iter() {
+        if e.memory_type() != EfiMemoryType::CONVENTIONAL_MEMORY {
+            continue;
+        }
+        total_memory_pages += e.number_of_pages();
+        info!("{e:?}");
+    }
+    let total_memory_size_mib = total_memory_pages * 4096 / 1024 / 1024;
+    info!("Total: {total_memory_pages} pages = {total_memory_size_mib} MiB");
 }
