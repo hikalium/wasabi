@@ -87,3 +87,13 @@ pub fn init_display(vram: &mut VramBufferInfo) {
     fill_rect(vram, 0x000000, 0, 0, vw, vh).expect("fill_rect failed");
     draw_test_pattern(vram, vw - 128, 0).unwrap();
 }
+
+pub fn init_pci(acpi: &AcpiRsdpStruct) {
+    if let Some(mcfg) = acpi.mcfg() {
+        for i in 0..mcfg.num_of_entries() {
+            if let Some(e) = mcfg.entry(i) {
+                info!("{}", e)
+            }
+        }
+    }
+}

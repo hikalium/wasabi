@@ -1,5 +1,6 @@
 use crate::hpet::HpetRegisters;
 use crate::result::Result;
+use core::fmt;
 
 #[repr(packed)]
 #[derive(Clone, Copy, Debug)]
@@ -143,5 +144,70 @@ impl AcpiRsdpStruct {
     pub fn hpet(&self) -> Option<&AcpiHpetDescriptor> {
         let xsdt = self.xsdt();
         xsdt.find_table(b"HPET").map(AcpiHpetDescriptor::new)
+    }
+    pub fn mcfg(&self) -> Option<&AcpiMcfgDescriptor> {
+        let xsdt = self.xsdt();
+        xsdt.find_table(b"MCFG").map(AcpiMcfgDescriptor::new)
+    }
+}
+
+#[repr(C, packed)]
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct AcpiMcfgDescriptor {
+    // https://wiki.osdev.org/PCI_Express
+    header: SystemDescriptionTableHeader,
+    _unused: [u8; 8],
+    // 44 + (16 * n) -> Configuration space base address allocation structures
+    // [EcamEntry; ?]
+}
+impl AcpiTable for AcpiMcfgDescriptor {
+    const SIGNATURE: &'static [u8; 4] = b"MCFG";
+    type Table = Self;
+}
+const _: () = assert!(size_of::<AcpiMcfgDescriptor>() == 44);
+impl AcpiMcfgDescriptor {
+    pub fn header_size(&self) -> usize {
+        size_of::<Self>()
+    }
+    pub fn num_of_entries(&self) -> usize {
+        (self.header.length as usize - self.header_size()) / size_of::<EcamEntry>()
+    }
+    pub fn entry(&self, index: usize) -> Option<&EcamEntry> {
+        if index >= self.num_of_entries() {
+            None
+        } else {
+            Some(unsafe {
+                &*((self as *const Self as *const u8).add(self.header_size()) as *const EcamEntry)
+                    .add(index)
+            })
+        }
+    }
+}
+
+#[repr(packed)]
+pub struct EcamEntry {
+    ecm_base_addr: u64,
+    _pci_segment_group: u16,
+    start_pci_bus: u8,
+    end_pci_bus: u8,
+    _reserved: u32,
+}
+impl EcamEntry {
+    pub fn base_address(&self) -> u64 {
+        self.ecm_base_addr
+    }
+}
+impl fmt::Display for EcamEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // To avoid "error: reference to packed field is unaligned"
+        let base = self.ecm_base_addr;
+        let bus_start = self.start_pci_bus;
+        let bus_end = self.end_pci_bus;
+        write!(
+            f,
+            "ECAM: Bus [{}..={}] is mapped at {:#X}",
+            bus_start, bus_end, base
+        )
     }
 }
