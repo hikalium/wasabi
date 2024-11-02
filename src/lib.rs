@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(custom_test_frameworks)]
 #![feature(sync_unsafe_cell)]
+#![feature(option_get_or_insert_default)]
 #![test_runner(crate::test_runner::test_runner)]
 #![reexport_test_harness_main = "run_unit_tests"]
 #![no_main]
