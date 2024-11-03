@@ -61,11 +61,11 @@ pub enum TranslationResult {
 }
 
 #[repr(transparent)]
-pub struct Entry<const LEVEL: usize, const SHIFT: usize, NEXT> {
+pub struct Entry<const LEVEL: usize, NEXT> {
     value: u64,
     next_type: PhantomData<NEXT>,
 }
-impl<const LEVEL: usize, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NEXT> {
+impl<const LEVEL: usize, NEXT> Entry<LEVEL, NEXT> {
     fn read_value(&self) -> u64 {
         self.value
     }
@@ -137,22 +137,22 @@ impl<const LEVEL: usize, const SHIFT: usize, NEXT> Entry<LEVEL, SHIFT, NEXT> {
         }
     }
 }
-impl<const LEVEL: usize, const SHIFT: usize, NEXT> fmt::Display for Entry<LEVEL, SHIFT, NEXT> {
+impl<const LEVEL: usize, NEXT> fmt::Display for Entry<LEVEL, NEXT> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.format(f)
     }
 }
-impl<const LEVEL: usize, const SHIFT: usize, NEXT> fmt::Debug for Entry<LEVEL, SHIFT, NEXT> {
+impl<const LEVEL: usize, NEXT> fmt::Debug for Entry<LEVEL, NEXT> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.format(f)
     }
 }
 
 #[repr(align(4096))]
-pub struct Table<const LEVEL: usize, const SHIFT: usize, NEXT> {
-    entry: [Entry<LEVEL, SHIFT, NEXT>; 512],
+pub struct Table<const LEVEL: usize, NEXT> {
+    entry: [Entry<LEVEL, NEXT>; 512],
 }
-impl<const LEVEL: usize, const SHIFT: usize, NEXT: core::fmt::Debug> Table<LEVEL, SHIFT, NEXT> {
+impl<const LEVEL: usize, NEXT: core::fmt::Debug> Table<LEVEL, NEXT> {
     fn format(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "L{}Table @ {:#p} {{", LEVEL, self)?;
         for i in 0..512 {
@@ -164,25 +164,26 @@ impl<const LEVEL: usize, const SHIFT: usize, NEXT: core::fmt::Debug> Table<LEVEL
         }
         writeln!(f, "}}")
     }
+    const fn index_shift() -> usize {
+        (LEVEL - 1) * 9 + 12
+    }
     fn calc_index(&self, addr: u64) -> usize {
-        ((addr >> SHIFT) & 0b1_1111_1111) as usize
+        ((addr >> Self::index_shift()) & 0b1_1111_1111) as usize
     }
     pub fn next_level(&self, index: usize) -> Option<&NEXT> {
         self.entry.get(index).and_then(|e| e.table().ok())
     }
 }
-impl<const LEVEL: usize, const SHIFT: usize, NEXT: fmt::Debug> fmt::Debug
-    for Table<LEVEL, SHIFT, NEXT>
-{
+impl<const LEVEL: usize, NEXT: fmt::Debug> fmt::Debug for Table<LEVEL, NEXT> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.format(f)
     }
 }
 
-pub type PT = Table<1, 12, [u8; PAGE_SIZE]>;
-pub type PD = Table<2, 21, PT>;
-pub type PDPT = Table<3, 30, PD>;
-pub type PML4 = Table<4, 39, PDPT>;
+pub type PT = Table<1, [u8; PAGE_SIZE]>;
+pub type PD = Table<2, PT>;
+pub type PDPT = Table<3, PD>;
+pub type PML4 = Table<4, PDPT>;
 
 impl PML4 {
     pub fn new() -> Box<Self> {
