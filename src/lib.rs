@@ -7,10 +7,12 @@
 #![no_main]
 pub mod acpi;
 pub mod allocator;
+pub mod bits;
 pub mod executor;
 pub mod graphics;
 pub mod hpet;
 pub mod init;
+pub mod mmio;
 pub mod mutex;
 pub mod pci;
 pub mod print;
@@ -18,6 +20,7 @@ pub mod qemu;
 pub mod result;
 pub mod serial;
 pub mod uefi;
+pub mod volatile;
 pub mod x86;
 pub mod xhci;
 
