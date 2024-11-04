@@ -200,25 +200,38 @@ impl PML4 {
         phys: u64,
         attr: PageAttr,
     ) -> Result<()> {
-        if virt_start & ATTR_MASK != 0 {
-            return Err("Invalid virt_start");
-        }
-        if virt_end & ATTR_MASK != 0 {
-            return Err("Invalid virt_end");
-        }
-        if phys & ATTR_MASK != 0 {
-            return Err("Invalid phys");
-        }
-        for addr in (virt_start..virt_end).step_by(PAGE_SIZE) {
-            let index = self.calc_index(addr);
-            let table = self.entry[index].ensure_populated()?.table_mut()?;
+        let table = self;
+        let mut addr = virt_start;
+        loop {
             let index = table.calc_index(addr);
             let table = table.entry[index].ensure_populated()?.table_mut()?;
-            let index = table.calc_index(addr);
-            let table = table.entry[index].ensure_populated()?.table_mut()?;
-            let index = table.calc_index(addr);
-            let pte = &mut table.entry[index];
-            pte.set_page(phys + addr - virt_start, attr)?;
+            loop {
+                let index = table.calc_index(addr);
+                let table = table.entry[index].ensure_populated()?.table_mut()?;
+                loop {
+                    let index = table.calc_index(addr);
+                    let table = table.entry[index].ensure_populated()?.table_mut()?;
+                    loop {
+                        let index = table.calc_index(addr);
+                        let pte = &mut table.entry[index];
+                        let phys_addr = phys + addr - virt_start;
+                        pte.set_page(phys_addr, attr)?;
+                        addr = addr.wrapping_add(PAGE_SIZE as u64);
+                        if index + 1 >= (1 << 9) || addr >= virt_end {
+                            break;
+                        }
+                    }
+                    if index + 1 >= (1 << 9) || addr >= virt_end {
+                        break;
+                    }
+                }
+                if index + 1 >= (1 << 9) || addr >= virt_end {
+                    break;
+                }
+            }
+            if index + 1 >= (1 << 9) || addr >= virt_end {
+                break;
+            }
         }
         Ok(())
     }
