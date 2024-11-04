@@ -1,6 +1,7 @@
 use crate::acpi::AcpiRsdpStruct;
 use crate::graphics::Bitmap;
 use crate::result::Result;
+use core::fmt;
 use core::mem::offset_of;
 use core::ptr::null_mut;
 
@@ -66,7 +67,7 @@ pub enum EfiMemoryType {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct EfiMemoryDescriptor {
     memory_type: EfiMemoryType,
     physical_start: u64,
@@ -83,6 +84,23 @@ impl EfiMemoryDescriptor {
     }
     pub fn physical_start(&self) -> u64 {
         self.physical_start
+    }
+}
+impl fmt::Debug for EfiMemoryDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EfiMemoryDescriptor")
+            .field(
+                "phys",
+                &format_args!(
+                    "[{:#014X}-{:#014X})",
+                    self.physical_start,
+                    self.physical_start + self.number_of_pages * 4096,
+                ),
+            )
+            .field("size", &format_args!("({:8} pages)", self.number_of_pages))
+            .field("attr", &format_args!("{:#X}", self.attribute))
+            .field("type", &format_args!("{:?}", self.memory_type))
+            .finish()
     }
 }
 
