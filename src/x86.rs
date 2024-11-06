@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::error;
 use crate::info;
+use crate::mmio::IoBox;
 use crate::result::Result;
 use alloc::boxed::Box;
 use core::arch::asm;
@@ -981,4 +982,16 @@ where
     let mut table = take_current_page_table();
     callback(&mut table);
     put_current_page_table(table)
+}
+
+pub fn disable_cache<T: Sized>(io_box: &IoBox<T>) {
+    let region = io_box.as_ref();
+    let vstart = region as *const T as u64;
+    let vend = vstart + size_of_val(region) as u64;
+    unsafe {
+        with_current_page_table(|pt| {
+            pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
+                .expect("Failed to create mapping")
+        })
+    }
 }
