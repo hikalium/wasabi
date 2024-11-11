@@ -25,3 +25,6 @@ default-members = [
     "font",
     "noli",
 ]
+exclude = [
+	"external_app_template"
+]
