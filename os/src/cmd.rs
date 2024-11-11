@@ -48,6 +48,10 @@ async fn run_app(name: &str, args: &[&str]) -> Result<i64> {
 }
 
 pub async fn run(cmdline: &str) -> Result<()> {
+    let cmdline = cmdline.trim();
+    if cmdline.is_empty() {
+        return Ok(());
+    }
     let network = Network::take();
     let args = cmdline.trim();
     let args: Vec<&str> = args.split(' ').collect();

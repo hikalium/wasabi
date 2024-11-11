@@ -142,9 +142,10 @@ fn run_tasks() -> Result<()> {
             .find(|&e| e.name() == &init_txt)
             .ok_or(Error::Failed("init.txt not found"))?;
         let init_txt = String::from_utf8_lossy(init_txt.data());
-        for line in init_txt.trim().split('\n') {
+        for (line_idx, line) in init_txt.split('\n').enumerate() {
             if let Err(e) = cmd::run(line).await {
-                error!("{e:?}");
+                info!("Init script: line {}: {e:?}", line_idx + 1);
+                break;
             };
         }
         Ok(())
