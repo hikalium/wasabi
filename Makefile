@@ -103,7 +103,7 @@ clippy:
 	cd os && cargo clippy --all-features --all-targets -- ${CLIPPY_OPTIONS}
 	# Run clippy on all apps under app dir
 	cargo clippy $(APP_PACKAGES) -- ${CLIPPY_OPTIONS}
-	cargo clippy --target=x86_64-unknown-none $(APP_PACKAGES) -- ${CLIPPY_OPTIONS}
+	cargo clippy --target=$(APP_TARGET) $(APP_PACKAGES) -- ${CLIPPY_OPTIONS}
 
 .PHONY : dump_config
 dump_config:
@@ -200,7 +200,7 @@ app :
 	$(APP_CARGO) build $(APP_BUILD_ARG) $(APP_PACKAGES)
 	mkdir -p $(BIN_DIR)
 	@echo "Installing apps to ${BIN_DIR}"
-	cd target/x86_64-unknown-none/release && cp $(APPS) $(BIN_DIR)
+	cd target/$(APP_TARGET)/release && cp $(APPS) $(BIN_DIR)
 
 .PHONY : run_deps
 run_deps : app

@@ -12,7 +12,7 @@ APP_BUILD_ARG=-v --target $(TARGET) --release
 
 .PHONY : build
 build :
-	rustup target add x86_64-unknown-none
+	rustup target add $(TARGET)
 	$(CARGO) build $(APP_BUILD_ARG)
 
 .PHONY : test
