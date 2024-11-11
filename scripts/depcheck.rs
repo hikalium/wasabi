@@ -8,6 +8,7 @@
 
 use anyhow::Result;
 use std::collections::HashSet;
+use std::fs::File;
 use std::io::Write;
 use std::process::Command;
 use std::str;
@@ -93,7 +94,7 @@ fn main() -> Result<()> {
 
     let fset: HashSet<&str> = depset.iter().map(|e| e.0.as_str()).collect();
     let vset: HashSet<&str> = depset.iter().map(|e| e.1.as_str()).collect();
-    let mut f = std::fs::File::create("dep.dot")?;
+    let mut f = File::create("dep.dot")?;
     writeln!(f, "digraph DEP {{")?;
     writeln!(f, "layout=dot")?;
     writeln!(f, "overlap=false")?;

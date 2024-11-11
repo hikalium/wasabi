@@ -148,7 +148,7 @@ commit :
 
 .PHONY : filecheck
 filecheck:
-	@! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock|mk)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore|\.gitkeep)$$' \
+	@! git ls-files | grep -v -E '(\.(rs|md|toml|sh|txt|json|lock|mk|dot|svg)|Makefile|LICENSE|rust-toolchain|Dockerfile|OVMF.fd|\.yml|\.gitignore|\.gitkeep)$$' \
 		|| ! echo "!!! Unknown file type is being added! Do you really want to commit the file above? (if so, just modify filecheck recipe)"
 
 .PHONY : spellcheck
