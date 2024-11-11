@@ -8,10 +8,11 @@ RUSTFLAGS=\
 		  -C link-args=execstack
 CARGO=RUSTFLAGS='$(RUSTFLAGS)' cargo
 BIN_PATH_DEBUG=$(shell cargo metadata --format-version 1 | jq -r .target_directory)/debug/$(NAME)
-APP_BUILD_ARG=-v --target x86_64-unknown-none --release
+APP_BUILD_ARG=-v --target $(TARGET) --release
 
 .PHONY : build
 build :
+	rustup target add x86_64-unknown-none
 	$(CARGO) build $(APP_BUILD_ARG)
 
 .PHONY : test
