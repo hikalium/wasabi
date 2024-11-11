@@ -82,9 +82,15 @@ os:
 
 .PHONY : doc
 doc:
-	# `cargo doc -p os --open --document-private-items` to open os doc.
-	# `cargo doc -p noli --open --target x86_64-unknown-none --document-private-items` to open noli doc for WasabiOS apps.
 	cargo doc --all
+
+.PHONY : os_doc
+os_doc:
+	cargo doc -p os --open --document-private-items
+
+.PHONY : noli_doc_for_app
+noli_doc_for_app:
+	cargo doc -p noli --open --target $(APP_TARGET) --document-private-items
 
 .PHONY : clippy
 clippy:
