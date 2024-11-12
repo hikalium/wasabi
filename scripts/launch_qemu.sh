@@ -16,6 +16,7 @@ qemu-system-x86_64 \
   -serial chardev:char_com1 \
   -monitor telnet:0.0.0.0:2345,server,nowait,logfile=log/qemu_monitor.txt \
   -device qemu-xhci \
+  -device usb-kbd \
   -device isa-debug-exit,iobase=0xf4,iosize=0x01
 RETCODE=$?
 set -e
