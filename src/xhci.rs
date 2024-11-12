@@ -120,6 +120,11 @@ impl PciXhciDriver {
         }
         if let Some(port) = connected_port {
             info!("xhci: port {port} is connected");
+            if let Some(portsc) = xhc.regs.portsc.get(port) {
+                info!("xhci: resetting port {port}");
+                portsc.reset_port().await;
+                info!("xhci: port {port} has been reset");
+            }
         }
         Ok(())
     }
@@ -734,5 +739,37 @@ impl PortScEntry {
     fn ccs(&self) -> bool {
         // CCS - Current Connect Status - ROS
         self.bit(0)
+    }
+    fn assert_bit(&self, pos: usize) {
+        const PRESERVE_MASK: u32 = 0b01001111000000011111111111101001;
+        let portsc = self.ptr.lock();
+        let old = unsafe { read_volatile(*portsc) };
+        unsafe { write_volatile(*portsc, (old & PRESERVE_MASK) | (1 << pos)) }
+    }
+    fn pp(&self) -> bool {
+        // PP - Port Power - RWS
+        self.bit(9)
+    }
+    fn assert_pp(&self) {
+        // PP - Port Power - RWS
+        self.assert_bit(9)
+    }
+    pub fn pr(&self) -> bool {
+        // PR - Port Reset - RW1S
+        self.bit(4)
+    }
+    pub fn assert_pr(&self) {
+        // PR - Port Reset - RW1S
+        self.assert_bit(4)
+    }
+    pub async fn reset_port(&self) {
+        self.assert_pp();
+        while !self.pp() {
+            yield_execution().await
+        }
+        self.assert_pr();
+        while self.pr() {
+            yield_execution().await
+        }
     }
 }
