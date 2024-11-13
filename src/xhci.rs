@@ -22,6 +22,7 @@ use alloc::rc::Weak;
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::cmp::max;
+use core::future::Future;
 use core::marker::PhantomPinned;
 use core::mem::MaybeUninit;
 use core::ops::Range;
@@ -29,11 +30,14 @@ use core::pin::Pin;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::slice;
+use core::task::Context;
+use core::task::Poll;
 
 struct XhcRegisters {
     cap_regs: Mmio<CapabilityRegisters>,
     op_regs: Mmio<OperationalRegisters>,
     rt_regs: Mmio<RuntimeRegisters>,
+    doorbell_regs: Vec<Rc<Doorbell>>,
     portsc: PortSc,
 }
 
@@ -67,11 +71,20 @@ impl PciXhciDriver {
             Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().rtsoff()) as *mut RuntimeRegisters)
         };
         let portsc = PortSc::new(bar0, cap_regs.as_ref());
+        let num_slots = cap_regs.as_ref().num_of_ports();
+        let mut doorbell_regs = Vec::new();
+        for i in 0..=num_slots {
+            let ptr = unsafe { bar0.addr().add(cap_regs.as_ref().dboff()).add(4 * i) as *mut u32 };
+            doorbell_regs.push(Rc::new(Doorbell::new(ptr)))
+        }
+        // number of doorbells will be 1 + num_slots since doorbell[] is for the host controller.
+        assert!(doorbell_regs.len() == 1 + num_slots);
         Ok(XhcRegisters {
             cap_regs,
             op_regs,
             rt_regs,
             portsc,
+            doorbell_regs,
         })
     }
     pub fn attach(pci: &Pci, bdf: BusDeviceFunction) -> Result<()> {
@@ -120,11 +133,12 @@ impl PciXhciDriver {
         }
         if let Some(port) = connected_port {
             info!("xhci: port {port} is connected");
-            Self::init_port(xhc, port).await?;
+            let slot = Self::init_port(xhc, port).await?;
+            info!("slot {slot} is assigned for port {port}");
         }
         Ok(())
     }
-    async fn init_port(xhc: Rc<Controller>, port: usize) -> Result<()> {
+    async fn init_port(xhc: Rc<Controller>, port: usize) -> Result<u8> {
         let portsc = xhc.regs.portsc.get(port).ok_or("invalid portsc")?;
         info!("resetting port {port}");
         portsc.reset_port().await;
@@ -134,7 +148,11 @@ impl PciXhciDriver {
             .then_some(())
             .ok_or("port is not enabled")?;
         info!("port is enabled");
-        Ok(())
+        let slot = xhc
+            .send_command(GenericTrbEntry::cmd_enable_slot())
+            .await?
+            .slot_id();
+        Ok(slot)
     }
 }
 
@@ -168,6 +186,9 @@ impl CapabilityRegisters {
     }
     fn num_of_ports(&self) -> usize {
         extract_bits(self.hcsparams1.read(), 24, 8) as usize
+    }
+    pub fn dboff(&self) -> usize {
+        self.dboff.read() as usize
     }
 }
 
@@ -419,6 +440,14 @@ impl Controller {
         unsafe { self.regs.op_regs.get_unchecked_mut() }
             .set_dcbaa_ptr(&mut self.device_context_base_array.lock())
     }
+    async fn send_command(&self, cmd: GenericTrbEntry) -> Result<GenericTrbEntry> {
+        let cmd_ptr = self.command_ring.lock().push(cmd)?;
+        self.notify_xhc();
+        EventFuture::new_for_trb(&self.primary_event_ring, cmd_ptr).await
+    }
+    fn notify_xhc(&self) {
+        self.regs.doorbell_regs[0].notify(0, 0);
+    }
 }
 
 struct EventRing {
@@ -504,6 +533,10 @@ impl EventRing {
     fn has_next_event(&self) -> bool {
         self.ring.as_ref().current().cycle_state() == self.cycle_state_ours
     }
+    pub fn register_waiter(&mut self, wait: &Rc<EventWaitInfo>) {
+        let wait = Rc::downgrade(wait);
+        self.wait_list.push_back(wait);
+    }
 }
 #[repr(C, align(4096))]
 struct EventRingSegmentTableEntry {
@@ -576,6 +609,18 @@ impl TrbRing {
     fn current_ptr(&self) -> usize {
         &self.trb[self.current_index] as *const GenericTrbEntry as usize
     }
+    fn advance_index(&mut self, new_cycle: bool) -> Result<()> {
+        if self.current().cycle_state() == new_cycle {
+            return Err("cycle state does not change");
+        }
+        self.trb[self.current_index].set_cycle_state(new_cycle);
+        self.current_index = (self.current_index + 1) % self.trb.len();
+        Ok(())
+    }
+    fn write_current(&mut self, trb: GenericTrbEntry) {
+        self.write(self.current_index, trb)
+            .expect("writing to the current index shall not fail")
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -619,6 +664,9 @@ impl GenericTrbEntry {
     fn set_trb_type(&mut self, trb_type: TrbType) {
         self.control.write_bits(10, 6, trb_type as u32).unwrap()
     }
+    pub fn set_cycle_state(&mut self, cycle: bool) {
+        self.control.write_bits(0, 1, cycle.into()).unwrap()
+    }
     fn set_toggle_cycle(&mut self, value: bool) {
         self.control.write_bits(1, 1, value.into()).unwrap()
     }
@@ -634,22 +682,46 @@ impl GenericTrbEntry {
     fn cycle_state(&self) -> bool {
         self.control.read_bits(0, 1) != 0
     }
+    pub fn cmd_enable_slot() -> Self {
+        let mut trb = Self::default();
+        trb.set_trb_type(TrbType::EnableSlotCommand);
+        trb
+    }
 }
 
 struct CommandRing {
     ring: IoBox<TrbRing>,
-    _cycle_state_ours: bool,
+    cycle_state_ours: bool,
 }
 impl CommandRing {
     fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
+    }
+    pub fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
+        // Calling get_unchecked_mut() here is safe
+        // as far as this function does not move the ring out.
+        let ring = unsafe { self.ring.get_unchecked_mut() };
+        if ring.current().cycle_state() != self.cycle_state_ours {
+            return Err("Command Ring is Full");
+        }
+        src.set_cycle_state(self.cycle_state_ours);
+        let dst_ptr = ring.current_ptr();
+        ring.write_current(src);
+        ring.advance_index(!self.cycle_state_ours)?;
+        if ring.current().trb_type() == TrbType::Link as u32 {
+            // Reached to Link TRB. Let's skip it and toggle the cycle.
+            ring.advance_index(!self.cycle_state_ours)?;
+            self.cycle_state_ours = !self.cycle_state_ours;
+        }
+        // The returned ptr will be used for waiting on command completion events.
+        Ok(dst_ptr as u64)
     }
 }
 impl Default for CommandRing {
     fn default() -> Self {
         let mut this = Self {
             ring: TrbRing::new(),
-            _cycle_state_ours: false,
+            cycle_state_ours: false,
         };
         let link_trb = GenericTrbEntry::trb_link(this.ring.as_ref());
         unsafe { this.ring.get_unchecked_mut() }
@@ -659,7 +731,7 @@ impl Default for CommandRing {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct EventWaitCond {
     trb_type: Option<TrbType>,
     trb_addr: Option<u64>,
@@ -786,5 +858,73 @@ impl PortScEntry {
     }
     pub fn is_enabled(&self) -> bool {
         self.pp() && self.ccs() && self.ped() && !self.pr()
+    }
+}
+
+// [xhci] 4.7 Doorbells
+// index 0: for the host controller
+// index 1-255: for device contexts (index by a Slot ID)
+// DO NOT implement Copy trait - this should be the only instance to have the ptr.
+pub struct Doorbell {
+    ptr: Mutex<*mut u32>,
+}
+impl Doorbell {
+    pub fn new(ptr: *mut u32) -> Self {
+        Self {
+            ptr: Mutex::new(ptr),
+        }
+    }
+    // [xhci] 5.6 Doorbell Registers
+    // bit 0..8: DB Target
+    // bit 8..16: RsvdZ
+    // bit 16..32: DB Task ID
+    // index 0: for the host controller
+    // index 1-255: for device contexts (index by a Slot ID)
+    pub fn notify(&self, target: u8, task: u16) {
+        let value = (target as u32) | (task as u32) << 16;
+        // SAFETY: This is safe as long as the ptr is valid
+        unsafe {
+            write_volatile(*self.ptr.lock(), value);
+        }
+    }
+}
+#[derive(Clone)]
+struct EventFuture {
+    wait_on: Rc<EventWaitInfo>,
+    _pinned: PhantomPinned,
+}
+impl EventFuture {
+    fn new(event_ring: &Mutex<EventRing>, cond: EventWaitCond) -> Self {
+        let wait_on = EventWaitInfo {
+            cond,
+            trbs: Default::default(),
+        };
+        let wait_on = Rc::new(wait_on);
+        event_ring.lock().register_waiter(&wait_on);
+        Self {
+            wait_on,
+            _pinned: PhantomPinned,
+        }
+    }
+    fn new_for_trb(event_ring: &Mutex<EventRing>, trb_addr: u64) -> Self {
+        let trb_addr = Some(trb_addr);
+        Self::new(
+            event_ring,
+            EventWaitCond {
+                trb_addr,
+                ..Default::default()
+            },
+        )
+    }
+}
+impl Future for EventFuture {
+    type Output = Result<GenericTrbEntry>;
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<GenericTrbEntry>> {
+        let mut_self = unsafe { self.get_unchecked_mut() };
+        if let Some(trb) = mut_self.wait_on.trbs.lock().pop_front() {
+            Poll::Ready(Ok(trb))
+        } else {
+            Poll::Pending
+        }
     }
 }
