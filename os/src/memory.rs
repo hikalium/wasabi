@@ -82,6 +82,9 @@ impl ContiguousPhysicalMemoryPages {
         let layout = Layout::from_size_align(PAGE_SIZE * num_pages, PAGE_SIZE)
             .or(Err(Error::Failed("Invalid layout")))?;
         let phys_addr = ALLOCATOR.alloc_with_options(layout);
+        if phys_addr.is_null() {
+            return Err(Error::Failed("Failed to allocate pages"));
+        }
         Ok(Self { layout, phys_addr })
     }
     pub fn fill_with_bytes(&mut self, value: u8) {
