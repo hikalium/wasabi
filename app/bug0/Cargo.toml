@@ -1,0 +1,10 @@
+[package]
+name = "bug0"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name="bug0"
+
+[dependencies]
+noli = { path = "../../noli", version = "0.1.0" }

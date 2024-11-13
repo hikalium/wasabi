@@ -149,11 +149,14 @@ pub async fn run(cmdline: &str) -> Result<()> {
                 }
             }
             app_name => {
-                let result = run_app(app_name, &args).await;
-                if result.is_ok() {
-                    info!("{result:?}");
-                } else {
-                    error!("{result:?}");
+                for i in 0..1000 {
+                    info!("try {i}");
+                    let result = run_app(app_name, &args).await;
+                    if result.is_ok() {
+                        info!("{result:?}");
+                    } else {
+                        error!("{result:?}");
+                    }
                 }
             }
         }

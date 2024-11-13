@@ -29,8 +29,9 @@ struct Header {
     next_header: Option<Box<Header>>,
     size: usize,
     is_allocated: bool,
-    _reserved: usize,
+    canary: usize,
 }
+const CANARY_SIGNATURE: usize = 0xC0FFEE713E;
 const HEADER_SIZE: usize = size_of::<Header>();
 #[allow(clippy::assertions_on_constants)]
 const _: () = assert!(HEADER_SIZE == 32);
@@ -39,6 +40,7 @@ const _: () = assert!(HEADER_SIZE.count_ones() == 1);
 pub const LAYOUT_PAGE_4K: Layout = unsafe { Layout::from_size_align_unchecked(4096, 4096) };
 impl Header {
     fn can_provide(&self, size: usize, align: usize) -> bool {
+        self.verify_canary();
         self.size >= size + HEADER_SIZE * 3 + align
     }
     fn is_allocated(&self) -> bool {
@@ -53,7 +55,7 @@ impl Header {
             next_header: None,
             size: 0,
             is_allocated: false,
-            _reserved: 0,
+            canary: CANARY_SIGNATURE,
         });
         Box::from_raw(addr as *mut Header)
     }
@@ -105,6 +107,9 @@ impl Header {
             self.next_header = Some(header_for_allocated);
             Some(allocated_addr as *mut u8)
         }
+    }
+    fn verify_canary(&self) {
+        assert!(self.canary == CANARY_SIGNATURE)
     }
 }
 impl Drop for Header {
