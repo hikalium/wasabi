@@ -120,15 +120,20 @@ impl PciXhciDriver {
         }
         if let Some(port) = connected_port {
             info!("xhci: port {port} is connected");
-            if let Some(portsc) = xhc.regs.portsc.get(port) {
-                info!("xhci: resetting port {port}");
-                portsc.reset_port().await;
-                info!("xhci: port {port} has been reset");
-                if portsc.is_enabled() {
-                    info!("xhci: port {port} is enabled");
-                }
-            }
+            Self::init_port(xhc, port).await?;
         }
+        Ok(())
+    }
+    async fn init_port(xhc: Rc<Controller>, port: usize) -> Result<()> {
+        let portsc = xhc.regs.portsc.get(port).ok_or("invalid portsc")?;
+        info!("resetting port {port}");
+        portsc.reset_port().await;
+        info!("port {port} has been reset");
+        portsc
+            .is_enabled()
+            .then_some(())
+            .ok_or("port is not enabled")?;
+        info!("port is enabled");
         Ok(())
     }
 }
