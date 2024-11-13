@@ -238,7 +238,7 @@ pub async fn exec_app_context(proc_context: Box<ProcessContext>) -> Result<i64> 
                 (app_ctx.cpu.rsp, app_ctx.cpu.rip, app_ctx.as_mut_ptr())
             };
             // Push the ExecutionContext for the app to be used by return_to_app
-            let app_rsp = app_rsp + size_of::<ExecutionContext>() as u64;
+            let app_rsp = app_rsp - size_of::<ExecutionContext>() as u64;
             {
                 let app_ctx = CONTEXT_APP.lock();
                 let app_ctx_on_app_stack = app_rsp as *mut ExecutionContext;
