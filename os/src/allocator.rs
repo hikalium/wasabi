@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::efi::EfiMemoryDescriptor;
 use crate::efi::EfiMemoryType;
+use crate::error;
 use crate::info;
 use crate::memory_map_holder::MemoryMapHolder;
 use crate::util::round_up_to_nearest_pow2;
@@ -109,7 +110,10 @@ impl Header {
         }
     }
     fn verify_canary(&self) {
-        assert!(self.canary == CANARY_SIGNATURE)
+        if self.canary != CANARY_SIGNATURE {
+            error!("{self:?}");
+            panic!("CANARY_SIGNATURE is broken! Possibly OOB write has happened...")
+        }
     }
 }
 impl Drop for Header {
@@ -146,6 +150,7 @@ unsafe impl GlobalAlloc for FirstFitAllocator {
     }
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
         let mut region = Header::from_allocated_region(ptr);
+        region.verify_canary();
         region.is_allocated = false;
         Box::leak(region);
         // region is leaked here to avoid dropping the free info on the memory.
