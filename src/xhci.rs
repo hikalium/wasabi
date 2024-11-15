@@ -24,10 +24,18 @@ use core::alloc::Layout;
 use core::cmp::max;
 use core::marker::PhantomPinned;
 use core::mem::MaybeUninit;
+use core::ops::Range;
 use core::pin::Pin;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::slice;
+
+struct XhcRegisters {
+    cap_regs: Mmio<CapabilityRegisters>,
+    op_regs: Mmio<OperationalRegisters>,
+    rt_regs: Mmio<RuntimeRegisters>,
+    portsc: PortSc,
+}
 
 pub struct PciXhciDriver {}
 impl PciXhciDriver {
@@ -48,13 +56,7 @@ impl PciXhciDriver {
         ];
         VDI_LIST.contains(&vp)
     }
-    fn setup_xhc_registers(
-        bar0: &BarMem64,
-    ) -> Result<(
-        Mmio<CapabilityRegisters>,
-        Mmio<OperationalRegisters>,
-        Mmio<RuntimeRegisters>,
-    )> {
+    fn setup_xhc_registers(bar0: &BarMem64) -> Result<XhcRegisters> {
         let cap_regs = unsafe { Mmio::from_raw(bar0.addr() as *mut CapabilityRegisters) };
         let op_regs = unsafe {
             Mmio::from_raw(
@@ -64,7 +66,13 @@ impl PciXhciDriver {
         let rt_regs = unsafe {
             Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().rtsoff()) as *mut RuntimeRegisters)
         };
-        Ok((cap_regs, op_regs, rt_regs))
+        let portsc = PortSc::new(bar0, cap_regs.as_ref());
+        Ok(XhcRegisters {
+            cap_regs,
+            op_regs,
+            rt_regs,
+            portsc,
+        })
     }
     pub fn attach(pci: &Pci, bdf: BusDeviceFunction) -> Result<()> {
         info!("Xhci found at: {bdf:?}");
@@ -72,18 +80,30 @@ impl PciXhciDriver {
         pci.enable_bus_master(bdf)?;
         let bar0 = pci.try_bar0_mem64(bdf)?;
         bar0.disable_cache();
-        let (cap_regs, op_regs, rt_regs) = Self::setup_xhc_registers(&bar0)?;
-        let xhc = Controller::new(cap_regs, op_regs, rt_regs)?;
+        let regs = Self::setup_xhc_registers(&bar0)?;
+        let xhc = Controller::new(regs)?;
         spawn_global(Self::run(xhc));
         Ok(())
     }
     async fn run(xhc: Controller) -> Result<()> {
         info!(
             "xhci: cap_regs.MaxSlots = {}",
-            xhc.cap_regs.as_ref().num_of_device_slots()
+            xhc.regs.cap_regs.as_ref().num_of_device_slots()
         );
-        info!("xhci: op_regs.USBSTS = {}", xhc.op_regs.as_ref().usbsts());
-        info!("xhci: rt_regs.MFINDEX = {}", xhc.rt_regs.as_ref().mfindex());
+        info!(
+            "xhci: op_regs.USBSTS = {}",
+            xhc.regs.op_regs.as_ref().usbsts()
+        );
+        info!(
+            "xhci: rt_regs.MFINDEX = {}",
+            xhc.regs.rt_regs.as_ref().mfindex()
+        );
+        info!("PORTSC values for port {:?}", xhc.regs.portsc.port_range());
+        for port in xhc.regs.portsc.port_range() {
+            if let Some(e) = xhc.regs.portsc.get(port) {
+                info!("  {port:3}: {:#010X}", e.value())
+            }
+        }
         let xhc = Rc::new(xhc);
         {
             let xhc = xhc.clone();
@@ -125,6 +145,9 @@ impl CapabilityRegisters {
     fn num_scratchpad_bufs(&self) -> usize {
         (extract_bits(self.hcsparams2.read(), 21, 5) << 5
             | extract_bits(self.hcsparams2.read(), 27, 5)) as usize
+    }
+    fn num_of_ports(&self) -> usize {
+        extract_bits(self.hcsparams1.read(), 24, 8) as usize
     }
 }
 
@@ -332,31 +355,24 @@ impl DeviceContextBaseAddressArray {
 }
 
 struct Controller {
-    cap_regs: Mmio<CapabilityRegisters>,
-    op_regs: Mmio<OperationalRegisters>,
-    rt_regs: Mmio<RuntimeRegisters>,
+    regs: XhcRegisters,
     device_context_base_array: Mutex<DeviceContextBaseAddressArray>,
     primary_event_ring: Mutex<EventRing>,
     command_ring: Mutex<CommandRing>,
 }
 impl Controller {
-    fn new(
-        cap_regs: Mmio<CapabilityRegisters>,
-        mut op_regs: Mmio<OperationalRegisters>,
-        rt_regs: Mmio<RuntimeRegisters>,
-    ) -> Result<Self> {
+    fn new(mut regs: XhcRegisters) -> Result<Self> {
         unsafe {
-            op_regs.get_unchecked_mut().reset_xhc();
+            regs.op_regs.get_unchecked_mut().reset_xhc();
         }
-        let scratchpad_buffers = ScratchpadBuffers::alloc(cap_regs.as_ref(), op_regs.as_ref())?;
+        let scratchpad_buffers =
+            ScratchpadBuffers::alloc(regs.cap_regs.as_ref(), regs.op_regs.as_ref())?;
         let device_context_base_array = DeviceContextBaseAddressArray::new(scratchpad_buffers);
         let device_context_base_array = Mutex::new(device_context_base_array);
         let primary_event_ring = Mutex::new(EventRing::new()?);
         let command_ring = Mutex::new(CommandRing::default());
         let mut xhc = Self {
-            cap_regs,
-            op_regs,
-            rt_regs,
+            regs,
             device_context_base_array,
             primary_event_ring,
             command_ring,
@@ -365,21 +381,22 @@ impl Controller {
         xhc.init_slots_and_contexts()?;
         xhc.init_command_ring();
         info!("Starting xHC...");
-        unsafe { xhc.op_regs.get_unchecked_mut() }.start_xhc();
+        unsafe { xhc.regs.op_regs.get_unchecked_mut() }.start_xhc();
         info!("xHC started running!");
         Ok(xhc)
     }
     fn init_primary_event_ring(&mut self) -> Result<()> {
         let eq = &mut self.primary_event_ring;
-        unsafe { self.rt_regs.get_unchecked_mut() }.init_irs(0, &mut eq.lock())
+        unsafe { self.regs.rt_regs.get_unchecked_mut() }.init_irs(0, &mut eq.lock())
     }
     fn init_command_ring(&mut self) {
-        unsafe { self.op_regs.get_unchecked_mut() }.set_cmd_ring_ctrl(&self.command_ring.lock());
+        unsafe { self.regs.op_regs.get_unchecked_mut() }
+            .set_cmd_ring_ctrl(&self.command_ring.lock());
     }
     fn init_slots_and_contexts(&mut self) -> Result<()> {
-        let num_slots = self.cap_regs.as_ref().num_of_device_slots();
-        unsafe { self.op_regs.get_unchecked_mut() }.set_num_device_slots(num_slots)?;
-        unsafe { self.op_regs.get_unchecked_mut() }
+        let num_slots = self.regs.cap_regs.as_ref().num_of_device_slots();
+        unsafe { self.regs.op_regs.get_unchecked_mut() }.set_num_device_slots(num_slots)?;
+        unsafe { self.regs.op_regs.get_unchecked_mut() }
             .set_dcbaa_ptr(&mut self.device_context_base_array.lock())
     }
 }
@@ -658,5 +675,50 @@ impl EventWaitInfo {
             trbs.push_back(trb.clone());
             Ok(())
         })
+    }
+}
+
+// Interface to access PORTSC registers
+//
+// [xhci] 5.4.8: PORTSC
+// OperationalBase + (0x400 + 0x10 * (n - 1))
+// where n = Port Number (1, 2, ..., MaxPorts)
+struct PortSc {
+    entries: Vec<Rc<PortScEntry>>,
+}
+impl PortSc {
+    fn new(bar: &BarMem64, cap_regs: &CapabilityRegisters) -> Self {
+        let base = unsafe { bar.addr().add(cap_regs.caplength()).add(0x400) } as *mut u32;
+        let num_ports = cap_regs.num_of_ports();
+        let mut entries = Vec::new();
+        for port in 1..=num_ports {
+            // SAFETY: This is safe since the result of ptr calculation
+            // always points to a valid PORTSC entry under the condition.
+            let ptr = unsafe { base.add((port - 1) * 4) };
+            entries.push(Rc::new(PortScEntry::new(ptr)));
+        }
+        assert!(entries.len() == num_ports);
+        Self { entries }
+    }
+    fn port_range(&self) -> Range<usize> {
+        1..self.entries.len() + 1
+    }
+    fn get(&self, port: usize) -> Option<Rc<PortScEntry>> {
+        self.entries.get(port.wrapping_sub(1)).cloned()
+    }
+}
+#[repr(C)]
+struct PortScEntry {
+    ptr: Mutex<*mut u32>,
+}
+impl PortScEntry {
+    fn new(ptr: *mut u32) -> Self {
+        Self {
+            ptr: Mutex::new(ptr),
+        }
+    }
+    fn value(&self) -> u32 {
+        let portsc = self.ptr.lock();
+        unsafe { read_volatile(*portsc) }
     }
 }
