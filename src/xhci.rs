@@ -1571,6 +1571,7 @@ impl StatusStageTrb {
 #[derive(Debug, Copy, Clone)]
 pub enum UsbDescriptor {
     Config(ConfigDescriptor),
+    Endpoint(EndpointDescriptor),
     Interface(InterfaceDescriptor),
     Unknown { desc_len: u8, desc_type: u8 },
 }
@@ -1627,6 +1628,9 @@ impl<'a> Iterator for DescriptorIterator<'a> {
                 e if e == UsbDescriptorType::Interface as u8 => {
                     UsbDescriptor::Interface(InterfaceDescriptor::copy_from_slice(buf).ok()?)
                 }
+                e if e == UsbDescriptorType::Endpoint as u8 => {
+                    UsbDescriptor::Endpoint(EndpointDescriptor::copy_from_slice(buf).ok()?)
+                }
                 _ => UsbDescriptor::Unknown {
                     desc_len,
                     desc_type,
@@ -1655,3 +1659,30 @@ pub struct InterfaceDescriptor {
 const _: () = assert!(size_of::<InterfaceDescriptor>() == 9);
 unsafe impl IntoPinnedMutableSlice for InterfaceDescriptor {}
 unsafe impl Sliceable for InterfaceDescriptor {}
+
+#[derive(Debug, Copy, Clone, Default)]
+#[allow(unused)]
+#[repr(packed)]
+pub struct EndpointDescriptor {
+    pub desc_length: u8,
+    pub desc_type: u8,
+
+    // endpoint_address:
+    //   - bit[0..=3]: endpoint number
+    //   - bit[7]: direction(0: out, 1: in)
+    pub endpoint_address: u8,
+
+    // attributes:
+    //   - bit[0..=1]: transfer type(0: Control, 1: Isochronous, 2: Bulk, 3: Interrupt)
+    pub attributes: u8,
+    pub max_packet_size: u16,
+    // interval:
+    // [xhci] Table 6-12
+    // interval_ms = interval (For FS/LS Interrupt)
+    // interval_ms = 2^(interval-1) (For FS Isoch)
+    // interval_ms = 2^(interval-1) (For SSP/SS/HS)
+    pub interval: u8,
+}
+const _: () = assert!(size_of::<EndpointDescriptor>() == 7);
+unsafe impl IntoPinnedMutableSlice for EndpointDescriptor {}
+unsafe impl Sliceable for EndpointDescriptor {}
