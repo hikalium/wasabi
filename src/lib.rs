@@ -20,6 +20,7 @@ pub mod print;
 pub mod qemu;
 pub mod result;
 pub mod serial;
+pub mod slice;
 pub mod uefi;
 pub mod volatile;
 pub mod x86;
