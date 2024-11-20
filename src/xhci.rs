@@ -1571,6 +1571,7 @@ impl StatusStageTrb {
 #[derive(Debug, Copy, Clone)]
 pub enum UsbDescriptor {
     Config(ConfigDescriptor),
+    Interface(InterfaceDescriptor),
     Unknown { desc_len: u8, desc_type: u8 },
 }
 
@@ -1623,6 +1624,9 @@ impl<'a> Iterator for DescriptorIterator<'a> {
                 e if e == UsbDescriptorType::Config as u8 => {
                     UsbDescriptor::Config(ConfigDescriptor::copy_from_slice(buf).ok()?)
                 }
+                e if e == UsbDescriptorType::Interface as u8 => {
+                    UsbDescriptor::Interface(InterfaceDescriptor::copy_from_slice(buf).ok()?)
+                }
                 _ => UsbDescriptor::Unknown {
                     desc_len,
                     desc_type,
@@ -1633,3 +1637,21 @@ impl<'a> Iterator for DescriptorIterator<'a> {
         }
     }
 }
+
+#[derive(Debug, Copy, Clone, Default)]
+#[allow(unused)]
+#[repr(packed)]
+pub struct InterfaceDescriptor {
+    desc_length: u8,
+    desc_type: u8,
+    interface_number: u8,
+    alt_setting: u8,
+    num_of_endpoints: u8,
+    interface_class: u8,
+    interface_subclass: u8,
+    interface_protocol: u8,
+    interface_index: u8,
+}
+const _: () = assert!(size_of::<InterfaceDescriptor>() == 9);
+unsafe impl IntoPinnedMutableSlice for InterfaceDescriptor {}
+unsafe impl Sliceable for InterfaceDescriptor {}
