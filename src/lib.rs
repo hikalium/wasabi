@@ -12,6 +12,7 @@ pub mod executor;
 pub mod graphics;
 pub mod hpet;
 pub mod init;
+pub mod keyboard;
 pub mod mmio;
 pub mod mutex;
 pub mod pci;
