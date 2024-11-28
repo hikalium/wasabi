@@ -18,6 +18,7 @@ use crate::slice::Sliceable;
 use crate::volatile::Volatile;
 use crate::x86::busy_loop_hint;
 use alloc::boxed::Box;
+use alloc::collections::BTreeSet;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::rc::Weak;
@@ -240,9 +241,22 @@ impl PciXhciDriver {
                     UsbHidProtocol::BootProtocol as u8,
                 )
                 .await?;
+                let mut prev_pressed = BTreeSet::new();
                 loop {
-                    let report = Self::request_hid_report(&xhc, slot, &mut ctrl_ep_ring).await?;
-                    info!("xhci: hid report: {report:?}");
+                    let pressed = {
+                        let report =
+                            Self::request_hid_report(&xhc, slot, &mut ctrl_ep_ring).await?;
+                        BTreeSet::from_iter(report.into_iter().skip(2).filter(|id| *id != 0))
+                    };
+                    let diff = pressed.symmetric_difference(&prev_pressed);
+                    for id in diff {
+                        if pressed.contains(id) {
+                            info!("usb_keyboard: key down: {id}");
+                        } else {
+                            info!("usb_keyboard: key up  : {id}");
+                        }
+                    }
+                    prev_pressed = pressed;
                 }
             }
         }
