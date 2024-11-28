@@ -283,3 +283,41 @@ pub async fn request_hid_report(
         .await?;
     Ok(buf.to_vec())
 }
+
+pub fn pick_interface_with_triple(
+    descriptors: &Vec<UsbDescriptor>,
+    triple: (u8, u8, u8),
+) -> Option<(
+    ConfigDescriptor,
+    InterfaceDescriptor,
+    Vec<EndpointDescriptor>,
+)> {
+    let mut config: Option<ConfigDescriptor> = None;
+    let mut interface: Option<InterfaceDescriptor> = None;
+    let mut ep_list: Vec<EndpointDescriptor> = Vec::new();
+    for d in descriptors {
+        match d {
+            UsbDescriptor::Config(e) => {
+                if interface.is_some() {
+                    break;
+                }
+                config = Some(*e);
+                ep_list.clear();
+            }
+            UsbDescriptor::Interface(e) => {
+                if triple == e.triple() {
+                    interface = Some(*e)
+                }
+            }
+            UsbDescriptor::Endpoint(e) => {
+                ep_list.push(*e);
+            }
+            _ => {}
+        }
+    }
+    if let (Some(config), Some(interface)) = (config, interface) {
+        Some((config, interface, ep_list))
+    } else {
+        None
+    }
+}

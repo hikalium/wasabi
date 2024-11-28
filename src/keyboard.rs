@@ -48,31 +48,8 @@ pub async fn start_usb_keyboard(
     ctrl_ep_ring: &mut CommandRing,
     descriptors: &Vec<UsbDescriptor>,
 ) -> Result<()> {
-    let mut last_config: Option<ConfigDescriptor> = None;
-    let mut boot_keyboard_interface: Option<InterfaceDescriptor> = None;
-    let mut ep_desc_list: Vec<EndpointDescriptor> = Vec::new();
-    for d in descriptors {
-        match d {
-            UsbDescriptor::Config(e) => {
-                if boot_keyboard_interface.is_some() {
-                    break;
-                }
-                last_config = Some(*e);
-                ep_desc_list.clear();
-            }
-            UsbDescriptor::Interface(e) => {
-                if let (3, 1, 1) = e.triple() {
-                    boot_keyboard_interface = Some(*e)
-                }
-            }
-            UsbDescriptor::Endpoint(e) => {
-                ep_desc_list.push(*e);
-            }
-            _ => {}
-        }
-    }
-    let config_desc = last_config.ok_or("No USB KBD Boot config found")?;
-    let interface_desc = boot_keyboard_interface.ok_or("No USB KBD Boot interface found")?;
+    let (config_desc, interface_desc, _) = pick_interface_with_triple(descriptors, (3, 1, 1))
+        .ok_or("No USB KBD Boot interface found")?;
     xhc.request_set_config(slot, ctrl_ep_ring, config_desc.config_value())
         .await?;
     xhc.request_set_interface(
