@@ -24,6 +24,7 @@ pub enum UsbDescriptorType {
     String = 3,
     Interface = 4,
     Endpoint = 5,
+    Report = 0x22,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -320,4 +321,24 @@ pub fn pick_interface_with_triple(
     } else {
         None
     }
+}
+pub async fn request_hid_report_descriptor(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut CommandRing,
+    interface_number: u8,
+) -> Result<Vec<u8>> {
+    // 7.1.1 Get_Descriptor Request
+    let buf = vec![0; 4096];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    xhc.request_descriptor_for_interface(
+        slot,
+        ctrl_ep_ring,
+        UsbDescriptorType::Report,
+        0,
+        interface_number.into(),
+        buf.as_mut(),
+    )
+    .await?;
+    Ok(buf.to_vec())
 }
