@@ -2,6 +2,7 @@
 #![feature(custom_test_frameworks)]
 #![feature(sync_unsafe_cell)]
 #![feature(option_get_or_insert_default)]
+#![feature(iter_advance_by)]
 #![test_runner(crate::test_runner::test_runner)]
 #![reexport_test_harness_main = "run_unit_tests"]
 #![no_main]
@@ -16,7 +17,6 @@ pub mod keyboard;
 pub mod mmio;
 pub mod mutex;
 pub mod pci;
-pub mod pin;
 pub mod print;
 pub mod qemu;
 pub mod result;

@@ -15,7 +15,7 @@ use wasabi::init::init_display;
 use wasabi::init::init_hpet;
 use wasabi::init::init_paging;
 use wasabi::init::init_pci;
-use wasabi::print::hexdump;
+use wasabi::print::hexdump_struct;
 use wasabi::print::set_global_vram;
 use wasabi::println;
 use wasabi::qemu::exit_qemu;
@@ -40,7 +40,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     info!("info");
     warn!("warn");
     error!("error");
-    hexdump(efi_system_table);
+    hexdump_struct(efi_system_table);
     let mut vram = init_vram(efi_system_table).expect("init_vram failed");
     init_display(&mut vram);
     set_global_vram(vram);

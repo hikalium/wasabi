@@ -45,7 +45,7 @@ macro_rules! error {
             ($($arg:tt)*) => ($crate::print!("[ERROR] {}:{:<3}: {}\n", file!(), line!(), format_args!($($arg)*)));
 }
 
-fn hexdump_bytes(bytes: &[u8]) {
+pub fn hexdump_bytes(bytes: &[u8]) {
     let mut i = 0;
     let mut ascii = [0u8; 16];
     let mut offset = 0;
@@ -96,6 +96,7 @@ fn hexdump_bytes(bytes: &[u8]) {
         println!("|");
     }
 }
-pub fn hexdump<T: Sized>(data: &T) {
+pub fn hexdump_struct<T: Sized>(data: &T) {
+    info!("hexdump_struct: {:?}", core::any::type_name::<T>());
     hexdump_bytes(unsafe { slice::from_raw_parts(data as *const T as *const u8, size_of::<T>()) })
 }
