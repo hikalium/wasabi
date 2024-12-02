@@ -1,6 +1,7 @@
 extern crate alloc;
 
 use crate::bits::extract_bits;
+use crate::bits::extract_bits_from_le_bytes;
 use crate::info;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
@@ -33,7 +34,7 @@ pub enum UsbHidUsagePage {
     UnknownUsagePage(usize),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum UsbHidUsage {
     Pointer,
@@ -55,6 +56,7 @@ fn parse_hid_report_descriptor(report: &[u8]) -> Result<Vec<UsbHidReportInputIte
     let mut usage_max = None;
     let mut report_size = 0;
     let mut report_count = 0;
+    let mut bit_offset = 0;
     while let Some(prefix) = it.next() {
         let b_size = match prefix & 0b11 {
             0b11 => 4,
@@ -103,12 +105,13 @@ fn parse_hid_report_descriptor(report: &[u8]) -> Result<Vec<UsbHidReportInputIte
                             UsbHidUsage::UnknownUsage(0)
                         };
                         input_report_items.push(UsbHidReportInputItem {
-                            report_usage,
-                            report_size,
+                            usage: report_usage,
+                            bit_size: report_size,
                             is_array,
                             is_absolute,
-                            usage_page,
-                        })
+                            bit_offset,
+                        });
+                        bit_offset += report_size;
                     }
                 }
             }
@@ -186,11 +189,16 @@ fn parse_hid_report_descriptor(report: &[u8]) -> Result<Vec<UsbHidReportInputIte
 
 #[derive(Debug)]
 pub struct UsbHidReportInputItem {
-    pub usage_page: UsbHidUsagePage,
-    pub report_usage: UsbHidUsage,
-    pub report_size: usize,
+    pub usage: UsbHidUsage,
+    pub bit_size: usize,
     pub is_array: bool,
     pub is_absolute: bool,
+    pub bit_offset: usize,
+}
+impl UsbHidReportInputItem {
+    fn value_from_report(&self, report: &[u8]) -> Option<u64> {
+        extract_bits_from_le_bytes(report, self.bit_offset, self.bit_size)
+    }
 }
 
 pub async fn start_usb_tablet(
@@ -236,17 +244,33 @@ pub async fn start_usb_tablet(
     for e in &input_report_items {
         info!("  {e:?}")
     }
-    let total_bits = input_report_items
+    let report_size_in_byte = if let Some(last_item) = input_report_items.last() {
+        (last_item.bit_offset + last_item.bit_size + 7) / 8
+    } else {
+        return Err("report size is zero");
+    };
+    let mut prev_report = vec![0u8; report_size_in_byte];
+    let desc_button_l = input_report_items
         .iter()
-        .fold(0, |acc, e| acc + e.report_size);
-    let total_bytes = (total_bits + 7) / 8;
-    let mut prev_report = vec![0u8; total_bytes];
+        .find(|e| e.usage == UsbHidUsage::Button(1))
+        .ok_or("Button(1) not found")?;
+    let desc_button_r = input_report_items
+        .iter()
+        .find(|e| e.usage == UsbHidUsage::Button(2))
+        .ok_or("Button(2) not found")?;
+    let desc_button_c = input_report_items
+        .iter()
+        .find(|e| e.usage == UsbHidUsage::Button(3))
+        .ok_or("Button(3) not found")?;
     loop {
         let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
         if report == prev_report {
             continue;
         }
-        info!("{report:?}");
+        let l = desc_button_l.value_from_report(&report);
+        let r = desc_button_r.value_from_report(&report);
+        let c = desc_button_c.value_from_report(&report);
+        info!("{report:?}: ({l:?}, {c:?}, {r:?})");
         prev_report = report;
     }
 }
