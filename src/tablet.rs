@@ -12,6 +12,7 @@ use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::ToString;
+use alloc::vec;
 use alloc::vec::Vec;
 
 #[derive(Debug)]
@@ -232,8 +233,20 @@ pub async fn start_usb_tablet(
     info!("Report Descriptor:");
     hexdump_bytes(&report);
     let input_report_items = parse_hid_report_descriptor(&report)?;
-    for e in input_report_items {
+    for e in &input_report_items {
         info!("  {e:?}")
     }
-    Ok(())
+    let total_bits = input_report_items
+        .iter()
+        .fold(0, |acc, e| acc + e.report_size);
+    let total_bytes = (total_bits + 7) / 8;
+    let mut prev_report = vec![0u8; total_bytes];
+    loop {
+        let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
+        if report == prev_report {
+            continue;
+        }
+        info!("{report:?}");
+        prev_report = report;
+    }
 }
