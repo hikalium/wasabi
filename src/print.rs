@@ -1,3 +1,4 @@
+use crate::graphics::Bitmap;
 use crate::graphics::BitmapTextWriter;
 use crate::mutex::Mutex;
 use crate::serial::SerialPort;
@@ -10,6 +11,11 @@ pub fn set_global_vram(vram: VramBufferInfo) {
     assert!(GLOBAL_VRAM_WRITER.lock().is_none());
     let w = BitmapTextWriter::new(vram);
     *GLOBAL_VRAM_WRITER.lock() = Some(w);
+}
+pub fn get_global_vram_resolutions() -> Option<(i64, i64)> {
+    (GLOBAL_VRAM_WRITER.lock())
+        .as_ref()
+        .map(|vram| (vram.buf().width(), vram.buf().height()))
 }
 pub fn global_print(args: fmt::Arguments) {
     let mut writer = SerialPort::default();

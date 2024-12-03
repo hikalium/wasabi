@@ -19,6 +19,7 @@ pub mod mutex;
 pub mod pci;
 pub mod print;
 pub mod qemu;
+pub mod range;
 pub mod result;
 pub mod serial;
 pub mod slice;
