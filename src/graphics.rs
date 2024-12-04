@@ -203,17 +203,36 @@ impl<T: Bitmap> BitmapTextWriter<T> {
     pub fn buf(&self) -> &T {
         &self.buf
     }
+    fn adjust_cursor_pos(&mut self) -> bool {
+        let mut adjusted = false;
+        if self.cursor_x >= self.buf.width() {
+            self.cursor_x = 0;
+            self.cursor_y += 16;
+            adjusted = true;
+        }
+        if self.cursor_y >= self.buf.height() {
+            self.cursor_y = 0;
+            adjusted = true;
+        }
+        adjusted
+    }
 }
 impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        let w = self.buf.width();
         for c in s.chars() {
             if c == '\n' {
                 self.cursor_y += 16;
                 self.cursor_x = 0;
+                self.adjust_cursor_pos();
+                fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16).or(Err(fmt::Error))?;
                 continue;
             }
             draw_font_fg(&mut self.buf, self.cursor_x, self.cursor_y, 0xffffff, c);
             self.cursor_x += 8;
+            if self.adjust_cursor_pos() {
+                fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16).or(Err(fmt::Error))?;
+            }
         }
         Ok(())
     }
