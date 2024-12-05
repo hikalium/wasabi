@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::allocator::ALLOCATOR;
 use crate::bits::extract_bits;
+use crate::executor::sleep;
 use crate::executor::spawn_global;
 use crate::executor::yield_execution;
 use crate::info;
@@ -40,6 +41,7 @@ use core::ptr::write_volatile;
 use core::slice;
 use core::task::Context;
 use core::task::Poll;
+use core::time::Duration;
 
 struct XhcRegisters {
     cap_regs: Mmio<CapabilityRegisters>,
@@ -119,16 +121,6 @@ impl PciXhciDriver {
             "xhci: rt_regs.MFINDEX = {}",
             xhc.regs.rt_regs.as_ref().mfindex()
         );
-        info!("PORTSC values for port {:?}", xhc.regs.portsc.port_range());
-        let mut connected_port = None;
-        for port in xhc.regs.portsc.port_range() {
-            if let Some(e) = xhc.regs.portsc.get(port) {
-                info!("  {port:3}: {:#010X}", e.value());
-                if e.ccs() {
-                    connected_port = Some(port)
-                }
-            }
-        }
         let xhc = Rc::new(xhc);
         {
             let xhc = xhc.clone();
@@ -139,10 +131,28 @@ impl PciXhciDriver {
                 }
             })
         }
-        if let Some(port) = connected_port {
-            Self::handle_port_connect(&xhc, port).await?;
+        loop {
+            let mut new_port_connected = None;
+            for port in xhc.regs.portsc.port_range() {
+                if let Some(e) = xhc.regs.portsc.get(port) {
+                    if e.csc() {
+                        e.clear_csc();
+                        if e.ccs() {
+                            info!("  {port:3}: Connected: {:#010X}", e.value());
+                            new_port_connected = Some(port);
+                            break;
+                        } else {
+                            info!("  {port:3}: Disconnected: {:#010X}", e.value());
+                        }
+                    }
+                }
+            }
+            if let Some(port) = new_port_connected {
+                Self::handle_port_connect(&xhc, port).await?;
+            } else {
+                sleep(Duration::from_millis(100)).await;
+            }
         }
-        Ok(())
     }
     async fn handle_port_connect(xhc: &Rc<Controller>, port: usize) -> Result<()> {
         info!("xhci: port {port} is connected");
@@ -1266,6 +1276,13 @@ impl PortScEntry {
     fn ccs(&self) -> bool {
         // CCS - Current Connect Status - ROS
         self.bit(0)
+    }
+    fn csc(&self) -> bool {
+        // CSC - Connect Status Change - RW1CS
+        self.bit(17)
+    }
+    fn clear_csc(&self) {
+        self.assert_bit(17);
     }
     fn assert_bit(&self, pos: usize) {
         const PRESERVE_MASK: u32 = 0b01001111000000011111111111101001;
