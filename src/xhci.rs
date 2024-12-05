@@ -5,7 +5,7 @@ use crate::bits::extract_bits;
 use crate::executor::spawn_global;
 use crate::executor::yield_execution;
 use crate::info;
-use crate::keyboard::start_usb_keyboard;
+use crate::keyboard::UsbKeyboardDriver;
 use crate::mmio::IoBox;
 use crate::mmio::Mmio;
 use crate::mutex::Mutex;
@@ -14,8 +14,11 @@ use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::VendorDeviceId;
 use crate::result::Result;
-use crate::tablet::start_usb_tablet;
+use crate::tablet::UsbTabletDriver;
 use crate::usb;
+use crate::usb::UsbDescriptor;
+use crate::usb::UsbDeviceDescriptor;
+use crate::usb::UsbDeviceDriver;
 use crate::volatile::Volatile;
 use crate::x86::busy_loop_hint;
 use alloc::boxed::Box;
@@ -196,26 +199,25 @@ impl PciXhciDriver {
                 let descriptors =
                     usb::request_config_descriptor_and_rest(&xhc, slot, &mut ctrl_ep_ring).await?;
                 info!("xhci: {descriptors:?}");
-                if start_usb_keyboard(&xhc, slot, &mut ctrl_ep_ring, &descriptors)
-                    .await
-                    .is_ok()
-                {
-                    return Ok(());
-                }
-                if start_usb_tablet(
-                    &xhc,
-                    slot,
-                    &mut ctrl_ep_ring,
-                    &device_descriptor,
-                    &descriptors,
-                )
-                .await
-                .is_ok()
-                {
-                    return Ok(());
-                }
-                info!("xhci: No available drivers...");
+                Self::start_device_driver(xhc, slot, ctrl_ep_ring, device_descriptor, descriptors)
+                    .await?;
             }
+        }
+        Ok(())
+    }
+    async fn start_device_driver(
+        xhc: Rc<Controller>,
+        slot: u8,
+        ctrl_ep_ring: CommandRing,
+        device_descriptor: UsbDeviceDescriptor,
+        descriptors: Vec<UsbDescriptor>,
+    ) -> Result<()> {
+        if UsbKeyboardDriver::is_compatible(&descriptors, &device_descriptor) {
+            UsbKeyboardDriver::start(xhc, slot, ctrl_ep_ring, descriptors);
+        } else if UsbTabletDriver::is_compatible(&descriptors, &device_descriptor) {
+            UsbTabletDriver::start(xhc, slot, ctrl_ep_ring, descriptors);
+        } else {
+            return Err("xhci: No available drivers found");
         }
         Ok(())
     }

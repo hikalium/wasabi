@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::bits::extract_bits;
 use crate::bits::extract_bits_from_le_bytes;
+use crate::executor::spawn_global;
 use crate::info;
 use crate::print::get_global_vram_resolutions;
 use crate::print::hexdump_bytes;
@@ -230,88 +231,102 @@ impl UsbHidReportInputItem {
     }
 }
 
-pub async fn start_usb_tablet(
-    xhc: &Rc<Controller>,
-    slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
-    device_descriptor: &UsbDeviceDescriptor,
-    descriptors: &Vec<UsbDescriptor>,
-) -> Result<()> {
-    // vid:pid = 0x0627:0x0001
-    if device_descriptor.device_class != 0
-        || device_descriptor.device_subclass != 0
-        || device_descriptor.device_protocol != 0
-        || device_descriptor.vendor_id != 0x0627
-        || device_descriptor.product_id != 0x0001
-    {
-        return Err("Not a USB Tablet");
-    }
-    let (_config_desc, interface_desc, other_desc_list) =
-        pick_interface_with_triple(descriptors, (3, 0, 0))
-            .ok_or("No USB KBD Boot interface found")?;
-    info!("USB tablet found");
-    let hid_desc = other_desc_list
-        .iter()
-        .flat_map(|e| match e {
-            UsbDescriptor::Hid(e) => Some(e),
-            _ => None,
-        })
-        .next()
-        .ok_or("No HID Descriptor found")?;
-    info!("HID Descriptor: {hid_desc:?}");
-    let report = request_hid_report_descriptor(
-        xhc,
-        slot,
-        ctrl_ep_ring,
-        interface_desc.interface_number,
-        hid_desc.report_descriptor_length as usize,
-    )
-    .await?;
-    info!("Report Descriptor:");
-    hexdump_bytes(&report);
-    let input_report_items = parse_hid_report_descriptor(&report)?;
-    for e in &input_report_items {
-        info!("  {e:?}")
-    }
-    let report_size_in_byte = if let Some(last_item) = input_report_items.last() {
-        (last_item.bit_offset + last_item.bit_size + 7) / 8
-    } else {
-        return Err("report size is zero");
-    };
-    let mut prev_report = vec![0u8; report_size_in_byte];
-    let desc_button_l = input_report_items
-        .iter()
-        .find(|e| e.usage == UsbHidUsage::Button(1))
-        .ok_or("Button(1) not found")?;
-    let desc_button_r = input_report_items
-        .iter()
-        .find(|e| e.usage == UsbHidUsage::Button(2))
-        .ok_or("Button(2) not found")?;
-    let desc_button_c = input_report_items
-        .iter()
-        .find(|e| e.usage == UsbHidUsage::Button(3))
-        .ok_or("Button(3) not found")?;
-    let desc_abs_x = input_report_items
-        .iter()
-        .find(|e| e.usage == UsbHidUsage::X && e.is_absolute)
-        .ok_or("Absolute pointer X not found")?;
-    let desc_abs_y = input_report_items
-        .iter()
-        .find(|e| e.usage == UsbHidUsage::Y && e.is_absolute)
-        .ok_or("Absolute pointer Y not found")?;
-
-    let (vw, vh) = get_global_vram_resolutions().ok_or("global VRAM is not set")?;
-    loop {
-        let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
-        if report == prev_report {
-            continue;
+pub struct UsbTabletDriver;
+impl UsbTabletDriver {
+    async fn run(
+        xhc: &Rc<Controller>,
+        slot: u8,
+        ctrl_ep_ring: &mut CommandRing,
+        descriptors: &[UsbDescriptor],
+    ) -> Result<()> {
+        let (_config_desc, interface_desc, other_desc_list) =
+            pick_interface_with_triple(descriptors, (3, 0, 0))
+                .ok_or("No USB KBD Boot interface found")?;
+        info!("USB tablet found");
+        let hid_desc = other_desc_list
+            .iter()
+            .flat_map(|e| match e {
+                UsbDescriptor::Hid(e) => Some(e),
+                _ => None,
+            })
+            .next()
+            .ok_or("No HID Descriptor found")?;
+        info!("HID Descriptor: {hid_desc:?}");
+        let report = request_hid_report_descriptor(
+            xhc,
+            slot,
+            ctrl_ep_ring,
+            interface_desc.interface_number,
+            hid_desc.report_descriptor_length as usize,
+        )
+        .await?;
+        info!("Report Descriptor:");
+        hexdump_bytes(&report);
+        let input_report_items = parse_hid_report_descriptor(&report)?;
+        for e in &input_report_items {
+            info!("  {e:?}")
         }
-        let l = desc_button_l.value_from_report(&report);
-        let r = desc_button_r.value_from_report(&report);
-        let c = desc_button_c.value_from_report(&report);
-        let ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
-        let ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
-        info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
-        prev_report = report;
+        let report_size_in_byte = if let Some(last_item) = input_report_items.last() {
+            (last_item.bit_offset + last_item.bit_size + 7) / 8
+        } else {
+            return Err("report size is zero");
+        };
+        let mut prev_report = vec![0u8; report_size_in_byte];
+        let desc_button_l = input_report_items
+            .iter()
+            .find(|e| e.usage == UsbHidUsage::Button(1))
+            .ok_or("Button(1) not found")?;
+        let desc_button_r = input_report_items
+            .iter()
+            .find(|e| e.usage == UsbHidUsage::Button(2))
+            .ok_or("Button(2) not found")?;
+        let desc_button_c = input_report_items
+            .iter()
+            .find(|e| e.usage == UsbHidUsage::Button(3))
+            .ok_or("Button(3) not found")?;
+        let desc_abs_x = input_report_items
+            .iter()
+            .find(|e| e.usage == UsbHidUsage::X && e.is_absolute)
+            .ok_or("Absolute pointer X not found")?;
+        let desc_abs_y = input_report_items
+            .iter()
+            .find(|e| e.usage == UsbHidUsage::Y && e.is_absolute)
+            .ok_or("Absolute pointer Y not found")?;
+
+        let (vw, vh) = get_global_vram_resolutions().ok_or("global VRAM is not set")?;
+        loop {
+            let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
+            if report == prev_report {
+                continue;
+            }
+            let l = desc_button_l.value_from_report(&report);
+            let r = desc_button_r.value_from_report(&report);
+            let c = desc_button_c.value_from_report(&report);
+            let ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
+            let ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
+            info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
+            prev_report = report;
+        }
+    }
+}
+impl UsbDeviceDriver for UsbTabletDriver {
+    fn is_compatible(
+        descriptors: &[UsbDescriptor],
+        device_descriptor: &UsbDeviceDescriptor,
+    ) -> bool {
+        device_descriptor.device_class == 0
+            && device_descriptor.device_subclass == 0
+            && device_descriptor.device_protocol == 0
+            && device_descriptor.vendor_id == 0x0627
+            && device_descriptor.product_id == 0x0001
+            && pick_interface_with_triple(descriptors, (3, 0, 0)).is_some()
+    }
+    fn start(
+        xhc: Rc<Controller>,
+        slot: u8,
+        mut ctrl_ep_ring: CommandRing,
+        descriptors: Vec<UsbDescriptor>,
+    ) {
+        spawn_global(async move { Self::run(&xhc, slot, &mut ctrl_ep_ring, &descriptors).await });
     }
 }

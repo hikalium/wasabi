@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::executor::spawn_global;
 use crate::info;
 use crate::result::Result;
 use crate::usb::*;
@@ -42,45 +43,64 @@ impl KeyEvent {
     }
 }
 
-pub async fn start_usb_keyboard(
-    xhc: &Rc<Controller>,
-    slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
-    descriptors: &Vec<UsbDescriptor>,
-) -> Result<()> {
-    let (config_desc, interface_desc, _) = pick_interface_with_triple(descriptors, (3, 1, 1))
-        .ok_or("No USB KBD Boot interface found")?;
-    xhc.request_set_config(slot, ctrl_ep_ring, config_desc.config_value())
+pub struct UsbKeyboardDriver;
+impl UsbKeyboardDriver {
+    async fn run(
+        xhc: &Rc<Controller>,
+        slot: u8,
+        ctrl_ep_ring: &mut CommandRing,
+        descriptors: &[UsbDescriptor],
+    ) -> Result<()> {
+        let (config_desc, interface_desc, _) = pick_interface_with_triple(descriptors, (3, 1, 1))
+            .ok_or("No USB KBD Boot interface found")?;
+        xhc.request_set_config(slot, ctrl_ep_ring, config_desc.config_value())
+            .await?;
+        xhc.request_set_interface(
+            slot,
+            ctrl_ep_ring,
+            interface_desc.interface_number,
+            interface_desc.alt_setting,
+        )
         .await?;
-    xhc.request_set_interface(
-        slot,
-        ctrl_ep_ring,
-        interface_desc.interface_number,
-        interface_desc.alt_setting,
-    )
-    .await?;
-    xhc.request_set_protocol(
-        slot,
-        ctrl_ep_ring,
-        interface_desc.interface_number,
-        UsbHidProtocol::BootProtocol as u8,
-    )
-    .await?;
-    let mut prev_pressed = BTreeSet::new();
-    loop {
-        let pressed = {
-            let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
-            BTreeSet::from_iter(report.into_iter().skip(2).filter(|id| *id != 0))
-        };
-        let diff = pressed.symmetric_difference(&prev_pressed);
-        for id in diff {
-            let e = KeyEvent::from_usb_key_id(*id);
-            if pressed.contains(id) {
-                info!("usb_keyboard: key down: {id} = {e:?}");
-            } else {
-                info!("usb_keyboard: key up  : {id} = {e:?}");
+        xhc.request_set_protocol(
+            slot,
+            ctrl_ep_ring,
+            interface_desc.interface_number,
+            UsbHidProtocol::BootProtocol as u8,
+        )
+        .await?;
+        let mut prev_pressed = BTreeSet::new();
+        loop {
+            let pressed = {
+                let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
+                BTreeSet::from_iter(report.into_iter().skip(2).filter(|id| *id != 0))
+            };
+            let diff = pressed.symmetric_difference(&prev_pressed);
+            for id in diff {
+                let e = KeyEvent::from_usb_key_id(*id);
+                if pressed.contains(id) {
+                    info!("usb_keyboard: key down: {id} = {e:?}");
+                } else {
+                    info!("usb_keyboard: key up  : {id} = {e:?}");
+                }
             }
+            prev_pressed = pressed;
         }
-        prev_pressed = pressed;
+    }
+}
+impl UsbDeviceDriver for UsbKeyboardDriver {
+    fn is_compatible(
+        descriptors: &[UsbDescriptor],
+        _device_descriptor: &UsbDeviceDescriptor,
+    ) -> bool {
+        pick_interface_with_triple(descriptors, (3, 1, 1)).is_some()
+    }
+    fn start(
+        xhc: Rc<Controller>,
+        slot: u8,
+        mut ctrl_ep_ring: CommandRing,
+        descriptors: Vec<UsbDescriptor>,
+    ) {
+        spawn_global(async move { Self::run(&xhc, slot, &mut ctrl_ep_ring, &descriptors).await });
     }
 }

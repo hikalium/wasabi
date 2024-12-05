@@ -290,7 +290,7 @@ pub async fn request_hid_report(
 }
 
 pub fn pick_interface_with_triple(
-    descriptors: &Vec<UsbDescriptor>,
+    descriptors: &[UsbDescriptor],
     triple: (u8, u8, u8),
 ) -> Option<(ConfigDescriptor, InterfaceDescriptor, Vec<UsbDescriptor>)> {
     let mut config: Option<ConfigDescriptor> = None;
@@ -358,3 +358,16 @@ pub struct HidDescriptor {
 }
 const _: () = assert!(size_of::<HidDescriptor>() == 9);
 unsafe impl Sliceable for HidDescriptor {}
+
+pub trait UsbDeviceDriver {
+    fn is_compatible(
+        descriptors: &[UsbDescriptor],
+        device_descriptor: &UsbDeviceDescriptor,
+    ) -> bool;
+    fn start(
+        xhc: Rc<Controller>,
+        slot: u8,
+        ctrl_ep_ring: CommandRing,
+        descriptors: Vec<UsbDescriptor>,
+    );
+}
