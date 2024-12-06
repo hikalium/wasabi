@@ -2,8 +2,10 @@ extern crate alloc;
 
 use crate::executor::spawn_global;
 use crate::print;
+use crate::println;
 use crate::result::Result;
 use crate::usb::*;
+use crate::warn;
 use crate::xhci::CommandRing;
 use crate::xhci::Controller;
 use alloc::collections::BTreeSet;
@@ -104,8 +106,10 @@ pub async fn start_usb_keyboard(
         for id in diff {
             let e = KeyEvent::from_usb_key_id(*id);
             if pressed.contains(id) {
-                if let KeyEvent::Char(c) = e {
-                    print!("{c}");
+                match e {
+                    KeyEvent::Char(c) => print!("{c}"),
+                    KeyEvent::Enter => println!(),
+                    e => warn!("Unhandled input: {e:?}"),
                 }
             }
         }
