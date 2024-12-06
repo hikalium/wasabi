@@ -7,7 +7,6 @@ use wasabi::error;
 use wasabi::executor::sleep;
 use wasabi::executor::spawn_global;
 use wasabi::executor::start_global_executor;
-use wasabi::hpet::global_timestamp;
 use wasabi::info;
 use wasabi::init::init_allocator;
 use wasabi::init::init_basic_runtime;
@@ -53,21 +52,6 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     init_paging(&memory_map);
     init_hpet(acpi);
     init_pci(acpi);
-    let t0 = global_timestamp();
-    let task1 = async move {
-        for i in 100..=103 {
-            info!("{i} hpet.main_counter = {:?}", global_timestamp() - t0);
-            sleep(Duration::from_secs(1)).await;
-        }
-        Ok(())
-    };
-    let task2 = async move {
-        for i in 200..=203 {
-            info!("{i} hpet.main_counter = {:?}", global_timestamp() - t0);
-            sleep(Duration::from_secs(2)).await;
-        }
-        Ok(())
-    };
     let serial_task = async {
         let sp = SerialPort::default();
         info!("Started to monitor serial port");
@@ -79,8 +63,6 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
             sleep(Duration::from_millis(20)).await;
         }
     };
-    spawn_global(task1);
-    spawn_global(task2);
     spawn_global(serial_task);
     start_global_executor()
 }
