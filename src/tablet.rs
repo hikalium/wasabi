@@ -299,12 +299,12 @@ impl UsbTabletDriver {
             if report == prev_report {
                 continue;
             }
-            let l = desc_button_l.value_from_report(&report);
-            let r = desc_button_r.value_from_report(&report);
-            let c = desc_button_c.value_from_report(&report);
-            let ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
-            let ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
-            info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
+            let _l = desc_button_l.value_from_report(&report);
+            let _r = desc_button_r.value_from_report(&report);
+            let _c = desc_button_c.value_from_report(&report);
+            let _ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
+            let _ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
+            // info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
             prev_report = report;
         }
     }
