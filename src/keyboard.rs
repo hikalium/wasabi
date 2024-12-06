@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use crate::executor::spawn_global;
-use crate::info;
+use crate::print;
 use crate::result::Result;
 use crate::usb::*;
 use crate::xhci::CommandRing;
@@ -79,9 +79,9 @@ impl UsbKeyboardDriver {
             for id in diff {
                 let e = KeyEvent::from_usb_key_id(*id);
                 if pressed.contains(id) {
-                    info!("usb_keyboard: key down: {id} = {e:?}");
-                } else {
-                    info!("usb_keyboard: key up  : {id} = {e:?}");
+                    if let KeyEvent::Char(c) = e {
+                        print!("{c}");
+                    }
                 }
             }
             prev_pressed = pressed;
