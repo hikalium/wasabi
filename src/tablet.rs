@@ -284,18 +284,9 @@ pub async fn start_usb_tablet(
     xhc: &Rc<Controller>,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
-    device_descriptor: &UsbDeviceDescriptor,
+    _device_descriptor: &UsbDeviceDescriptor,
     descriptors: &[UsbDescriptor],
 ) -> Result<()> {
-    // vid:pid = 0x0627:0x0001
-    if device_descriptor.device_class != 0
-        || device_descriptor.device_subclass != 0
-        || device_descriptor.device_protocol != 0
-        || device_descriptor.vendor_id != 0x0627
-        || device_descriptor.product_id != 0x0001
-    {
-        return Err("Not a USB Tablet");
-    }
     let (_config_desc, interface_desc, other_desc_list) =
         pick_interface_with_triple(descriptors, (3, 0, 0))
             .ok_or("No USB KBD Boot interface found")?;
@@ -350,20 +341,20 @@ pub async fn start_usb_tablet(
         .iter()
         .find(|e| e.usage == UsbHidUsage::Y && e.is_absolute)
         .ok_or("Absolute pointer Y not found")?;
+
     let (vw, vh) =
         get_global_vram_resolutions().ok_or("global VRAM is not set")?;
-
     loop {
         let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
         if report == prev_report {
             continue;
         }
-        let l = desc_button_l.value_from_report(&report);
-        let r = desc_button_r.value_from_report(&report);
-        let c = desc_button_c.value_from_report(&report);
-        let ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
-        let ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
-        info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
+        let _l = desc_button_l.value_from_report(&report);
+        let _r = desc_button_r.value_from_report(&report);
+        let _c = desc_button_c.value_from_report(&report);
+        let _ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
+        let _ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
+        // info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
         prev_report = report;
     }
 }
