@@ -1,11 +1,9 @@
 extern crate alloc;
 
+use crate::cui::Console;
 use crate::executor::spawn_global;
-use crate::print;
-use crate::println;
 use crate::result::Result;
 use crate::usb::*;
-use crate::warn;
 use crate::xhci::CommandRing;
 use crate::xhci::Controller;
 use alloc::collections::BTreeSet;
@@ -72,6 +70,7 @@ impl UsbKeyboardDriver {
         )
         .await?;
         let mut prev_pressed = BTreeSet::new();
+        let mut console = Console::default();
         loop {
             let pressed = {
                 let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
@@ -81,11 +80,7 @@ impl UsbKeyboardDriver {
             for id in diff {
                 let e = KeyEvent::from_usb_key_id(*id);
                 if pressed.contains(id) {
-                    match e {
-                        KeyEvent::Char(c) => print!("{c}"),
-                        KeyEvent::Enter => println!(),
-                        e => warn!("Unhandled input: {e:?}"),
-                    }
+                    console.handle_key_down(e);
                 }
             }
             prev_pressed = pressed;
