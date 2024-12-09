@@ -1,8 +1,11 @@
 extern crate alloc;
 
+use crate::error;
+use crate::hpet::global_timestamp;
 use crate::keyboard::KeyEvent;
 use crate::print;
 use crate::println;
+use crate::result::Result;
 use crate::warn;
 use alloc::string::String;
 
@@ -18,10 +21,24 @@ impl Console {
                 print!("{c}");
             }
             KeyEvent::Enter => {
-                println!("\n{}", self.input_buf);
+                println!();
+                if let Err(e) = run_cmd(&self.input_buf) {
+                    error!("{e}: {}", self.input_buf)
+                }
                 self.input_buf.clear();
             }
             e => warn!("Unhandled input: {e:?}"),
         }
+    }
+}
+
+pub fn run_cmd(cmdline: &str) -> Result<()> {
+    match cmdline {
+        "time" => {
+            println!("{:?}", global_timestamp());
+            Ok(())
+        }
+        "" => Ok(()),
+        _ => Err("Unknown command"),
     }
 }
