@@ -19,6 +19,7 @@ use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::RangeInclusive;
+use core::sync::atomic::AtomicBool;
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -299,12 +300,14 @@ impl UsbTabletDriver {
             if report == prev_report {
                 continue;
             }
-            let _l = desc_button_l.value_from_report(&report);
-            let _r = desc_button_r.value_from_report(&report);
-            let _c = desc_button_c.value_from_report(&report);
-            let _ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
-            let _ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
-            // info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
+            let l = desc_button_l.value_from_report(&report);
+            let r = desc_button_r.value_from_report(&report);
+            let c = desc_button_c.value_from_report(&report);
+            let ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
+            let ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
+            if is_in_debug_mouse() {
+                info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
+            }
             prev_report = report;
         }
     }
@@ -329,4 +332,12 @@ impl UsbDeviceDriver for UsbTabletDriver {
     ) {
         spawn_global(async move { Self::run(&xhc, slot, &mut ctrl_ep_ring, &descriptors).await });
     }
+}
+
+static IS_IN_DEBUG_MOUSE: AtomicBool = AtomicBool::new(false);
+fn is_in_debug_mouse() -> bool {
+    IS_IN_DEBUG_MOUSE.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_debug_mouse(choice: bool) {
+    IS_IN_DEBUG_MOUSE.store(choice, core::sync::atomic::Ordering::Relaxed)
 }
