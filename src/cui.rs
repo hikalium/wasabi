@@ -8,6 +8,7 @@ use crate::println;
 use crate::result::Result;
 use crate::warn;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::mem::swap;
 
 #[derive(Default)]
@@ -69,13 +70,19 @@ impl Console {
 }
 
 pub fn run_cmd(cmdline: &str) -> Result<()> {
-    match cmdline {
-        "time" => {
-            println!("{:?}", global_timestamp());
-            Ok(())
+    let args = cmdline.trim();
+    let args: Vec<&str> = args.split(' ').collect();
+    if let Some(&cmd) = args.first() {
+        match cmd {
+            "time" => {
+                println!("{:?}", global_timestamp());
+                Ok(())
+            }
+            "" => Ok(()),
+            _ => Err("Unknown command"),
         }
-        "" => Ok(()),
-        _ => Err("Unknown command"),
+    } else {
+        Ok(())
     }
 }
 
