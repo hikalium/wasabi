@@ -15,6 +15,7 @@ use wasabi::init::init_display;
 use wasabi::init::init_hpet;
 use wasabi::init::init_paging;
 use wasabi::init::init_pci;
+use wasabi::input::input_task;
 use wasabi::print::hexdump_struct;
 use wasabi::println;
 use wasabi::qemu::exit_qemu;
@@ -64,6 +65,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
         }
     };
     spawn_global(serial_task);
+    spawn_global(input_task());
     start_global_executor()
 }
 #[panic_handler]

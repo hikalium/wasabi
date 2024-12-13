@@ -3,10 +3,12 @@ extern crate alloc;
 use crate::bits::extract_bits;
 use crate::bits::extract_bits_from_le_bytes;
 use crate::executor::spawn_global;
-use crate::graphics::draw_point;
 use crate::gui::global_vram_resolutions;
-use crate::gui::GLOBAL_VRAM;
 use crate::info;
+use crate::input::MouseButtonState;
+use crate::input::MouseEvent;
+use crate::input::PointerPosition;
+use crate::input::GLOBAL_INPUT_MANAGER;
 use crate::print::hexdump_bytes;
 use crate::range::map_value_in_range_inclusive;
 use crate::result::Result;
@@ -232,6 +234,9 @@ impl UsbHidReportInputItem {
             v,
         )
     }
+    fn bool_value_from_report(&self, report: &[u8]) -> Option<bool> {
+        self.value_from_report(report).map(|v| v != 0)
+    }
 }
 
 pub struct UsbTabletDriver;
@@ -302,20 +307,29 @@ impl UsbTabletDriver {
             if report == prev_report {
                 continue;
             }
-            let l = desc_button_l.value_from_report(&report);
-            let r = desc_button_r.value_from_report(&report);
-            let c = desc_button_c.value_from_report(&report);
-            let ax = desc_abs_x.mapped_range_from_report(&report, 0..=(vw - 1));
-            let ay = desc_abs_y.mapped_range_from_report(&report, 0..=(vh - 1));
+            let l = desc_button_l
+                .bool_value_from_report(&report)
+                .unwrap_or_default();
+            let r = desc_button_r
+                .bool_value_from_report(&report)
+                .unwrap_or_default();
+            let c = desc_button_c
+                .bool_value_from_report(&report)
+                .unwrap_or_default();
+            let ax = desc_abs_x
+                .mapped_range_from_report(&report, 0..=(vw - 1))
+                .unwrap_or_default();
+            let ay = desc_abs_y
+                .mapped_range_from_report(&report, 0..=(vh - 1))
+                .unwrap_or_default();
             if is_in_debug_mouse() {
                 info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
             }
-            let _ = draw_point(
-                &mut *GLOBAL_VRAM.lock(),
-                0x00ff00,
-                ax.unwrap_or_default(),
-                ay.unwrap_or_default(),
-            );
+            let e = MouseEvent {
+                button: MouseButtonState::from_lrc(l, r, c),
+                position: PointerPosition::from_xy(ax, ay),
+            };
+            GLOBAL_INPUT_MANAGER.push_mouse_event(e);
             prev_report = report;
         }
     }
