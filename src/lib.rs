@@ -12,6 +12,7 @@ pub mod bits;
 pub mod cui;
 pub mod executor;
 pub mod graphics;
+pub mod gui;
 pub mod hpet;
 pub mod init;
 pub mod keyboard;

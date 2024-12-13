@@ -3,8 +3,10 @@ extern crate alloc;
 use crate::bits::extract_bits;
 use crate::bits::extract_bits_from_le_bytes;
 use crate::executor::spawn_global;
+use crate::graphics::draw_point;
+use crate::gui::global_vram_resolutions;
+use crate::gui::GLOBAL_VRAM;
 use crate::info;
-use crate::print::get_global_vram_resolutions;
 use crate::print::hexdump_bytes;
 use crate::range::map_value_in_range_inclusive;
 use crate::result::Result;
@@ -294,7 +296,7 @@ impl UsbTabletDriver {
             .find(|e| e.usage == UsbHidUsage::Y && e.is_absolute)
             .ok_or("Absolute pointer Y not found")?;
 
-        let (vw, vh) = get_global_vram_resolutions().ok_or("global VRAM is not set")?;
+        let (vw, vh) = global_vram_resolutions();
         loop {
             let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
             if report == prev_report {
@@ -308,6 +310,12 @@ impl UsbTabletDriver {
             if is_in_debug_mouse() {
                 info!("{report:?}: ({l:?}, {c:?}, {r:?}, {ax:?}, {ay:?})");
             }
+            let _ = draw_point(
+                &mut *GLOBAL_VRAM.lock(),
+                0x00ff00,
+                ax.unwrap_or_default(),
+                ay.unwrap_or_default(),
+            );
             prev_report = report;
         }
     }

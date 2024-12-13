@@ -299,6 +299,16 @@ pub struct VramBufferInfo {
     height: i64,
     pixels_per_line: i64,
 }
+impl VramBufferInfo {
+    pub const fn null() -> Self {
+        Self {
+            buf: null_mut(),
+            width: 0,
+            height: 0,
+            pixels_per_line: 0,
+        }
+    }
+}
 impl Bitmap for VramBufferInfo {
     fn bytes_per_pixel(&self) -> i64 {
         4

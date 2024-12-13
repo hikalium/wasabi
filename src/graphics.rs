@@ -1,3 +1,4 @@
+use crate::mutex::Mutex;
 use crate::result::Result;
 use core::cmp::min;
 use core::fmt;
@@ -42,7 +43,7 @@ unsafe fn unchecked_draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i6
 
     Ok(())
 }
-fn draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> Result<()> {
+pub fn draw_point<T: Bitmap>(buf: &mut T, color: u32, x: i64, y: i64) -> Result<()> {
     *(buf.pixel_at_mut(x, y).ok_or("Out of Range")?) = color;
     Ok(())
 }
@@ -187,51 +188,60 @@ pub fn draw_test_pattern<T: Bitmap>(buf: &mut T, px: i64, py: i64) -> Result<()>
     Ok(())
 }
 
-pub struct BitmapTextWriter<T> {
-    buf: T,
+pub struct BitmapTextWriter<'a, T> {
+    buf: &'a Mutex<T>,
     cursor_x: i64,
     cursor_y: i64,
 }
-impl<T: Bitmap> BitmapTextWriter<T> {
-    pub fn new(buf: T) -> Self {
+impl<'a, T: Bitmap> BitmapTextWriter<'a, T> {
+    pub const fn new(buf: &'a Mutex<T>) -> Self {
         Self {
             buf,
             cursor_x: 0,
             cursor_y: 0,
         }
     }
-    pub fn buf(&self) -> &T {
-        &self.buf
-    }
     fn adjust_cursor_pos(&mut self) -> bool {
         let mut adjusted = false;
-        if self.cursor_x >= self.buf.width() {
+        let (w, h) = {
+            let bmp = self.buf.lock();
+            (bmp.width(), bmp.height())
+        };
+        if self.cursor_x >= w {
             self.cursor_x = 0;
             self.cursor_y += 16;
             adjusted = true;
         }
-        if self.cursor_y >= self.buf.height() {
+        if self.cursor_y >= h {
             self.cursor_y = 0;
             adjusted = true;
         }
         adjusted
     }
 }
-impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
+impl<'a, T: Bitmap> fmt::Write for BitmapTextWriter<'a, T> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        let w = self.buf.width();
+        let w = self.buf.lock().width();
         for c in s.chars() {
             if c == '\n' {
                 self.cursor_y += 16;
                 self.cursor_x = 0;
                 self.adjust_cursor_pos();
-                fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16).or(Err(fmt::Error))?;
+                fill_rect(&mut *self.buf.lock(), 0x000000, 0, self.cursor_y, w, 16)
+                    .or(Err(fmt::Error))?;
                 continue;
             }
-            draw_font_fg(&mut self.buf, self.cursor_x, self.cursor_y, 0xffffff, c);
+            draw_font_fg(
+                &mut *self.buf.lock(),
+                self.cursor_x,
+                self.cursor_y,
+                0xffffff,
+                c,
+            );
             self.cursor_x += 8;
             if self.adjust_cursor_pos() {
-                fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16).or(Err(fmt::Error))?;
+                fill_rect(&mut *self.buf.lock(), 0x000000, 0, self.cursor_y, w, 16)
+                    .or(Err(fmt::Error))?;
             }
         }
         Ok(())
