@@ -17,6 +17,9 @@ use crate::ime::InputMethodEditor;
 use crate::info;
 use crate::init::EFI_MEMORY_MAP;
 use crate::init::REBOOT_PARAMS;
+use crate::input::MouseEvent;
+use crate::input::PointerPosition;
+use crate::input::GLOBAL_INPUT_MANAGER;
 use crate::ip::IpV4Addr;
 use crate::keyboard::KeyEvent;
 use crate::net;
@@ -340,6 +343,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             "dns" | "nslookup" => run_cmd_dns(&args),
             "reboot" | "r" => run_cmd_reboot(&args),
             "uname" => run_cmd_uname(&args),
+            "demo" => run_cmd_demo(&args),
             "hello" => {
                 println!("こんにちは");
                 Ok(())
@@ -496,6 +500,44 @@ pub fn run_cmd_dns(args: &[&str]) -> Result<()> {
         _ => DNS_DEFAULT_SERVER,
     };
     spawn_global(dns_query(hostname, server));
+    Ok(())
+}
+
+async fn demo_mouse_event_inject_task() -> Result<()> {
+    let (w, h) = global_vram_resolutions();
+    let xrange = 0..w;
+    let yrange = 0..h;
+    let mut x = 0;
+    let mut y = 0;
+    let mut dx = 8;
+    let mut dy = 8;
+    for _ in 0..1000 {
+        x += dx;
+        y += dy;
+        if !xrange.contains(&x) {
+            dx = -dx;
+            x += 2 * dx;
+        }
+        if !yrange.contains(&y) {
+            dy = -dy;
+            y += 2 * dy;
+        }
+        GLOBAL_INPUT_MANAGER.push_mouse_event(MouseEvent {
+            position: PointerPosition::from_xy(x, y),
+            ..Default::default()
+        });
+        sleep(Duration::from_millis(10)).await;
+    }
+    Ok(())
+}
+
+pub fn run_cmd_demo(args: &[&str]) -> Result<()> {
+    if "mouse" == *args.get(1).unwrap_or(&"") {
+        spawn_global(demo_mouse_event_inject_task());
+    } else {
+        info!("Usage:");
+        info!("- demo mouse");
+    }
     Ok(())
 }
 
