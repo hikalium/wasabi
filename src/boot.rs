@@ -13,6 +13,7 @@ use crate::init::init_display;
 use crate::init::init_hpet;
 use crate::init::init_paging;
 use crate::init::init_pci;
+use crate::input::input_task;
 use crate::keyboard::KeyEvent;
 use crate::print::hexdump_struct;
 use crate::println;
@@ -98,6 +99,7 @@ pub fn setup_system(
         }
     };
     spawn_global(serial_task);
+    spawn_global(input_task());
     spawn_global(ps2kbd_task());
 
     descriptor_tables
