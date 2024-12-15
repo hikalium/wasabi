@@ -3,7 +3,7 @@ extern crate alloc;
 use crate::error;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
-use crate::graphics::draw_point;
+use crate::graphics::draw_button;
 use crate::gui::global_vram_resolutions;
 use crate::gui::GLOBAL_VRAM;
 use crate::hpet::global_timestamp;
@@ -112,12 +112,21 @@ async fn demo_mouse_event_inject_task() -> Result<()> {
     Ok(())
 }
 
+async fn demo_button_task() -> Result<()> {
+    let (vw, vh) = global_vram_resolutions();
+    let _ = draw_button(&mut *GLOBAL_VRAM.lock(), vw / 2, vh / 2, 128, 32, 0xc6c6c6);
+    Ok(())
+}
+
 pub fn run_cmd_demo(args: &[&str]) -> Result<()> {
-    if "mouse" == *args.get(1).unwrap_or(&"") {
-        spawn_global(demo_mouse_event_inject_task());
-    } else {
-        info!("Usage:");
-        info!("- demo mouse");
+    let subcmd = *args.get(1).unwrap_or(&"");
+    match subcmd {
+        "mouse" => spawn_global(demo_mouse_event_inject_task()),
+        "button" => spawn_global(demo_button_task()),
+        _ => {
+            info!("Usage:");
+            info!("- demo mouse");
+        }
     }
     Ok(())
 }
