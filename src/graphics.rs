@@ -212,6 +212,24 @@ pub fn draw_test_pattern<T: Bitmap>(buf: &mut T) {
     draw_str_fg(buf, left, h * colors.len() as i64 + 16, 0x00ff00, "ABCDEF");
 }
 
+pub fn draw_button<T: Bitmap>(
+    buf: &mut T,
+    left: i64,
+    top: i64,
+    w: i64,
+    h: i64,
+    fgc: u32,
+) -> Result<()> {
+    fill_rect(buf, fgc, left, top, w, h)?;
+    let right = left + w - 1;
+    let bottom = top + h - 1;
+    draw_line(buf, 0xffffff, left, top, right, top)?;
+    draw_line(buf, 0xffffff, left, top, left, bottom)?;
+    draw_line(buf, 0x000000, right, bottom, right, top)?;
+    draw_line(buf, 0x000000, right, bottom, left, bottom)?;
+    Ok(())
+}
+
 pub struct BitmapTextWriter<'a, T> {
     buf: &'a Mutex<T>,
     cursor_x: i64,
