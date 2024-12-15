@@ -16,7 +16,7 @@ pub const MOUSE_BUTTON_L: u64 = 1 << 0;
 pub const MOUSE_BUTTON_C: u64 = 1 << 1;
 pub const MOUSE_BUTTON_R: u64 = 1 << 2;
 impl MouseButtonState {
-    pub fn from_lrc(l: bool, r: bool, c: bool) -> Self {
+    pub const fn from_lrc(l: bool, r: bool, c: bool) -> Self {
         MouseButtonState(
             MOUSE_BUTTON_L * l as u64 + MOUSE_BUTTON_C * c as u64 + MOUSE_BUTTON_R * r as u64,
         )
@@ -42,7 +42,7 @@ pub struct PointerPosition {
     pub y: i64,
 }
 impl PointerPosition {
-    pub fn from_xy(x: i64, y: i64) -> Self {
+    pub const fn from_xy(x: i64, y: i64) -> Self {
         Self { x, y }
     }
 }
@@ -58,11 +58,16 @@ pub static GLOBAL_INPUT_MANAGER: InputManager = InputManager::new();
 
 pub struct InputManager {
     mouse_events: Mutex<VecDeque<MouseEvent>>,
+    current_mouse_state: Mutex<MouseEvent>,
 }
 impl InputManager {
     const fn new() -> Self {
         Self {
             mouse_events: Mutex::new(VecDeque::new()),
+            current_mouse_state: Mutex::new(MouseEvent {
+                button: MouseButtonState::from_lrc(false, false, false),
+                position: PointerPosition::from_xy(0, 0),
+            }),
         }
     }
     pub fn push_mouse_event(&self, e: MouseEvent) {
@@ -70,6 +75,9 @@ impl InputManager {
     }
     pub fn pop_mouse_event(&self) -> Option<MouseEvent> {
         self.mouse_events.lock().pop_front()
+    }
+    pub fn current_mouse_state(&self) -> MouseEvent {
+        *self.current_mouse_state.lock()
     }
 }
 
@@ -82,6 +90,7 @@ pub async fn input_task() -> Result<()> {
                 e.position.x,
                 e.position.y,
             );
+            *GLOBAL_INPUT_MANAGER.current_mouse_state.lock() = e;
         }
         sleep(Duration::from_millis(10)).await;
     }

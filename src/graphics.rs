@@ -1,7 +1,9 @@
 use crate::mutex::Mutex;
 use crate::result::Result;
+use core::cmp::max;
 use core::cmp::min;
 use core::fmt;
+use core::ops::Range;
 
 pub trait Bitmap {
     fn bytes_per_pixel(&self) -> i64;
@@ -195,14 +197,22 @@ pub fn draw_button<T: Bitmap>(
     w: i64,
     h: i64,
     fgc: u32,
+    is_pressed: bool,
 ) -> Result<()> {
     fill_rect(buf, fgc, left, top, w, h)?;
     let right = left + w - 1;
     let bottom = top + h - 1;
-    draw_line(buf, 0xffffff, left, top, right, top)?;
-    draw_line(buf, 0xffffff, left, top, left, bottom)?;
-    draw_line(buf, 0x000000, right, bottom, right, top)?;
-    draw_line(buf, 0x000000, right, bottom, left, bottom)?;
+    draw_line(buf, 0xffffff * !is_pressed as u32, left, top, right, top)?;
+    draw_line(buf, 0xffffff * !is_pressed as u32, left, top, left, bottom)?;
+    draw_line(buf, 0xffffff * is_pressed as u32, right, bottom, right, top)?;
+    draw_line(
+        buf,
+        0xffffff * is_pressed as u32,
+        right,
+        bottom,
+        left,
+        bottom,
+    )?;
     Ok(())
 }
 
@@ -263,5 +273,150 @@ impl<'a, T: Bitmap> fmt::Write for BitmapTextWriter<'a, T> {
             }
         }
         Ok(())
+    }
+}
+
+/// A non-empty i64 scalar range, for graphics operations
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct ScalarRange {
+    pub range: Range<i64>,
+}
+impl ScalarRange {
+    pub fn new(start: i64, end: i64) -> Option<Self> {
+        let range = start..end;
+        if range.is_empty() {
+            None
+        } else {
+            Some(Self { range })
+        }
+    }
+    pub fn intersection(&self, another: &Self) -> Option<Self> {
+        let range =
+            max(self.range.start, another.range.start)..min(self.range.end, another.range.end);
+        Self::new(range.start, range.end)
+    }
+    pub fn start(&self) -> i64 {
+        self.range.start
+    }
+    pub fn end(&self) -> i64 {
+        self.range.end
+    }
+}
+#[cfg(test)]
+mod scalar_range_tests {
+    use super::ScalarRange;
+    #[test]
+    fn creates_range() {
+        let r = ScalarRange::new(0, 0);
+        assert!(r.is_none());
+        let r = ScalarRange::new(1, 0);
+        assert!(r.is_none());
+        let r = ScalarRange::new(0, 1).unwrap();
+        assert_eq!(r.start(), 0);
+        assert_eq!(r.end(), 1);
+    }
+    #[test]
+    fn intersections() {
+        let a = ScalarRange::new(2, 3).unwrap();
+        let b = ScalarRange::new(1, 2).unwrap();
+        let c = ScalarRange::new(3, 4).unwrap();
+        let d = ScalarRange::new(1, 4).unwrap();
+        let e = ScalarRange::new(0, 2).unwrap();
+        let f = ScalarRange::new(3, 5).unwrap();
+
+        assert!(a.intersection(&a).unwrap() == a);
+        assert!(a.intersection(&b).is_none());
+        assert!(a.intersection(&c).is_none());
+        assert!(a.intersection(&d).unwrap() == a);
+        assert!(a.intersection(&e).is_none());
+        assert!(a.intersection(&f).is_none());
+    }
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct Rect {
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+}
+impl Rect {
+    pub fn new(x: i64, y: i64, w: i64, h: i64) -> Option<Rect> {
+        if w < 0 || h < 0 {
+            None
+        } else {
+            Some(Self { x, y, w, h })
+        }
+    }
+    pub fn x(&self) -> i64 {
+        self.x
+    }
+    pub fn y(&self) -> i64 {
+        self.y
+    }
+    pub fn w(&self) -> i64 {
+        self.w
+    }
+    pub fn h(&self) -> i64 {
+        self.h
+    }
+    pub fn frame_ranges(&self) -> (ScalarRange, ScalarRange) {
+        (
+            ScalarRange::new(self.x, self.x + self.w).unwrap(),
+            ScalarRange::new(self.y, self.y + self.h).unwrap(),
+        )
+    }
+    pub fn intersection(&self, another: &Self) -> Option<Rect> {
+        let (rx0, ry0) = self.frame_ranges();
+        let (rx1, ry1) = another.frame_ranges();
+        let rx = rx0.intersection(&rx1)?;
+        let ry = ry0.intersection(&ry1)?;
+        let x = rx.start();
+        let w = rx.end() - rx.start();
+        let y = ry.start();
+        let h = ry.end() - ry.start();
+        Some(Self { x, y, w, h })
+    }
+    pub fn contains_point(&self, x: i64, y: i64) -> bool {
+        let (rx, ry) = self.frame_ranges();
+        rx.range.contains(&x) && ry.range.contains(&y)
+    }
+}
+
+#[cfg(test)]
+mod rect_tests {
+    use super::Rect;
+
+    #[test]
+    fn creates_rect() {
+        let r = Rect::new(0, 0, 0, 0).unwrap();
+        assert_eq!(r.x(), 0);
+        assert_eq!(r.y(), 0);
+        assert_eq!(r.w(), 0);
+        assert_eq!(r.h(), 0);
+
+        let r = Rect::new(1, 2, 3, 4).unwrap();
+        assert_eq!(r.x(), 1);
+        assert_eq!(r.y(), 2);
+        assert_eq!(r.w(), 3);
+        assert_eq!(r.h(), 4);
+
+        let r = Rect::new(-1, -2, 3, 4).unwrap();
+        assert_eq!(r.x(), -1);
+        assert_eq!(r.y(), -2);
+        assert_eq!(r.w(), 3);
+        assert_eq!(r.h(), 4);
+    }
+    #[test]
+    fn fails_to_create_negative_sized_rect() {
+        assert!(Rect::new(0, 0, -1, 0).is_none());
+        assert!(Rect::new(0, 0, 0, -1).is_none());
+        assert!(Rect::new(0, 0, -1, -1).is_none());
+    }
+    #[test]
+    fn calc_intersection() {
+        let r1 = Rect::new(0, 0, 1, 1).unwrap();
+        let self_intersect = r1.intersection(&r1).unwrap();
+        assert_eq!(self_intersect, r1);
     }
 }

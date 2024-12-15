@@ -3,7 +3,9 @@ extern crate alloc;
 use crate::error;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
+use crate::executor::yield_execution;
 use crate::graphics::draw_button;
+use crate::graphics::Rect;
 use crate::gui::global_vram_resolutions;
 use crate::gui::GLOBAL_VRAM;
 use crate::hpet::global_timestamp;
@@ -112,10 +114,32 @@ async fn demo_mouse_event_inject_task() -> Result<()> {
     Ok(())
 }
 
+fn is_rect_pressed(rect: &Rect) -> bool {
+    let e = GLOBAL_INPUT_MANAGER.current_mouse_state();
+
+    e.button.l() && rect.contains_point(e.position.x, e.position.y)
+}
+
 async fn demo_button_task() -> Result<()> {
     let (vw, vh) = global_vram_resolutions();
-    let _ = draw_button(&mut *GLOBAL_VRAM.lock(), vw / 2, vh / 2, 128, 32, 0xc6c6c6);
-    Ok(())
+    let button_rect = Rect::new(vw / 2, vh / 2, 128, 32).ok_or("Failed to create button rect")?;
+    let mut is_pressed_prev = true;
+    loop {
+        let is_pressed = is_rect_pressed(&button_rect);
+        if is_pressed != is_pressed_prev {
+            let _ = draw_button(
+                &mut *GLOBAL_VRAM.lock(),
+                vw / 2,
+                vh / 2,
+                128,
+                32,
+                0xcccccc,
+                is_pressed,
+            );
+        }
+        yield_execution().await;
+        is_pressed_prev = is_pressed;
+    }
 }
 
 pub fn run_cmd_demo(args: &[&str]) -> Result<()> {
@@ -126,6 +150,7 @@ pub fn run_cmd_demo(args: &[&str]) -> Result<()> {
         _ => {
             info!("Usage:");
             info!("- demo mouse");
+            info!("- demo button");
         }
     }
     Ok(())
