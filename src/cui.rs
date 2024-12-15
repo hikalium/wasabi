@@ -7,6 +7,7 @@ use crate::error;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
 use crate::font::get_glyph_width;
+use crate::graphics::draw_button;
 use crate::graphics::draw_str_fg;
 use crate::graphics::fill_rect;
 use crate::gui::global_vram_resolutions;
@@ -531,12 +532,28 @@ async fn demo_mouse_event_inject_task() -> Result<()> {
     Ok(())
 }
 
+async fn demo_button_task() -> Result<()> {
+    let (vw, vh) = global_vram_resolutions();
+    let _ = draw_button(
+        &mut *GLOBAL_VRAM.lock(),
+        vw / 2,
+        vh / 2,
+        128,
+        32,
+        0xc6c6c6,
+    );
+    Ok(())
+}
+
 pub fn run_cmd_demo(args: &[&str]) -> Result<()> {
-    if "mouse" == *args.get(1).unwrap_or(&"") {
-        spawn_global(demo_mouse_event_inject_task());
-    } else {
-        info!("Usage:");
-        info!("- demo mouse");
+    let subcmd = *args.get(1).unwrap_or(&"");
+    match subcmd {
+        "mouse" => spawn_global(demo_mouse_event_inject_task()),
+        "button" => spawn_global(demo_button_task()),
+        _ => {
+            info!("Usage:");
+            info!("- demo mouse");
+        }
     }
     Ok(())
 }
