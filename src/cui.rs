@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::error;
 use crate::hpet::global_timestamp;
 use crate::info;
+use crate::init::EFI_MEMORY_MAP;
 use crate::keyboard::KeyEvent;
 use crate::print;
 use crate::println;
@@ -92,6 +93,22 @@ pub fn run_cmd_debug(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+pub fn run_cmd_show(args: &[&str]) -> Result<()> {
+    if "mmap" == *args.get(1).unwrap_or(&"") {
+        if let Some(mmap) = EFI_MEMORY_MAP.lock().as_ref() {
+            for e in mmap.iter() {
+                println!("{e:?}");
+            }
+        } else {
+            println!("EFI_MEMORY_MAP is not set")
+        }
+    } else {
+        info!("Usage:");
+        info!("- show mmap");
+    }
+    Ok(())
+}
+
 pub fn run_cmd(cmdline: &str) -> Result<()> {
     let args = cmdline.trim();
     let args: Vec<&str> = args.split(' ').collect();
@@ -102,6 +119,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
                 Ok(())
             }
             "debug" => run_cmd_debug(&args),
+            "show" => run_cmd_show(&args),
             "" => Ok(()),
             _ => Err("Unknown command"),
         }
