@@ -15,7 +15,7 @@ pub const BIT_TYPE_CODE: u64 = 0b11u64 << 43;
 
 pub const BIT_PRESENT: u64 = 1u64 << 47;
 pub const BIT_CS_LONG_MODE: u64 = 1u64 << 53;
-pub const BIT_CS_READABLE: u64 = 1u64 << 53;
+pub const BIT_CS_READABLE: u64 = 1u64 << 41;
 pub const BIT_DS_WRITABLE: u64 = 1u64 << 41;
 pub const BIT_DPL0: u64 = 0u64 << 45;
 pub const BIT_DPL3: u64 = 3u64 << 45;
