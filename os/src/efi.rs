@@ -402,9 +402,9 @@ pub fn alloc_byte_slice<'a>(
     Ok(unsafe { core::slice::from_raw_parts_mut(pages, size) })
 }
 
-pub fn locate_graphic_protocol<'a>(
+pub fn locate_graphic_protocol(
     efi_system_table: Pin<&EfiSystemTable>,
-) -> Result<&'a EfiGraphicsOutputProtocol<'a>> {
+) -> Result<&EfiGraphicsOutputProtocol<'_>> {
     let mut graphic_output_protocol: *mut EfiGraphicsOutputProtocol =
         null_mut::<EfiGraphicsOutputProtocol>();
     let status = (efi_system_table.as_ref().boot_services.locate_protocol)(
