@@ -23,18 +23,19 @@ use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum KeyEvent {
     Char(char),
     CursorDown,
+    CursorUp,
     CursorLeft,
     CursorRight,
-    CursorUp,
     Enter,
     Error,
     Esc,
     LeftCtrl,
     None,
+    UnknownPlaceholder,
     Unknown(u8),
 }
 impl KeyEvent {
