@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::acpi::RebootParams;
 use crate::error;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
@@ -12,6 +13,7 @@ use crate::gui::GLOBAL_VRAM;
 use crate::hpet::global_timestamp;
 use crate::info;
 use crate::init::EFI_MEMORY_MAP;
+use crate::init::REBOOT_PARAMS;
 use crate::input::MouseEvent;
 use crate::input::PointerPosition;
 use crate::input::GLOBAL_INPUT_MANAGER;
@@ -23,6 +25,7 @@ use crate::tablet::set_debug_mouse;
 use crate::warn;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::ptr::write_volatile;
 use core::time::Duration;
 
 #[derive(Default)]
@@ -85,6 +88,24 @@ pub fn run_cmd_show(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+pub fn run_cmd_reboot(_args: &[&str]) -> Result<()> {
+    let params = (*REBOOT_PARAMS.lock())
+        .as_ref()
+        .ok_or("RESET_PARAMS not set so can't reboot via ACPI")?
+        .clone();
+    info!("Using params: {params:?}");
+    info!("Rebooting...");
+    match params {
+        RebootParams::Memory { addr, value } => unsafe {
+            write_volatile(addr as *mut u8, value)
+        },
+        RebootParams::Io { addr, value } => {
+            crate::x86::write_io_port_u8(addr, value)
+        }
+    }
+    Ok(())
+}
+
 pub fn run_cmd(cmdline: &str) -> Result<()> {
     let args = cmdline.trim();
     let args: Vec<&str> = args.split(' ').collect();
@@ -97,6 +118,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             "debug" => run_cmd_debug(&args),
             "show" => run_cmd_show(&args),
             "demo" => run_cmd_demo(&args),
+            "reboot" => run_cmd_reboot(&args),
             "" => Ok(()),
             _ => Err("Unknown command"),
         }
