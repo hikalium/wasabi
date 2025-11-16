@@ -46,12 +46,14 @@ impl KeyEvent {
 pub struct UsbKeyboardDriver;
 impl UsbDeviceDriver for UsbKeyboardDriver {
     fn is_compatible(
+        &self,
         descriptors: &[UsbDescriptor],
         _device_descriptor: &UsbDeviceDescriptor,
     ) -> bool {
         pick_interface_with_triple(descriptors, (3, 1, 1)).is_some()
     }
     fn start(
+        &self,
         xhc: Rc<Controller>,
         slot: u8,
         mut ctrl_ep_ring: CommandRing,
