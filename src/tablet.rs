@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::bits::extract_bits;
 use crate::bits::extract_bits_from_le_bytes;
+use crate::executor::spawn_global;
 use crate::info;
 use crate::print::get_global_vram_resolutions;
 use crate::print::hexdump_bytes;
@@ -241,6 +242,41 @@ impl UsbHidReportInputItem {
             to_range,
             v,
         )
+    }
+}
+
+pub struct UsbTabletDriver;
+impl UsbDeviceDriver for UsbTabletDriver {
+    fn is_compatible(
+        &self,
+        _descriptors: &[UsbDescriptor],
+        device_descriptor: &UsbDeviceDescriptor,
+    ) -> bool {
+        device_descriptor.device_class == 0
+            && device_descriptor.device_subclass == 0
+            && device_descriptor.device_protocol == 0
+            && device_descriptor.vendor_id == 0x0627
+            && device_descriptor.product_id == 0x0001
+    }
+    fn start(
+        &self,
+        xhc: Rc<Controller>,
+        slot: u8,
+        mut ctrl_ep_ring: CommandRing,
+        descriptors: Vec<UsbDescriptor>,
+        device_descriptor: &UsbDeviceDescriptor,
+    ) {
+        let device_descriptor = *device_descriptor;
+        spawn_global(async move {
+            start_usb_tablet(
+                &xhc,
+                slot,
+                &mut ctrl_ep_ring,
+                &device_descriptor,
+                &descriptors,
+            )
+            .await
+        });
     }
 }
 
