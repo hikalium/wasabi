@@ -6,6 +6,7 @@
 #![feature(const_location_fields)]
 #![feature(option_get_or_insert_default)]
 #![feature(iter_advance_by)]
+#![feature(async_fn_track_caller)]
 #![test_runner(crate::test_runner::test_runner)]
 #![reexport_test_harness_main = "run_unit_tests"]
 #![no_main]
@@ -22,6 +23,7 @@ pub mod input;
 pub mod keyboard;
 pub mod mmio;
 pub mod mutex;
+pub mod nic;
 pub mod pci;
 pub mod print;
 pub mod qemu;

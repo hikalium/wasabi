@@ -259,6 +259,10 @@ impl<'a, T: Bitmap> BitmapTextWriter<'a, T> {
             let bmp = self.buf.lock();
             (bmp.width(), bmp.height())
         };
+        if self.cursor_x < 0 {
+            self.cursor_x = 0;
+            adjusted = true;
+        }
         if self.cursor_x >= w {
             self.cursor_x = 0;
             self.cursor_y += 16;
@@ -285,6 +289,19 @@ impl<'a, T: Bitmap> fmt::Write for BitmapTextWriter<'a, T> {
                     0,
                     self.cursor_y,
                     w,
+                    16,
+                )
+                .or(Err(fmt::Error))?;
+                continue;
+            } else if c == '\x08' {
+                self.cursor_x -= 8;
+                self.adjust_cursor_pos();
+                fill_rect(
+                    &mut *self.buf.lock(),
+                    0x000000,
+                    self.cursor_x,
+                    self.cursor_y,
+                    8,
                     16,
                 )
                 .or(Err(fmt::Error))?;
