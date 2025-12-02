@@ -133,6 +133,10 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             "show" => run_cmd_show(&args),
             "demo" => run_cmd_demo(&args),
             "reboot" => run_cmd_reboot(&args),
+            "hello" => {
+                println!("こんにちは");
+                Ok(())
+            }
             "" => Ok(()),
             _ => Err("Unknown command"),
         }

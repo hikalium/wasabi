@@ -12,9 +12,11 @@
 #![no_main]
 pub mod acpi;
 pub mod allocator;
+pub mod bitmap;
 pub mod bits;
 pub mod cui;
 pub mod executor;
+pub mod font;
 pub mod graphics;
 pub mod gui;
 pub mod hpet;
