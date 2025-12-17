@@ -172,6 +172,8 @@ unsafe impl GlobalAlloc for FirstFitAllocator {
 }
 
 impl FirstFitAllocator {
+    /// Note: Only the start address of obj will be aligned.
+    /// In other words, size of obj will not be aligned.
     pub fn alloc_with_options(&self, layout: Layout) -> *mut u8 {
         let mut header = self.first_header.borrow_mut();
         let mut header = header.deref_mut();
