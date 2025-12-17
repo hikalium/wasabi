@@ -230,6 +230,10 @@ impl<T: Bitmap> BitmapTextWriter<T> {
     }
     fn adjust_cursor_pos(&mut self) -> bool {
         let mut adjusted = false;
+        if self.cursor_x < 0 {
+            self.cursor_x = 0;
+            adjusted = true;
+        }
         if self.cursor_x >= self.buf.width() {
             self.cursor_x = 0;
             self.cursor_y += 16;
@@ -252,6 +256,19 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
                 self.adjust_cursor_pos();
                 fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16)
                     .or(Err(fmt::Error))?;
+                continue;
+            } else if c == '\x08' {
+                self.cursor_x -= 8;
+                self.adjust_cursor_pos();
+                fill_rect(
+                    &mut self.buf,
+                    0x000000,
+                    self.cursor_x,
+                    self.cursor_y,
+                    8,
+                    16,
+                )
+                .or(Err(fmt::Error))?;
                 continue;
             }
             draw_font_fg(
