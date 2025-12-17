@@ -30,6 +30,8 @@ fi
   -device qemu-xhci \
   -device usb-kbd \
   -device usb-tablet \
+  -netdev user,id=usbnet0 \
+  -device usb-ncm,netdev=usbnet0 \
   -device isa-debug-exit,iobase=0xf4,iosize=0x01
 RETCODE=$?
 set -e
