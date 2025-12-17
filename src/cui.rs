@@ -13,6 +13,10 @@ pub struct Console {
 impl Console {
     pub fn handle_key_down(&mut self, e: KeyEvent) {
         match e {
+            KeyEvent::Char('\x08') => {
+                self.input_buf.pop();
+                print!("\x08");
+            }
             KeyEvent::Char(c) => {
                 self.input_buf.push(c);
                 print!("{c}");
