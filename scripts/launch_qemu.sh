@@ -19,6 +19,7 @@ qemu-system-x86_64 \
   -device qemu-xhci \
   -device usb-kbd \
   -device usb-tablet \
+  -device usb-net \
   -device isa-debug-exit,iobase=0xf4,iosize=0x01
 RETCODE=$?
 set -e
