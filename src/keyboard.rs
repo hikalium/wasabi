@@ -15,6 +15,10 @@ pub enum KeyEvent {
     None,
     Char(char),
     Unknown(u8),
+    CursorDown,
+    CursorLeft,
+    CursorRight,
+    CursorUp,
     Enter,
 }
 impl KeyEvent {
@@ -31,6 +35,10 @@ impl KeyEvent {
             54 => KeyEvent::Char(','),
             55 => KeyEvent::Char('.'),
             56 => KeyEvent::Char('/'),
+            79 => KeyEvent::CursorRight,
+            80 => KeyEvent::CursorLeft,
+            81 => KeyEvent::CursorDown,
+            82 => KeyEvent::CursorUp,
             _ => KeyEvent::Unknown(usage_id),
         }
     }
