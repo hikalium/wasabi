@@ -25,11 +25,13 @@ use crate::tablet::set_debug_mouse;
 use crate::warn;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::mem::swap;
 use core::ptr::write_volatile;
 use core::time::Duration;
 
 #[derive(Default)]
 pub struct Console {
+    prev_cmd: Option<String>,
     input_buf: String,
 }
 impl Console {
@@ -43,12 +45,20 @@ impl Console {
                 self.input_buf.push(c);
                 print!("{c}");
             }
+            KeyEvent::CursorUp => {
+                if let Some(prev_cmd) = self.prev_cmd.as_mut() {
+                    swap(prev_cmd, &mut self.input_buf);
+                    print!("\n{}", self.input_buf);
+                }
+            }
             KeyEvent::Enter => {
                 println!();
                 if let Err(e) = run_cmd(&self.input_buf) {
                     error!("{e}: {}", self.input_buf)
                 }
-                self.input_buf.clear();
+                let mut prev_cmd = String::new();
+                swap(&mut prev_cmd, &mut self.input_buf);
+                self.prev_cmd = Some(prev_cmd);
             }
             e => warn!("Unhandled input: {e:?}"),
         }
