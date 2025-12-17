@@ -1,4 +1,5 @@
 extern crate alloc;
+use crate::error;
 use crate::hpet::global_timestamp;
 use crate::info;
 use crate::mutex::Mutex;
@@ -8,7 +9,9 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use core::fmt::Debug;
 use core::future::Future;
+use core::ops::ControlFlow;
 use core::panic::Location;
+use core::pin::pin;
 use core::pin::Pin;
 use core::ptr::null;
 use core::sync::atomic::AtomicBool;
@@ -26,7 +29,6 @@ struct Task<T> {
     created_at_line: u32,
 }
 impl<T> Task<T> {
-    #[track_caller]
     fn new(future: impl Future<Output = Result<T>> + 'static) -> Task<T> {
         Task {
             // Pin the task here to avoid invalidating the self references used
@@ -91,7 +93,6 @@ impl Executor {
         self.task_queue().push_back(task)
     }
     fn run(executor: &Mutex<Option<Self>>) -> ! {
-        info!("Executor starts running...");
         loop {
             let task =
                 executor.lock().as_mut().map(|e| e.task_queue().pop_front());
@@ -160,6 +161,117 @@ pub async fn sleep(duration: Duration) {
     TimeoutFuture::new(duration).await
 }
 
+pub enum MaybeReadyResult<'a, T, U>
+where
+    U: Future<Output = T>,
+{
+    Ready(T),
+    NotYet(Pin<&'a mut U>),
+}
+pub struct MaybeReady<'a, T, U>
+where
+    U: Future<Output = T>,
+{
+    wait_on: Option<Pin<&'a mut U>>,
+}
+impl<'a, T, U> MaybeReady<'a, T, U>
+where
+    U: Future<Output = T>,
+{
+    pub fn new(wait_on: Pin<&'a mut U>) -> Self {
+        let wait_on = Some(wait_on);
+        Self { wait_on }
+    }
+}
+impl<'a, T, U> Future for MaybeReady<'a, T, U>
+where
+    U: Future<Output = T>,
+{
+    type Output = MaybeReadyResult<'a, T, U>;
+    fn poll(
+        mut self: Pin<&mut Self>,
+        ctx: &mut Context,
+    ) -> Poll<MaybeReadyResult<'a, T, U>> {
+        if let Some(mut wait_on) = self.wait_on.take() {
+            let l = wait_on.as_mut().poll(ctx);
+            if let Poll::Ready(l) = l {
+                Poll::Ready(MaybeReadyResult::Ready(l))
+            } else {
+                Poll::Ready(MaybeReadyResult::NotYet(wait_on))
+            }
+        } else {
+            panic!("MaybeReady future polled after taken")
+        }
+    }
+}
+
+pub async fn check_if_ready<T, U>(
+    future: Pin<&mut U>,
+) -> ControlFlow<Result<T>, Pin<&mut U>>
+where
+    U: Future<Output = Result<T>>,
+{
+    match MaybeReady::new(future).await {
+        MaybeReadyResult::Ready(l) => ControlFlow::Break(l),
+        MaybeReadyResult::NotYet(f) => ControlFlow::Continue(f),
+    }
+}
+
+pub enum Select2Result<L, R> {
+    LeftReady(L),
+    RightReady(R),
+}
+
+pub struct Select2<'a, L, R> {
+    left: Pin<&'a mut dyn Future<Output = L>>,
+    right: Pin<&'a mut dyn Future<Output = R>>,
+}
+impl<'a, L, R> Select2<'a, L, R> {
+    pub fn new(
+        left: Pin<&'a mut impl Future<Output = L>>,
+        right: Pin<&'a mut impl Future<Output = R>>,
+    ) -> Self {
+        Self { left, right }
+    }
+}
+impl<'a, L, R> Future for Select2<'a, L, R> {
+    type Output = Select2Result<L, R>;
+    fn poll(
+        mut self: Pin<&mut Self>,
+        ctx: &mut Context,
+    ) -> Poll<Select2Result<L, R>> {
+        let l = self.left.as_mut().poll(ctx);
+        if let Poll::Ready(l) = l {
+            return Poll::Ready(Select2Result::LeftReady(l));
+        }
+        let r = self.right.as_mut().poll(ctx);
+        if let Poll::Ready(r) = r {
+            return Poll::Ready(Select2Result::RightReady(r));
+        }
+        Poll::Pending
+    }
+}
+
+pub async fn with_timeout<T>(
+    duration: Duration,
+    future: impl Future<Output = Result<T>>,
+) -> Result<T> {
+    let future = pin!(future);
+    let tf = pin!(TimeoutFuture::new(duration));
+    match Select2::new(future, tf).await {
+        Select2Result::LeftReady(l) => l,
+        Select2Result::RightReady(_) => {
+            error!(
+                "Future at {}:{} is timed out after {:?}",
+                Location::caller().file(),
+                Location::caller().line(),
+                duration
+            );
+            Err("TimedOut")
+        }
+    }
+}
+
 static GLOBAL_EXECUTOR: Mutex<Option<Executor>> = Mutex::new(None);
 #[track_caller]
 pub fn spawn_global(future: impl Future<Output = Result<()>> + 'static) {
@@ -167,6 +279,5 @@ pub fn spawn_global(future: impl Future<Output = Result<()>> + 'static) {
     GLOBAL_EXECUTOR.lock().get_or_insert_default().enqueue(task);
 }
 pub fn start_global_executor() -> ! {
-    info!("Starting global executor loop");
     Executor::run(&GLOBAL_EXECUTOR);
 }
