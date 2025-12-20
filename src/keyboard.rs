@@ -216,7 +216,6 @@ impl UsbKeyboardDriverState {
             ));
             self.xhc.notify_ep(self.slot, int_ep_desc.dci())?;
             waiter.await?;
-            info!("{buf:?}");
             let pressed = {
                 let report = buf.to_vec();
                 BTreeSet::from_iter(
