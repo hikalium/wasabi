@@ -1,3 +1,6 @@
+use crate::font::get_glyph_width;
+use crate::font::lookup_font_16x16;
+use crate::font::lookup_font_8x16;
 use crate::mutex::Mutex;
 use crate::result::Result;
 use core::cmp::max;
@@ -130,46 +133,15 @@ fn draw_line<T: Bitmap>(
     Ok(())
 }
 
-fn lookup_font(c: char) -> Option<[[char; 8]; 16]> {
-    const FONT_SOURCE: &str = include_str!("./font.txt");
-    static mut FONT_CACHE: Option<[[[char; 8]; 16]; 256]> = None;
-    if let Ok(c) = u8::try_from(c) {
-        let font = unsafe {
-            FONT_CACHE.get_or_insert_with(|| {
-                let mut font = [[['*'; 8]; 16]; 256];
-                let mut fi = FONT_SOURCE.split('\n');
-                while let Some(line) = fi.next() {
-                    if let Some(line) = line.strip_prefix("0x") {
-                        if let Ok(idx) = u8::from_str_radix(line, 16) {
-                            let mut glyph = [['*'; 8]; 16];
-                            for (y, line) in fi.clone().take(16).enumerate() {
-                                for (x, c) in line.chars().enumerate() {
-                                    if let Some(e) = glyph[y].get_mut(x) {
-                                        *e = c;
-                                    }
-                                }
-                            }
-                            font[idx as usize] = glyph;
-                        }
-                    }
-                }
-                font
-            })
-        };
-        Some(font[c as usize])
-    } else {
-        None
-    }
-}
-
+/// Returns the glyph width in pixels.
 pub fn draw_font_fg<T: Bitmap>(
     buf: &mut T,
     x: i64,
     y: i64,
     color: u32,
     c: char,
-) {
-    if let Some(font) = lookup_font(c) {
+) -> i64 {
+    if let Some(font) = lookup_font_8x16(c) {
         for (dy, row) in font.iter().enumerate() {
             for (dx, pixel) in row.iter().enumerate() {
                 let color = match pixel {
@@ -179,18 +151,33 @@ pub fn draw_font_fg<T: Bitmap>(
                 let _ = draw_point(buf, color, x + dx as i64, y + dy as i64);
             }
         }
+        8
+    } else if let Some(font) = lookup_font_16x16(c) {
+        for (dy, row) in font.iter().enumerate() {
+            for (dx, pixel) in row.iter().enumerate() {
+                let color = match pixel {
+                    '#' => color,
+                    _ => continue,
+                };
+                let _ = draw_point(buf, color, x + dx as i64, y + dy as i64);
+            }
+        }
+        16
+    } else {
+        0
     }
 }
 
 pub fn draw_str_fg<T: Bitmap>(
     buf: &mut T,
-    x: i64,
+    mut x: i64,
     y: i64,
     color: u32,
     s: &str,
 ) {
-    for (i, c) in s.chars().enumerate() {
-        draw_font_fg(buf, x + i as i64 * 8, y, color, c)
+    for c in s.chars() {
+        let dx = draw_font_fg(buf, x, y, color, c);
+        x += dx;
     }
 }
 
@@ -253,6 +240,23 @@ impl<'a, T: Bitmap> BitmapTextWriter<'a, T> {
             cursor_y: 0,
         }
     }
+    fn adjust_cursor_pos_pre(&mut self, next_glyph_width: i64) -> bool {
+        let mut adjusted = false;
+        let (w, h) = {
+            let bmp = self.buf.lock();
+            (bmp.width(), bmp.height())
+        };
+        if self.cursor_x + next_glyph_width > w {
+            self.cursor_x = 0;
+            self.cursor_y += 16;
+            adjusted = true;
+        }
+        if self.cursor_y >= h {
+            self.cursor_y = 0;
+            adjusted = true;
+        }
+        adjusted
+    }
     fn adjust_cursor_pos(&mut self) -> bool {
         let mut adjusted = false;
         let (w, h) = {
@@ -307,14 +311,27 @@ impl<'a, T: Bitmap> fmt::Write for BitmapTextWriter<'a, T> {
                 .or(Err(fmt::Error))?;
                 continue;
             }
-            draw_font_fg(
+            let gw = get_glyph_width(c);
+            if self.adjust_cursor_pos_pre(gw) {
+                fill_rect(
+                    &mut *self.buf.lock(),
+                    0x000000,
+                    0,
+                    self.cursor_y,
+                    w,
+                    16,
+                )
+                .or(Err(fmt::Error))?;
+            }
+
+            let dx = draw_font_fg(
                 &mut *self.buf.lock(),
                 self.cursor_x,
                 self.cursor_y,
                 0xffffff,
                 c,
             );
-            self.cursor_x += 8;
+            self.cursor_x += dx;
             if self.adjust_cursor_pos() {
                 fill_rect(
                     &mut *self.buf.lock(),
@@ -328,6 +345,94 @@ impl<'a, T: Bitmap> fmt::Write for BitmapTextWriter<'a, T> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod bmp_text_writer_tests {
+    use super::*;
+    use crate::bitmap::BitmapBuffer;
+    use core::fmt::Write;
+
+    #[test_case]
+    fn create_writer() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let writer = BitmapTextWriter::new(&bmp);
+        assert_eq!(writer.cursor_x, 0);
+        assert_eq!(writer.cursor_y, 0);
+    }
+
+    #[test_case]
+    fn write_char_w8() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "A").unwrap();
+        assert_eq!(writer.cursor_x, 8);
+        assert_eq!(writer.cursor_y, 0);
+    }
+    #[test_case]
+    fn write_char_w16() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "あ").unwrap();
+        assert_eq!(writer.cursor_x, 16);
+        assert_eq!(writer.cursor_y, 0);
+    }
+    #[test_case]
+    fn write_char_w16x2() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "ああ").unwrap();
+        assert_eq!(writer.cursor_x, 16);
+        assert_eq!(writer.cursor_y, 16);
+    }
+    #[test_case]
+    fn write_char_w8x3() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "AAA").unwrap();
+        assert_eq!(writer.cursor_x, 0);
+        assert_eq!(writer.cursor_y, 16);
+    }
+    #[test_case]
+    fn write_char_w8x4() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "AAAA").unwrap();
+        assert_eq!(writer.cursor_x, 8);
+        assert_eq!(writer.cursor_y, 16);
+    }
+    #[test_case]
+    fn write_char_w8_w16() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "Aあ").unwrap();
+        assert_eq!(writer.cursor_x, 0);
+        assert_eq!(writer.cursor_y, 16);
+    }
+    #[test_case]
+    fn write_char_w16_w8() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "あA").unwrap();
+        assert_eq!(writer.cursor_x, 0);
+        assert_eq!(writer.cursor_y, 16);
+    }
+    #[test_case]
+    fn write_char_w8x6() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "AAAAAA").unwrap();
+        assert_eq!(writer.cursor_x, 0);
+        assert_eq!(writer.cursor_y, 0);
+    }
+    #[test_case]
+    fn write_char_w16x3() {
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let mut writer = BitmapTextWriter::new(&bmp);
+        write!(writer, "あああ").unwrap();
+        assert_eq!(writer.cursor_x, 16);
+        assert_eq!(writer.cursor_y, 0);
     }
 }
 
