@@ -22,6 +22,7 @@ use wasabi::init::init_pci;
 use wasabi::input::input_task;
 use wasabi::print::hexdump_struct;
 use wasabi::println;
+use wasabi::ps2kbd::ps2kbd_task;
 use wasabi::qemu::exit_qemu;
 use wasabi::qemu::QemuExitCode;
 use wasabi::serial::SerialPort;
@@ -77,6 +78,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     };
     spawn_global(serial_task);
     spawn_global(input_task());
+    spawn_global(ps2kbd_task());
     let abp_uart_task = async {
         // https://caro.su/msx/ocm_de1/16550.pdf
         sleep(Duration::from_millis(1000)).await;
