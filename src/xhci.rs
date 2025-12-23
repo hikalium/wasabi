@@ -1642,6 +1642,7 @@ enum TrbType {
     DataStage = 3,
     StatusStage = 4,
     Link = 6,
+    NoOpTransfer = 8,
     EnableSlotCommand = 9,
     AddressDeviceCommand = 11,
     ConfigureEndpointCommand = 12,
@@ -1886,6 +1887,11 @@ impl From<StatusStageTrb> for GenericTrbEntry {
 }
 impl From<NormalTrb> for GenericTrbEntry {
     fn from(trb: NormalTrb) -> GenericTrbEntry {
+        unsafe { transmute(trb) }
+    }
+}
+impl From<NoOpTransferTrb> for GenericTrbEntry {
+    fn from(trb: NoOpTransferTrb) -> GenericTrbEntry {
         unsafe { transmute(trb) }
     }
 }
@@ -2430,6 +2436,25 @@ impl SetupStageTrb {
             control: transfer_type << 16
                 | (TrbType::SetupStage as u32) << 10
                 | GenericTrbEntry::CTRL_BIT_IMMEDIATE_DATA,
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C, align(16))]
+pub struct NoOpTransferTrb {
+    buf: u64,
+    option: u32,
+    control: u32,
+}
+const _: () = assert!(size_of::<NoOpTransferTrb>() == 16);
+impl Default for NoOpTransferTrb {
+    fn default() -> Self {
+        Self {
+            buf: 0,
+            option: 0,
+            control: (TrbType::NoOpTransfer as u32) << 10
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION,
         }
     }
 }
