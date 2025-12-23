@@ -25,6 +25,7 @@ pub mod mmio;
 pub mod mutex;
 pub mod pci;
 pub mod print;
+pub mod ps2kbd;
 pub mod qemu;
 pub mod range;
 pub mod result;
