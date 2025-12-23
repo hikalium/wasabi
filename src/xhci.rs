@@ -92,6 +92,20 @@ impl PciXhciDriver {
     fn setup_xhc_registers(bar0: &BarMem64) -> Result<XhcRegisters> {
         let cap_regs =
             unsafe { Mmio::from_raw(bar0.addr() as *mut CapabilityRegisters) };
+        if !cap_regs.as_ref().ac64_u64addr_capable() {
+            return Err(
+                "Only supports xHCI with AC64=1 (64bit address capable)",
+            );
+        }
+        if cap_regs.as_ref().context_size_64() {
+            // Note: QEMU has CSZ=0
+            return Err(
+                "Only supports xHCI with CSZ=0 (context data size is 32byte)",
+            );
+        }
+        if cap_regs.as_ref().config_info_capable() {
+            warn!("CIC=1 detected - maybe setting config info is needed")
+        }
         let op_regs = unsafe {
             Mmio::from_raw(bar0.addr().add(cap_regs.as_ref().caplength())
                 as *mut OperationalRegisters)
@@ -480,6 +494,15 @@ impl CapabilityRegisters {
     }
     pub fn dboff(&self) -> usize {
         self.dboff.read() as usize
+    }
+    fn ac64_u64addr_capable(&self) -> bool {
+        (self.hccparams1.read() & 1) != 0
+    }
+    fn context_size_64(&self) -> bool {
+        (self.hccparams1.read() & 0b100) != 0
+    }
+    fn config_info_capable(&self) -> bool {
+        (self.hccparams2.read() & 0b100000) != 0
     }
 }
 
