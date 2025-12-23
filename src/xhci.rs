@@ -300,7 +300,7 @@ impl PciXhciDriver {
     fn start_device_driver(
         xhc: Rc<Controller>,
         slot: u8,
-        ctrl_ep_ring: CommandRing,
+        ctrl_ep_ring: TransferRing,
         device_descriptor: UsbDeviceDescriptor,
         descriptors: Vec<UsbDescriptor>,
     ) -> Result<()> {
@@ -340,7 +340,7 @@ impl PciXhciDriver {
         xhc: &Rc<Controller>,
         port: usize,
         slot: u8,
-    ) -> Result<CommandRing> {
+    ) -> Result<TransferRing> {
         // Setup an input context and send AddressDevice command.
         // 4.3.3 Device Slot Initialization
         let output_context = Box::pin(OutputContext::default());
@@ -357,7 +357,7 @@ impl PciXhciDriver {
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
         let portsc = xhc.regs.portsc.get(port).ok_or("PORTSC was invalid")?;
         input_context.as_mut().set_port_speed(portsc.port_speed())?;
-        let ctrl_ep_ring = CommandRing::default();
+        let ctrl_ep_ring = TransferRing::default();
         input_context.as_mut().set_ep_ctx(
             1,
             EndpointContext::new_control_endpoint(
@@ -473,7 +473,7 @@ impl OperationalRegisters {
             busy_loop_hint();
         }
     }
-    fn set_cmd_ring_ctrl(&mut self, ring: &CommandRing) {
+    fn set_cmd_ring_ctrl(&mut self, ring: &TransferRing) {
         self.crcr.write(
             ring.ring_phys_addr() | 1, /* Consumer Ring Cycle State */
         )
@@ -736,7 +736,7 @@ pub struct Controller {
     regs: XhcRegisters,
     device_context_base_array: Mutex<DeviceContextBaseAddressArray>,
     primary_event_ring: Mutex<EventRing>,
-    command_ring: Mutex<CommandRing>,
+    command_ring: Mutex<TransferRing>,
 }
 impl Controller {
     fn new(mut regs: XhcRegisters) -> Result<Self> {
@@ -751,7 +751,7 @@ impl Controller {
             DeviceContextBaseAddressArray::new(scratchpad_buffers);
         let device_context_base_array = Mutex::new(device_context_base_array);
         let primary_event_ring = Mutex::new(EventRing::new()?);
-        let command_ring = Mutex::new(CommandRing::default());
+        let command_ring = Mutex::new(TransferRing::default());
         let mut xhc = Self {
             regs,
             device_context_base_array,
@@ -815,7 +815,7 @@ impl Controller {
     pub async fn request_descriptor(
         &self,
         slot: u8,
-        ctrl_ep_ring: &mut CommandRing,
+        ctrl_ep_ring: &mut TransferRing,
         desc_type: usb::UsbDescriptorType,
         desc_index: u8,
         lang_id: u16,
@@ -842,7 +842,7 @@ impl Controller {
     pub async fn request_descriptor_for_interface(
         &self,
         slot: u8,
-        ctrl_ep_ring: &mut CommandRing,
+        ctrl_ep_ring: &mut TransferRing,
         desc_type: usb::UsbDescriptorType,
         desc_index: u8,
         w_index: u16,
@@ -870,7 +870,7 @@ impl Controller {
     pub async fn request_report_bytes(
         &self,
         slot: u8,
-        ctrl_ep_ring: &mut CommandRing,
+        ctrl_ep_ring: &mut TransferRing,
         buf: &mut Pin<Box<[u8]>>,
     ) -> Result<()> {
         // [HID] 7.2.1 Get_Report Request
@@ -897,7 +897,7 @@ impl Controller {
     pub async fn request_set_config(
         &self,
         slot: u8,
-        ctrl_ep_ring: &mut CommandRing,
+        ctrl_ep_ring: &mut TransferRing,
         config_value: u8,
     ) -> Result<()> {
         ctrl_ep_ring.push(
@@ -920,7 +920,7 @@ impl Controller {
     pub async fn request_set_interface(
         &self,
         slot: u8,
-        ctrl_ep_ring: &mut CommandRing,
+        ctrl_ep_ring: &mut TransferRing,
         interface_number: u8,
         alt_setting: u8,
     ) -> Result<()> {
@@ -944,7 +944,7 @@ impl Controller {
     pub async fn request_set_protocol(
         &self,
         slot: u8,
-        ctrl_ep_ring: &mut CommandRing,
+        ctrl_ep_ring: &mut TransferRing,
         interface_number: u8,
         protocol: u8,
     ) -> Result<()> {
@@ -1272,11 +1272,11 @@ impl From<StatusStageTrb> for GenericTrbEntry {
     }
 }
 
-pub struct CommandRing {
+pub struct TransferRing {
     ring: IoBox<TrbRing>,
     cycle_state_ours: bool,
 }
-impl CommandRing {
+impl TransferRing {
     fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }
@@ -1301,7 +1301,7 @@ impl CommandRing {
         Ok(dst_ptr as u64)
     }
 }
-impl Default for CommandRing {
+impl Default for TransferRing {
     fn default() -> Self {
         let mut this = Self {
             ring: TrbRing::new(),

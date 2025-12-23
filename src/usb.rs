@@ -2,8 +2,8 @@ extern crate alloc;
 
 use crate::result::Result;
 use crate::slice::Sliceable;
-use crate::xhci::CommandRing;
 use crate::xhci::Controller;
+use crate::xhci::TransferRing;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -197,7 +197,7 @@ pub enum UsbHidProtocol {
 pub async fn request_device_descriptor(
     xhc: &Rc<Controller>,
     slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
+    ctrl_ep_ring: &mut TransferRing,
 ) -> Result<UsbDeviceDescriptor> {
     let buf = vec![0; size_of::<UsbDeviceDescriptor>()];
     let mut buf = Box::into_pin(buf.into_boxed_slice());
@@ -215,7 +215,7 @@ pub async fn request_device_descriptor(
 pub async fn request_string_descriptor(
     xhc: &Rc<Controller>,
     slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
+    ctrl_ep_ring: &mut TransferRing,
     lang_id: u16,
     index: u8,
 ) -> Result<String> {
@@ -238,7 +238,7 @@ pub async fn request_string_descriptor(
 pub async fn request_string_descriptor_zero(
     xhc: &Rc<Controller>,
     slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
+    ctrl_ep_ring: &mut TransferRing,
 ) -> Result<Vec<u8>> {
     let buf = vec![0; 8];
     let mut buf = Box::into_pin(buf.into_boxed_slice());
@@ -256,7 +256,7 @@ pub async fn request_string_descriptor_zero(
 pub async fn request_config_descriptor_and_rest(
     xhc: &Rc<Controller>,
     slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
+    ctrl_ep_ring: &mut TransferRing,
 ) -> Result<Vec<UsbDescriptor>> {
     let buf = vec![0u8; size_of::<ConfigDescriptor>()];
     let mut buf = Box::into_pin(buf.into_boxed_slice());
@@ -289,7 +289,7 @@ pub async fn request_config_descriptor_and_rest(
 pub async fn request_hid_report(
     xhc: &Rc<Controller>,
     slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
+    ctrl_ep_ring: &mut TransferRing,
 ) -> Result<Vec<u8>> {
     let buf = vec![0u8; 8];
     let mut buf = Box::into_pin(buf.into_boxed_slice());
@@ -335,7 +335,7 @@ pub fn pick_interface_with_triple(
 pub async fn request_hid_report_descriptor(
     xhc: &Rc<Controller>,
     slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
+    ctrl_ep_ring: &mut TransferRing,
     interface_number: u8,
     desc_size: usize,
 ) -> Result<Vec<u8>> {
@@ -380,7 +380,7 @@ pub trait UsbDeviceDriver {
         &self,
         _xhc: Rc<Controller>,
         _slot: u8,
-        _ctrl_ep_ring: CommandRing,
+        _ctrl_ep_ring: TransferRing,
         _descriptors: Vec<UsbDescriptor>,
         _device_descriptor: &UsbDeviceDescriptor,
     ) {
