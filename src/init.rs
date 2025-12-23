@@ -107,7 +107,7 @@ pub fn init_pci(acpi: &AcpiRsdpStruct) {
                 info!("{}", e)
             }
         }
-        let pci = Pci::new(mcfg);
+        let mut pci = Pci::new(mcfg);
         pci.probe_devices();
     }
 }
