@@ -10,8 +10,8 @@ use crate::range::map_value_in_range_inclusive;
 use crate::result::Result;
 use crate::usb::*;
 use crate::warn;
-use crate::xhci::CommandRing;
 use crate::xhci::Controller;
+use crate::xhci::TransferRing;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::rc::Rc;
@@ -263,7 +263,7 @@ impl UsbDeviceDriver for UsbTabletDriver {
         &self,
         xhc: Rc<Controller>,
         slot: u8,
-        mut ctrl_ep_ring: CommandRing,
+        mut ctrl_ep_ring: TransferRing,
         descriptors: Vec<UsbDescriptor>,
         device_descriptor: &UsbDeviceDescriptor,
     ) {
@@ -283,7 +283,7 @@ impl UsbDeviceDriver for UsbTabletDriver {
 pub async fn start_usb_tablet(
     xhc: &Rc<Controller>,
     slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
+    ctrl_ep_ring: &mut TransferRing,
     _device_descriptor: &UsbDeviceDescriptor,
     descriptors: &[UsbDescriptor],
 ) -> Result<()> {

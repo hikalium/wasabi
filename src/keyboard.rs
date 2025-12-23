@@ -4,8 +4,8 @@ use crate::cui::Console;
 use crate::executor::spawn_global;
 use crate::result::Result;
 use crate::usb::*;
-use crate::xhci::CommandRing;
 use crate::xhci::Controller;
+use crate::xhci::TransferRing;
 use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
@@ -65,7 +65,7 @@ impl UsbDeviceDriver for UsbKeyboardDriver {
         &self,
         xhc: Rc<Controller>,
         slot: u8,
-        mut ctrl_ep_ring: CommandRing,
+        mut ctrl_ep_ring: TransferRing,
         descriptors: Vec<UsbDescriptor>,
         _device_descriptor: &UsbDeviceDescriptor,
     ) {
@@ -79,7 +79,7 @@ impl UsbDeviceDriver for UsbKeyboardDriver {
 pub async fn start_usb_keyboard(
     xhc: &Rc<Controller>,
     slot: u8,
-    ctrl_ep_ring: &mut CommandRing,
+    ctrl_ep_ring: &mut TransferRing,
     descriptors: &[UsbDescriptor],
 ) -> Result<()> {
     let (config_desc, interface_desc, _) =
