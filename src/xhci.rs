@@ -13,6 +13,7 @@ use crate::mmio::Mmio;
 use crate::mutex::Mutex;
 use crate::pci::BarMem64;
 use crate::pci::BusDeviceFunction;
+use crate::pci::ClassCode;
 use crate::pci::Pci;
 use crate::pci::VendorDeviceId;
 use crate::print::hexdump_struct;
@@ -68,7 +69,7 @@ enum HostPortDriverState {
 
 pub struct PciXhciDriver {}
 impl PciXhciDriver {
-    pub fn supports(vp: VendorDeviceId) -> bool {
+    pub fn supports(pcicc: ClassCode, vdi: VendorDeviceId) -> bool {
         const VDI_LIST: [VendorDeviceId; 4] = [
             VendorDeviceId {
                 vendor: 0x1b36,
@@ -87,7 +88,15 @@ impl PciXhciDriver {
                 device: 0x4ded,
             },
         ];
-        VDI_LIST.contains(&vp)
+        const PCICC_LIST: [ClassCode; 1] = [
+            // [PCI Code and ID Assignment Spec 1.11] 1.13 Base Class 0Ch
+            ClassCode {
+                base_class: 0x0C,
+                sub_class: 0x03,
+                programming_interface: 0x30,
+            },
+        ];
+        VDI_LIST.contains(&vdi) || PCICC_LIST.contains(&pcicc)
     }
     fn setup_xhc_registers(bar0: &BarMem64) -> Result<XhcRegisters> {
         let cap_regs =
