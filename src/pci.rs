@@ -12,6 +12,35 @@ use core::ops::Range;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 
+// [pci]
+// https://pcisig.com/sites/default/files/files/
+// PCI_Code-ID_r_1_11__v24_Jan_2019.pdf
+#[derive(Copy, Clone, PartialEq, Eq, Default)]
+pub struct ClassCode {
+    pub base_class: u8,
+    pub sub_class: u8,
+    pub programming_interface: u8,
+}
+impl ClassCode {
+    pub fn fmt_common(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "(ClassCode Base:{:02X}, Sub:{:02X}, ProgInt:{:02X})",
+            self.base_class, self.sub_class, self.programming_interface
+        )
+    }
+}
+impl fmt::Debug for ClassCode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.fmt_common(f)
+    }
+}
+impl fmt::Display for ClassCode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.fmt_common(f)
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct VendorDeviceId {
     pub vendor: u16,
@@ -176,15 +205,27 @@ impl Pci {
             Some(VendorDeviceId { vendor, device })
         }
     }
-    pub fn probe_devices(&self) {
+    pub fn read_class_code(&self, id: BusDeviceFunction) -> Result<ClassCode> {
+        let v = self.read_register_u32(id, 8)?;
+        // byte ofs 0x8 0x9 0xa 0xb  : v
+        //          REV  PI  SC  BC
+        Ok(ClassCode {
+            base_class: (v >> 24) as u8,
+            sub_class: (v >> 16) as u8,
+            programming_interface: (v >> 8) as u8,
+        })
+    }
+    pub fn probe_devices(&mut self) {
         for bdf in BusDeviceFunction::iter() {
             if let Some(vd) = self.read_vendor_id_and_device_id(bdf) {
-                info!("{vd}");
-                if PciXhciDriver::supports(vd) {
+                let cc = self
+                    .read_class_code(bdf)
+                    .inspect_err(|e| error!("Failed to read class code: {e:?}"))
+                    .unwrap_or_default();
+                info!("{bdf:?}: {vd} : {cc:?}");
+                if PciXhciDriver::supports(cc, vd) {
                     if let Err(e) = PciXhciDriver::attach(self, bdf) {
                         error!("PCI: driver attach() failed: {e:?}")
-                    } else {
-                        continue;
                     }
                 }
             }
