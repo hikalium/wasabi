@@ -750,7 +750,7 @@ impl SlotContext {
 }
 
 #[repr(C, align(32))]
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct EndpointContext {
     data: [Volatile<u32>; 2],
     tr_dequeue_ptr: Volatile<u64>,
@@ -759,6 +759,17 @@ pub struct EndpointContext {
     _reserved: [u32; 3],
 }
 const _: () = assert!(size_of::<EndpointContext>() == 0x20);
+impl Debug for EndpointContext {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "EPCtx {{ deq_ptr: {:#018X}, avg_trb_sz: {}, interval: {} }}",
+            self.tr_dequeue_ptr.read(),
+            self.average_trb_length.read(),
+            self.interval(),
+        )
+    }
+}
 impl EndpointContext {
     fn new() -> Self {
         unsafe { MaybeUninit::zeroed().assume_init() }
@@ -851,6 +862,10 @@ impl EndpointContext {
     }
     fn set_ep_type(&mut self, ep_type: EndpointType) -> Result<()> {
         self.data[1].write_bits(3, 3, ep_type as u32)
+    }
+    fn interval(&self) -> u8 {
+        let d = self.data[0].read();
+        ((d >> 16) & 0xff) as u8
     }
     pub fn ep_state(&self) -> EndpointState {
         EndpointState::from(extract_bits(self.data[0].read(), 0, 3))
