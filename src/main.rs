@@ -21,6 +21,7 @@ use wasabi::keyboard::KeyEvent;
 use wasabi::print::hexdump_struct;
 use wasabi::print::set_global_vram;
 use wasabi::println;
+use wasabi::ps2kbd::ps2kbd_task;
 use wasabi::qemu::exit_qemu;
 use wasabi::qemu::QemuExitCode;
 use wasabi::serial::SerialPort;
@@ -83,6 +84,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
         }
     };
     spawn_global(serial_task);
+    spawn_global(ps2kbd_task());
     start_global_executor()
 }
 
