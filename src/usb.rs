@@ -74,7 +74,7 @@ pub struct UsbDeviceDescriptor {
 const _: () = assert!(size_of::<UsbDeviceDescriptor>() == 18);
 unsafe impl Sliceable for UsbDeviceDescriptor {}
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Copy, Clone, Default)]
 #[allow(unused)]
 #[repr(packed)]
 pub struct ConfigDescriptor {
@@ -96,6 +96,15 @@ impl ConfigDescriptor {
     }
     pub fn config_value(&self) -> u8 {
         self.config_value
+    }
+}
+impl fmt::Debug for ConfigDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ConfigDescriptor {{ config_value: {} }}",
+            self.config_value
+        )
     }
 }
 unsafe impl Sliceable for ConfigDescriptor {}
