@@ -23,7 +23,7 @@ use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum KeyEvent {
     None,
     Char(char),
