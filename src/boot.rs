@@ -27,6 +27,8 @@ use crate::warn;
 use crate::x86::init_exceptions;
 use crate::x86::GdtWrapper;
 use crate::x86::Idt;
+use core::ptr::read_volatile;
+use core::ptr::write_volatile;
 use core::time::Duration;
 
 /// Initialize every subsystem and spawn the default OS tasks, but do *not*
@@ -101,6 +103,34 @@ pub fn setup_system(
     spawn_global(serial_task);
     spawn_global(input_task());
     spawn_global(ps2kbd_task());
+    let abp_uart_task = async {
+        // https://caro.su/msx/ocm_de1/16550.pdf
+        sleep(Duration::from_millis(1000)).await;
+        let base_addr = 0xfe032000_usize; // chromebook boten/bookem
+        let reg_rx_data = base_addr as *mut u8;
+        let reg_line_status = (base_addr + 0b101) as *mut u8;
+        unsafe {
+            write_volatile((base_addr + 1) as *mut u8, 0x00);
+            write_volatile((base_addr + 3) as *mut u8, 0x80);
+            write_volatile((base_addr) as *mut u8, 1);
+            write_volatile((base_addr + 1) as *mut u8, 0);
+            write_volatile((base_addr + 3) as *mut u8, 0x03);
+            write_volatile((base_addr + 2) as *mut u8, 0xC7);
+            write_volatile((base_addr + 4) as *mut u8, 0x0B);
+        }
+        loop {
+            sleep(Duration::from_millis(1000)).await;
+            let data = unsafe { read_volatile(reg_rx_data) };
+            if data != 0 {
+                info!("DATA:      {data:#010X}");
+            }
+            let status = unsafe { read_volatile(reg_line_status) };
+            if status != 0 {
+                info!("STATUS:    {status:#010b}");
+            }
+        }
+    };
+    spawn_global(abp_uart_task);
 
     descriptor_tables
 }
