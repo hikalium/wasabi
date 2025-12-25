@@ -15,6 +15,7 @@ pub mod bitmap;
 pub mod bits;
 pub mod cui;
 pub mod executor;
+pub mod font;
 pub mod graphics;
 pub mod hpet;
 pub mod init;
