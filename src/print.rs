@@ -14,6 +14,13 @@ pub fn set_global_vram(vram: VramBufferInfo) {
     let w = BitmapTextWriter::new(vram);
     *GLOBAL_VRAM_WRITER.lock() = Some(w);
 }
+// Temporary accessor for drawing directly on the global VRAM before the
+// GUI layer exists; removed when GLOBAL_VRAM moves into gui.rs.
+pub fn with_global_vram_buf(f: impl FnOnce(&mut VramBufferInfo)) {
+    if let Some(w) = &mut *GLOBAL_VRAM_WRITER.lock() {
+        f(w.buf_mut());
+    }
+}
 pub fn get_global_vram_resolutions() -> Option<(i64, i64)> {
     (GLOBAL_VRAM_WRITER.lock())
         .as_ref()
