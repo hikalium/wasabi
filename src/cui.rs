@@ -2,6 +2,9 @@ extern crate alloc;
 
 use crate::acpi::RebootParams;
 use crate::error;
+use crate::font::get_glyph_width;
+use crate::graphics::draw_str_fg;
+use crate::graphics::fill_rect;
 use crate::hpet::global_timestamp;
 use crate::info;
 use crate::init::EFI_MEMORY_MAP;
@@ -22,6 +25,8 @@ pub struct Console {
     prev_cmd: Option<String>,
     input_buf: String,
     prev_input_was_cr: bool,
+    ctrl_is_pressed: bool,
+    is_ime_enabled: bool,
 }
 impl Console {
     /// Maps raw newline characters onto [`KeyEvent::Enter`] so that CR,
@@ -79,50 +84,82 @@ impl Console {
         };
         match e {
             KeyEvent::Char('\x08') => {
-                self.input_buf.pop();
-                print!("\x08");
+                if let Some(prev_char) = self.input_buf.pop() {
+                    let gw = get_glyph_width(prev_char);
+                    if gw == 16 {
+                        print!("\x08");
+                        print!("\x08");
+                    } else {
+                        print!("\x08");
+                    }
+                }
             }
             KeyEvent::Char(c) => {
-                let prev1_char = c;
-                let prev1 = Self::boin_index(c);
-                let prev2_char = self.input_buf.chars().last();
-                let prev2 = if !self.input_buf.is_empty() {
-                    self.input_buf.chars().last().and_then(Self::shiin_index)
-                } else {
-                    None
-                };
-                let c = if let (_, '-') = (prev2_char, prev1_char) {
-                    self.input_buf.pop();
-                    'ー'
-                } else if let (Some('n'), 'n') = (prev2_char, prev1_char) {
-                    self.input_buf.pop();
-                    print!("\x08");
-                    'ん'
-                } else {
-                    match (prev2, prev1) {
-                        (Some(si), Some(bi)) => {
-                            self.input_buf.pop();
-                            print!("\x08");
-                            [
-                                ['か', 'き', 'く', 'け', 'こ'],
-                                ['さ', 'し', 'す', 'せ', 'そ'],
-                                ['た', 'ち', 'つ', 'て', 'と'],
-                                ['な', 'に', 'ぬ', 'ね', 'の'],
-                                ['は', 'ひ', 'ふ', 'へ', 'ほ'],
-                                ['ま', 'み', 'む', 'め', 'も'],
-                                ['や', '　', 'ゆ', '　', 'よ'],
-                                ['ら', 'り', 'る', 'れ', 'ろ'],
-                                ['わ', '　', '　', '　', 'を'],
-                                ['が', 'ぎ', 'ぐ', 'げ', 'ご'],
-                                ['ざ', 'じ', 'ず', 'ぜ', 'ぞ'],
-                                ['だ', 'ぢ', 'づ', 'で', 'ど'],
-                                ['ば', 'び', 'ぶ', 'べ', 'ぼ'],
-                                ['ぱ', 'ぴ', 'ぷ', 'ぺ', 'ぽ'],
-                            ][si][bi]
+                if c == ' ' && self.ctrl_is_pressed {
+                    self.is_ime_enabled = !self.is_ime_enabled;
+                    let (vw, vh) = crate::print::get_global_vram_resolutions()
+                        .unwrap_or((0, 0));
+                    let enabled = self.is_ime_enabled;
+                    crate::print::with_global_vram_buf(|buf| {
+                        let _ =
+                            fill_rect(buf, 0x000000, vw - 16, vh - 16, 16, 16);
+                        draw_str_fg(
+                            buf,
+                            vw - 16,
+                            vh - 16,
+                            0xffffff,
+                            if enabled { "あ" } else { "Aa" },
+                        );
+                    });
+                    return;
+                }
+                let c = if self.is_ime_enabled {
+                    let prev1_char = c;
+                    let prev1 = Self::boin_index(c);
+                    let prev2_char = self.input_buf.chars().last();
+                    let prev2 = if !self.input_buf.is_empty() {
+                        self.input_buf
+                            .chars()
+                            .last()
+                            .and_then(Self::shiin_index)
+                    } else {
+                        None
+                    };
+                    if let (_, '-') = (prev2_char, prev1_char) {
+                        self.input_buf.pop();
+                        'ー'
+                    } else if let (Some('n'), 'n') = (prev2_char, prev1_char) {
+                        self.input_buf.pop();
+                        print!("\x08");
+                        'ん'
+                    } else {
+                        match (prev2, prev1) {
+                            (Some(si), Some(bi)) => {
+                                self.input_buf.pop();
+                                print!("\x08");
+                                [
+                                    ['か', 'き', 'く', 'け', 'こ'],
+                                    ['さ', 'し', 'す', 'せ', 'そ'],
+                                    ['た', 'ち', 'つ', 'て', 'と'],
+                                    ['な', 'に', 'ぬ', 'ね', 'の'],
+                                    ['は', 'ひ', 'ふ', 'へ', 'ほ'],
+                                    ['ま', 'み', 'む', 'め', 'も'],
+                                    ['や', '　', 'ゆ', '　', 'よ'],
+                                    ['ら', 'り', 'る', 'れ', 'ろ'],
+                                    ['わ', '　', '　', '　', 'を'],
+                                    ['が', 'ぎ', 'ぐ', 'げ', 'ご'],
+                                    ['ざ', 'じ', 'ず', 'ぜ', 'ぞ'],
+                                    ['だ', 'ぢ', 'づ', 'で', 'ど'],
+                                    ['ば', 'び', 'ぶ', 'べ', 'ぼ'],
+                                    ['ぱ', 'ぴ', 'ぷ', 'ぺ', 'ぽ'],
+                                ][si][bi]
+                            }
+                            (_, Some(bi)) => ['あ', 'い', 'う', 'え', 'お'][bi],
+                            _ => c,
                         }
-                        (_, Some(bi)) => ['あ', 'い', 'う', 'え', 'お'][bi],
-                        _ => c,
                     }
+                } else {
+                    c
                 };
                 self.input_buf.push(c);
                 print!("{c}");
@@ -143,7 +180,15 @@ impl Console {
                 self.prev_cmd = Some(prev_cmd);
                 print!("> ");
             }
+            KeyEvent::CtrlLeft => {
+                self.ctrl_is_pressed = true;
+            }
             e => warn!("Unhandled input: {e:?}"),
+        }
+    }
+    pub fn handle_key_up(&mut self, e: KeyEvent) {
+        if e == KeyEvent::CtrlLeft {
+            self.ctrl_is_pressed = false;
         }
     }
 }
