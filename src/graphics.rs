@@ -215,6 +215,9 @@ impl<T: Bitmap> BitmapTextWriter<T> {
     pub fn buf(&self) -> &T {
         &self.buf
     }
+    pub fn buf_mut(&mut self) -> &mut T {
+        &mut self.buf
+    }
     fn adjust_cursor_pos_pre(&mut self, next_glyph_width: i64) -> bool {
         let mut adjusted = false;
         let (w, h) = (self.buf.width(), self.buf.height());
