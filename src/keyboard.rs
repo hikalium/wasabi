@@ -19,6 +19,7 @@ pub enum KeyEvent {
     CursorLeft,
     CursorRight,
     CursorUp,
+    CtrlLeft,
     Enter,
 }
 impl KeyEvent {
