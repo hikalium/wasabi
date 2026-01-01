@@ -979,8 +979,8 @@ struct EventRing {
 }
 impl EventRing {
     fn new() -> Result<Self> {
-        let ring = TrbRing::new();
-        let erst = EventRingSegmentTableEntry::new(&ring)?;
+        let ring = IoBox::new(TrbRing::default());
+        let erst = IoBox::new(EventRingSegmentTableEntry::new(&ring)?);
         Ok(Self {
             ring,
             erst,
@@ -1067,22 +1067,20 @@ struct EventRingSegmentTableEntry {
 }
 const _: () = assert!(size_of::<EventRingSegmentTableEntry>() == 4096);
 impl EventRingSegmentTableEntry {
-    fn new(ring: &IoBox<TrbRing>) -> Result<IoBox<Self>> {
-        let mut erst: IoBox<Self> = IoBox::new();
-        {
-            let erst = unsafe { erst.get_unchecked_mut() };
-            erst.ring_segment_base_address =
-                ring.as_ref() as *const TrbRing as u64;
-            erst.ring_segment_size = ring
+    fn new(ring: &IoBox<TrbRing>) -> Result<Self> {
+        Ok(EventRingSegmentTableEntry {
+            ring_segment_base_address: ring.as_ref() as *const TrbRing as u64,
+            ring_segment_size: ring
                 .as_ref()
                 .num_trbs()
                 .try_into()
-                .or(Err("Too large num trbs"))?;
-        }
-        Ok(erst)
+                .or(Err("Too large num trbs"))?,
+            _rsvdz: Default::default(),
+        })
     }
 }
 #[repr(C, align(4096))]
+#[derive(Default)]
 struct TrbRing {
     trb: [GenericTrbEntry; Self::NUM_TRB],
     current_index: usize,
@@ -1093,9 +1091,6 @@ struct TrbRing {
 const _: () = assert!(size_of::<TrbRing>() <= 4096);
 impl TrbRing {
     const NUM_TRB: usize = 16;
-    fn new() -> IoBox<Self> {
-        IoBox::new()
-    }
     const fn num_trbs(&self) -> usize {
         Self::NUM_TRB
     }
@@ -1304,7 +1299,7 @@ impl TransferRing {
 impl Default for TransferRing {
     fn default() -> Self {
         let mut this = Self {
-            ring: TrbRing::new(),
+            ring: IoBox::new(TrbRing::default()),
             cycle_state_ours: false,
         };
         let link_trb = GenericTrbEntry::trb_link(this.ring.as_ref());
