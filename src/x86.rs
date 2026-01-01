@@ -14,6 +14,7 @@ use core::mem::size_of;
 use core::mem::size_of_val;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
+use core::ops::Range;
 use core::pin::Pin;
 
 pub fn hlt() {
@@ -56,6 +57,58 @@ const ATTR_PRESENT: u64 = 1 << 0;
 const ATTR_WRITABLE: u64 = 1 << 1;
 const ATTR_WRITE_THROUGH: u64 = 1 << 3;
 const ATTR_CACHE_DISABLE: u64 = 1 << 4;
+
+pub fn round_up_to_multiple_of_page_size(num_bytes: usize) -> Option<usize> {
+    if usize::MAX - num_bytes < PAGE_SIZE - 1 {
+        None
+    } else {
+        // Note: the order of calc matters to avoid overflow
+        Some((num_bytes + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1))
+    }
+}
+
+#[test_case]
+fn correctly_round_up_to_page_size_multiple() {
+    assert_eq!(round_up_to_multiple_of_page_size(0), Some(0));
+    assert_eq!(round_up_to_multiple_of_page_size(1), Some(PAGE_SIZE));
+    assert_eq!(
+        round_up_to_multiple_of_page_size(PAGE_SIZE - 1),
+        Some(PAGE_SIZE)
+    );
+    assert_eq!(
+        round_up_to_multiple_of_page_size(PAGE_SIZE),
+        Some(PAGE_SIZE)
+    );
+    assert_eq!(
+        round_up_to_multiple_of_page_size(PAGE_SIZE + 1),
+        Some(PAGE_SIZE * 2)
+    );
+    assert_eq!(
+        round_up_to_multiple_of_page_size(PAGE_SIZE * 2 - 1),
+        Some(PAGE_SIZE * 2)
+    );
+    assert_eq!(
+        round_up_to_multiple_of_page_size(PAGE_SIZE * 2),
+        Some(PAGE_SIZE * 2)
+    );
+    assert_eq!(
+        round_up_to_multiple_of_page_size(PAGE_SIZE * 2 + 1),
+        Some(PAGE_SIZE * 3)
+    );
+    assert_eq!(
+        round_up_to_multiple_of_page_size(usize::MAX - PAGE_SIZE),
+        Some(usize::MAX - PAGE_SIZE + 1)
+    );
+    assert_eq!(
+        round_up_to_multiple_of_page_size(usize::MAX - PAGE_SIZE + 1),
+        Some(usize::MAX - PAGE_SIZE + 1)
+    );
+    assert_eq!(
+        round_up_to_multiple_of_page_size(usize::MAX - PAGE_SIZE + 2),
+        None
+    );
+    assert_eq!(round_up_to_multiple_of_page_size(usize::MAX), None);
+}
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u64)]
@@ -961,6 +1014,19 @@ pub fn disable_cache<T: Sized>(io_box: &IoBox<T>) {
     unsafe {
         with_current_page_table(|pt| {
             pt.create_mapping(vstart, vend, vstart, PageAttr::ReadWriteIo)
+                .expect("Failed to create mapping")
+        })
+    }
+}
+
+pub fn disable_cache_slice<T>(slice: &[T]) {
+    let Range { start, end } = slice.as_ptr_range();
+    info!("Setting range {start:#p}..{end:#p} as ReadWriteIo");
+    let start = start as u64;
+    let end = end as u64;
+    unsafe {
+        with_current_page_table(|pt| {
+            pt.create_mapping(start, end, start, PageAttr::ReadWriteIo)
                 .expect("Failed to create mapping")
         })
     }
