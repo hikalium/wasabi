@@ -4,7 +4,6 @@ use crate::x86::disable_cache;
 use alloc::boxed::Box;
 use core::marker::PhantomPinned;
 use core::mem::ManuallyDrop;
-use core::mem::MaybeUninit;
 use core::pin::Pin;
 
 pub struct Mmio<T: Sized> {
@@ -51,10 +50,8 @@ pub struct IoBox<T: Sized> {
     inner: Pin<Box<IoBoxInner<T>>>,
 }
 impl<T: Sized> IoBox<T> {
-    pub fn new() -> Self {
-        let inner = Box::pin(IoBoxInner::new(unsafe {
-            MaybeUninit::<T>::zeroed().assume_init()
-        }));
+    pub fn new(data: T) -> Self {
+        let inner = Box::pin(IoBoxInner::new(data));
         let this = Self { inner };
         disable_cache(&this);
         this
@@ -70,13 +67,13 @@ impl<T> AsRef<T> for IoBox<T> {
         &self.inner.as_ref().get_ref().data
     }
 }
-impl<T: Sized> Default for IoBox<T> {
+impl<T: Sized + Default> Default for IoBox<T> {
     fn default() -> Self {
-        Self::new()
+        Self::new(T::default())
     }
 }
 
 #[test_case]
 fn io_box_new() {
-    IoBox::<u64>::new();
+    IoBox::<u64>::new(0);
 }
