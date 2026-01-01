@@ -1,6 +1,5 @@
 extern crate alloc;
 
-use crate::allocator::ALLOCATOR;
 use crate::bits::extract_bits;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
@@ -23,14 +22,13 @@ use crate::usb::UsbDeviceDriver;
 use crate::volatile::Volatile;
 use crate::warn;
 use crate::x86::busy_loop_hint;
+use crate::x86::PAGE_SIZE;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::rc::Weak;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::alloc::Layout;
-use core::cmp::max;
 use core::future::Future;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
@@ -38,9 +36,9 @@ use core::mem::transmute;
 use core::mem::MaybeUninit;
 use core::ops::Range;
 use core::pin::Pin;
+use core::ptr::null;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
-use core::slice;
 use core::task::Context;
 use core::task::Poll;
 use core::time::Duration;
@@ -334,6 +332,8 @@ impl PciXhciDriver {
             .send_command(GenericTrbEntry::cmd_enable_slot())
             .await?
             .slot_id();
+        let output_context = OutputContext::default();
+        xhc.set_output_context_for_slot(slot, output_context);
         Ok(slot)
     }
     async fn address_device(
@@ -343,8 +343,6 @@ impl PciXhciDriver {
     ) -> Result<TransferRing> {
         // Setup an input context and send AddressDevice command.
         // 4.3.3 Device Slot Initialization
-        let output_context = Box::pin(OutputContext::default());
-        xhc.set_output_context_for_slot(slot, output_context);
         let mut input_ctrl_ctx = InputControlContext::default();
         input_ctrl_ctx.add_context(0)?;
         input_ctrl_ctx.add_context(1)?;
@@ -418,9 +416,10 @@ impl CapabilityRegisters {
 #[repr(C, align(64))]
 struct RawDeviceContextBaseAddressArray {
     scratchpad_table_ptr: *const *const u8,
-    context: [u64; 255],
+    context: [*const OutputContext; 255],
     _pinned: PhantomPinned,
 }
+const _: () = assert!(size_of::<*const OutputContext>() == 8);
 const _: () = assert!(size_of::<RawDeviceContextBaseAddressArray>() == 2048);
 impl RawDeviceContextBaseAddressArray {
     fn new() -> Self {
@@ -534,41 +533,30 @@ impl RuntimeRegisters {
 }
 
 struct ScratchpadBuffers {
-    table: Pin<Box<[*const u8]>>,
-    _bufs: Vec<Pin<Box<[u8]>>>,
+    table: IoBox<[*const u8; Self::TABLE_LEN]>,
+    _bufs: Vec<IoBox<[u8; PAGE_SIZE]>>,
 }
 impl ScratchpadBuffers {
+    // Max Scratchpad Bufs Hi / Lo are 5 bits each (up to 1023 buffers)
+    const TABLE_LEN: usize = 1024;
     fn alloc(
         cap_regs: &CapabilityRegisters,
         op_regs: &OperationalRegisters,
     ) -> Result<Self> {
         let page_size = op_regs.page_size()?;
         info!("xhci: page_size = {page_size}");
+        if page_size != PAGE_SIZE {
+            return Err("xhci: unsupported page_size");
+        }
         let num_scratchpad_bufs = cap_regs.num_scratchpad_bufs();
-        info!("xhci: original num_scratchpad_bufs = {num_scratchpad_bufs}");
-
-        let num_scratchpad_bufs = max(cap_regs.num_scratchpad_bufs(), 1);
-        let table = ALLOCATOR.alloc_with_options(
-            Layout::from_size_align(
-                size_of::<usize>() * num_scratchpad_bufs,
-                page_size,
-            )
-            .map_err(|_| "could not allocate scratchpad buffer table")?,
-        );
-        let table = unsafe {
-            slice::from_raw_parts(table as *mut *const u8, num_scratchpad_bufs)
-        };
-        let mut table = Pin::new(Box::<[*const u8]>::from(table));
+        info!("xhci: num_scratchpad_bufs = {num_scratchpad_bufs}");
+        let mut table = IoBox::new([null::<u8>(); Self::TABLE_LEN]);
         let mut bufs = Vec::new();
-        for sb in table.iter_mut() {
-            let buf = ALLOCATOR.alloc_with_options(
-                Layout::from_size_align(page_size, page_size)
-                    .map_err(|_| "could not allocated a scratchpad buffer")?,
-            );
-            let buf =
-                unsafe { slice::from_raw_parts(buf as *const u8, page_size) };
-            let buf = Pin::new(Box::<[u8]>::from(buf));
-            *sb = buf.as_ref().as_ptr();
+        for i in 0..num_scratchpad_bufs {
+            let buf = IoBox::new([0u8; PAGE_SIZE]);
+            unsafe {
+                table.get_unchecked_mut()[i] = buf.as_ref().as_ptr();
+            }
             bufs.push(buf);
         }
         Ok(Self { table, _bufs: bufs })
@@ -693,41 +681,48 @@ struct OutputContext {
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
 
 struct DeviceContextBaseAddressArray {
-    inner: Pin<Box<RawDeviceContextBaseAddressArray>>,
+    inner: IoBox<RawDeviceContextBaseAddressArray>,
     // NB: the index of context is [slot - 1], not slot.
-    context: [Option<Pin<Box<OutputContext>>>; 255],
+    context: [IoBox<OutputContext>; 255],
     _scratchpad_buffers: ScratchpadBuffers,
 }
 impl DeviceContextBaseAddressArray {
     fn new(scratchpad_buffers: ScratchpadBuffers) -> Self {
+        // c.f. https://doc.rust-lang.org/core/mem/union.MaybeUninit.html
+        let context: [IoBox<OutputContext>; 255] = {
+            const UNINIT_VAL: MaybeUninit<IoBox<OutputContext>> =
+                MaybeUninit::uninit();
+            let mut context = [UNINIT_VAL; 255];
+            for output_context in context.iter_mut() {
+                output_context.write(IoBox::new(OutputContext::default()));
+            }
+            // SAFETY: MaybeUninit is transparent and all the element of context
+            // is properly set here so this bytes can be interpreted as a valid
+            // slice of its object.
+            unsafe { core::mem::transmute(context) }
+        };
+
         let mut inner = RawDeviceContextBaseAddressArray::new();
+
         inner.scratchpad_table_ptr = scratchpad_buffers.table.as_ref().as_ptr();
-        let inner = Box::pin(inner);
+        for (i, output_context) in context.iter().enumerate() {
+            inner.context[i] = output_context.as_ref() as *const OutputContext
+        }
+        let inner = IoBox::new(inner);
+
         Self {
             inner,
-            context: unsafe { MaybeUninit::zeroed().assume_init() },
+            context,
             _scratchpad_buffers: scratchpad_buffers,
         }
     }
     fn inner_mut_ptr(&mut self) -> *const RawDeviceContextBaseAddressArray {
-        self.inner.as_ref().get_ref() as *const RawDeviceContextBaseAddressArray
+        self.inner.as_ref() as *const RawDeviceContextBaseAddressArray
     }
-    fn set_output_context(
-        &mut self,
-        slot: u8,
-        output_context: Pin<Box<OutputContext>>,
-    ) {
+    fn set_output_context(&mut self, slot: u8, output_context: OutputContext) {
         let ctx_idx = slot as usize - 1;
-        // Own the output context here
-        self.context[ctx_idx] = Some(output_context);
-        // ...and set it in the actual pointer array
         unsafe {
-            self.inner.as_mut().get_unchecked_mut().context[ctx_idx] =
-                self.context[ctx_idx]
-                    .as_ref()
-                    .expect("Output Context was None")
-                    .as_ref()
-                    .get_ref() as *const OutputContext as u64;
+            *self.context[ctx_idx].get_unchecked_mut() = output_context;
         }
     }
 }
@@ -806,7 +801,7 @@ impl Controller {
     fn set_output_context_for_slot(
         &self,
         slot: u8,
-        output_context: Pin<Box<OutputContext>>,
+        output_context: OutputContext,
     ) {
         self.device_context_base_array
             .lock()
