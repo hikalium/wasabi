@@ -134,7 +134,7 @@ impl<'a> Iterator for DescriptorIterator<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Copy, Clone, Default)]
 #[allow(unused)]
 #[repr(packed)]
 pub struct InterfaceDescriptor {
@@ -150,6 +150,19 @@ pub struct InterfaceDescriptor {
 }
 const _: () = assert!(size_of::<InterfaceDescriptor>() == 9);
 unsafe impl Sliceable for InterfaceDescriptor {}
+impl fmt::Debug for InterfaceDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "IfaceDesc {{ num={}, alt={}, csp={:#04X}:{:#04X}:{:#04X} }}",
+            self.interface_number,
+            self.alt_setting,
+            self.interface_class,
+            self.interface_subclass,
+            self.interface_protocol
+        )
+    }
+}
 impl InterfaceDescriptor {
     pub fn triple(&self) -> (u8, u8, u8) {
         (
