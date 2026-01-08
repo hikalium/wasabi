@@ -10,6 +10,7 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
 
@@ -159,9 +160,9 @@ impl InterfaceDescriptor {
     }
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Copy, Clone, Default)]
 #[allow(unused)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct EndpointDescriptor {
     pub desc_length: u8,
     pub desc_type: u8,
@@ -182,6 +183,58 @@ pub struct EndpointDescriptor {
     // interval_ms = 2^(interval-1) (For FS Isoch)
     // interval_ms = 2^(interval-1) (For SSP/SS/HS)
     pub interval: u8,
+}
+impl EndpointDescriptor {
+    fn ep_num(&self) -> u8 {
+        self.endpoint_address & 0b1111
+    }
+    pub fn is_dir_in(&self) -> bool {
+        self.endpoint_address & (1 << 7) != 0
+    }
+    pub fn dci(&self) -> usize {
+        let dci = self.ep_num() * 2 + u8::from(self.is_dir_in());
+        dci as usize
+    }
+    fn ep_type_val(&self) -> u8 {
+        self.attributes & 0b11
+    }
+    pub fn is_interrupt_endpoint(&self) -> bool {
+        self.ep_type_val() == 3
+    }
+    pub fn is_bulk_endpoint(&self) -> bool {
+        self.ep_type_val() == 2
+    }
+    fn ep_type_str(&self) -> &str {
+        match self.ep_type_val() {
+            0 => "Control",
+            1 => "Isochronous",
+            2 => "Bulk",
+            3 => "Interrupt",
+            _ => "Unknown",
+        }
+    }
+    fn ep_dir_str(&self) -> &str {
+        if self.endpoint_address & (1 << 7) != 0 {
+            "IN"
+        } else {
+            "OUT"
+        }
+    }
+}
+impl fmt::Debug for EndpointDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let max_packet_size = self.max_packet_size;
+        let interval = self.interval;
+        write!(
+            f,
+            "EPDesc {{ ep {}: {:11} {:3}, mps:{:#06X}, interval:{} }}",
+            self.ep_num(),
+            self.ep_type_str(),
+            self.ep_dir_str(),
+            max_packet_size,
+            interval
+        )
+    }
 }
 const _: () = assert!(size_of::<EndpointDescriptor>() == 7);
 unsafe impl Sliceable for EndpointDescriptor {}
