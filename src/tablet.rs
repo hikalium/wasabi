@@ -15,7 +15,6 @@ use crate::xhci::TransferRing;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::RangeInclusive;
@@ -91,7 +90,6 @@ fn parse_hid_report_descriptor(
         };
         match (&b_type, &b_tag) {
             (UsbHidReportItemType::Main, 0b1000) => {
-                info!("M: Input attr {data_value:#b}");
                 if let Some(usage_page) = usage_page {
                     let is_constant = extract_bits(data_value, 0, 1) == 1;
                     let is_array = extract_bits(data_value, 1, 1) == 1;
@@ -130,39 +128,25 @@ fn parse_hid_report_descriptor(
                     }
                 }
             }
-            (UsbHidReportItemType::Main, 0b1010) => {
-                let collection_type = match data_value {
-                    0 => "Physical".to_string(),
-                    1 => "Application".to_string(),
-                    v => format!("{v}"),
-                };
-                info!("M: Collection {collection_type} {{",)
-            }
-            (UsbHidReportItemType::Main, 0b1100) => {
-                info!("M: }} Collection",)
-            }
+            (UsbHidReportItemType::Main, 0b1010) => {}
+            (UsbHidReportItemType::Main, 0b1100) => {}
             (UsbHidReportItemType::Global, 0b0000) => {
                 usage_page = Some(match data_value {
                     0x01 => UsbHidUsagePage::GenericDesktop,
                     0x09 => UsbHidUsagePage::Button,
                     _ => UsbHidUsagePage::UnknownUsagePage(data_value as usize),
                 });
-                info!("G: Usage Page: {usage_page:?}",);
             }
             (UsbHidReportItemType::Global, 0b0001) => {
-                info!("G: Logical Minimum: {data_value:#X}");
                 logical_min = data_value;
             }
             (UsbHidReportItemType::Global, 0b0010) => {
-                info!("G: Logical Maximum: {data_value:#X}");
                 logical_max = data_value;
             }
             (UsbHidReportItemType::Global, 0b0111) => {
-                info!("G: Report Size: {data_value} bits");
                 report_size = data_value as usize;
             }
             (UsbHidReportItemType::Global, 0b1001) => {
-                info!("G: Report Count: {data_value} times");
                 report_count = data_value as usize;
             }
             (UsbHidReportItemType::Local, 0) => {
@@ -191,13 +175,7 @@ fn parse_hid_report_descriptor(
             (UsbHidReportItemType::Local, 2) => {
                 usage_max = Some(data_value as usize)
             }
-            _ => {
-                info!(
-                    "{prefix:#04X} (type = {:6}, tag = {b_tag:2}): {}",
-                    format!("{b_type:?}"),
-                    format!("{data:#04X?}").replace('\n', "").replace(' ', "")
-                );
-            }
+            _ => {}
         }
         if matches!(b_type, UsbHidReportItemType::Main) {
             usage_queue.clear();
