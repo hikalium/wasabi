@@ -547,17 +547,17 @@ impl ScratchpadBuffers {
         let page_size = op_regs.page_size()?;
         info!("xhci: page_size = {page_size}");
         let num_scratchpad_bufs = cap_regs.num_scratchpad_bufs();
+        info!("xhci: original num_scratchpad_bufs = {num_scratchpad_bufs}");
+        let num_scratchpad_bufs = max(cap_regs.num_scratchpad_bufs(), 1);
+        info!("xhci: adjusted num_scratchpad_bufs = {num_scratchpad_bufs}");
         let list_byte_size = round_up_to_multiple_of_page_size(
             size_of::<*const u8>() * num_scratchpad_bufs,
         )
         .ok_or("Failed to calc list_byte_size")?;
-        info!("xhci: original num_scratchpad_bufs = {num_scratchpad_bufs}");
-
-        let num_scratchpad_bufs = max(cap_regs.num_scratchpad_bufs(), 1);
-        let table = ALLOCATOR.alloc_with_options(
-            Layout::from_size_align(list_byte_size, page_size)
-                .map_err(|_| "could not allocate scratchpad buffer table")?,
-        );
+        let table = Layout::from_size_align(list_byte_size, page_size)
+            .or(Err("Invalid layout"))
+            .and_then(|layout| ALLOCATOR.alloc_with_options(layout))
+            .or(Err("could not allocate scratchpad buffer table"))?;
         let table = table as *mut *const u8;
         info!("allocated addr: {table:#p}");
         {
@@ -566,11 +566,13 @@ impl ScratchpadBuffers {
             };
             disable_cache_slice(table);
             for sb in table.iter_mut() {
-                let ptr = ALLOCATOR.alloc_with_options(
-                    Layout::from_size_align(page_size, page_size).map_err(
-                        |_| "could not allocated a scratchpad buffer",
-                    )?,
-                );
+                let ptr = ALLOCATOR
+                    .alloc_with_options(
+                        Layout::from_size_align(page_size, page_size).map_err(
+                            |_| "could not allocated a scratchpad buffer",
+                        )?,
+                    )
+                    .or(Err("Failed to alloc scratchpad buffer"))?;
                 let buf = unsafe { slice::from_raw_parts_mut(ptr, page_size) };
                 disable_cache_slice(buf);
                 buf.fill(0);

@@ -13,7 +13,6 @@ use core::cmp::max;
 use core::fmt;
 use core::mem::size_of;
 use core::ops::DerefMut;
-use core::ptr::null_mut;
 
 pub fn round_up_to_nearest_pow2(v: usize) -> Result<usize> {
     1usize
@@ -162,6 +161,7 @@ unsafe impl Sync for FirstFitAllocator {}
 unsafe impl GlobalAlloc for FirstFitAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         self.alloc_with_options(layout)
+            .expect("alloc_with_option() failed")
     }
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
         let mut region = Header::from_allocated_region(ptr);
@@ -174,21 +174,19 @@ unsafe impl GlobalAlloc for FirstFitAllocator {
 impl FirstFitAllocator {
     /// Note: Only the start address of obj will be aligned.
     /// In other words, size of obj will not be aligned.
-    pub fn alloc_with_options(&self, layout: Layout) -> *mut u8 {
+    pub fn alloc_with_options(&self, layout: Layout) -> Result<*mut u8> {
         let mut header = self.first_header.borrow_mut();
         let mut header = header.deref_mut();
         loop {
             match header {
                 Some(e) => match e.provide(layout.size(), layout.align()) {
-                    Some(p) => break p,
+                    Some(p) => break Ok(p),
                     None => {
                         header = e.next_header.borrow_mut();
                         continue;
                     }
                 },
-                None => {
-                    break null_mut::<u8>();
-                }
+                None => break Err("Out of memory"),
             }
         }
     }
@@ -231,6 +229,16 @@ impl FirstFitAllocator {
 mod test {
     use super::*;
     use alloc::vec;
+    use core::ptr::null_mut;
+
+    #[test_case]
+    fn malloc_with_size_zero_should_fail() {
+        assert!(ALLOCATOR
+            .alloc_with_options(
+                Layout::from_size_align(0, 8).expect("Failed to create Layout"),
+            )
+            .is_err());
+    }
 
     #[test_case]
     fn malloc_iterate_free_and_alloc() {
@@ -247,10 +255,12 @@ mod test {
         let mut pointers = [null_mut::<u8>(); 100];
         for align in [1, 2, 4, 8, 16, 32, 4096] {
             for e in pointers.iter_mut() {
-                *e = ALLOCATOR.alloc_with_options(
-                    Layout::from_size_align(1234, align)
-                        .expect("Failed to create Layout"),
-                );
+                *e = ALLOCATOR
+                    .alloc_with_options(
+                        Layout::from_size_align(1234, align)
+                            .expect("Failed to create Layout"),
+                    )
+                    .unwrap();
                 assert!(*e as usize != 0);
                 assert!((*e as usize) % align == 0);
             }
@@ -262,10 +272,12 @@ mod test {
         for align in [32, 4096, 8, 4, 16, 2, 1] {
             let mut pointers = [null_mut::<u8>(); 100];
             for e in pointers.iter_mut() {
-                *e = ALLOCATOR.alloc_with_options(
-                    Layout::from_size_align(1234, align)
-                        .expect("Failed to create Layout"),
-                );
+                *e = ALLOCATOR
+                    .alloc_with_options(
+                        Layout::from_size_align(1234, align)
+                            .expect("Failed to create Layout"),
+                    )
+                    .unwrap();
                 assert!(*e as usize != 0);
                 assert!((*e as usize) % align == 0);
             }
@@ -313,7 +325,7 @@ mod test {
         let mut pointers = vec![null_mut::<u8>(); allocations.len()];
         for e in allocations.iter().zip(pointers.iter_mut()).enumerate() {
             let (i, (layout, pointer)) = e;
-            *pointer = ALLOCATOR.alloc_with_options(*layout);
+            *pointer = ALLOCATOR.alloc_with_options(*layout).unwrap();
             for k in 0..layout.size() {
                 unsafe { *pointer.add(k) = i as u8 }
             }
@@ -352,7 +364,7 @@ mod test {
             .step_by(2)
         {
             let (i, (layout, pointer)) = e;
-            *pointer = ALLOCATOR.alloc_with_options(*layout);
+            *pointer = ALLOCATOR.alloc_with_options(*layout).unwrap();
             for k in 0..layout.size() {
                 unsafe { *pointer.add(k) = i as u8 }
             }
