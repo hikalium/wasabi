@@ -27,5 +27,5 @@ fi
 rm -rf mnt
 
 cargo build
-rm -rf mnt && cargo test
+rm -rf mnt && RUSTFLAGS='-D warnings' cargo test
 echo "## This looks OK ;)"
