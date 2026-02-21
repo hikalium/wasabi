@@ -4,6 +4,7 @@ use crate::hpet::global_timestamp;
 use crate::info;
 use crate::mutex::Mutex;
 use crate::result::Result;
+use crate::x86;
 use crate::x86::busy_loop_hint;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
@@ -153,6 +154,9 @@ impl Future for TimeoutFuture {
         if self.time_out < global_timestamp() {
             Poll::Ready(())
         } else {
+            x86::enable_interrupt();
+            x86::hlt();
+            x86::disable_interrupt();
             Poll::Pending
         }
     }
