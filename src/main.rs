@@ -30,6 +30,7 @@ use wasabi::uefi::locate_loaded_image_protocol;
 use wasabi::uefi::EfiHandle;
 use wasabi::uefi::EfiSystemTable;
 use wasabi::warn;
+use wasabi::x86;
 use wasabi::x86::init_exceptions;
 
 #[no_mangle]
@@ -59,6 +60,8 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     init_paging(&memory_map);
     init_hpet(acpi);
     init_pci(acpi);
+    let bsp_local_apic = x86::LocalApic::default();
+    info!("{bsp_local_apic:?}");
 
     let serial_task = async {
         let sp = SerialPort::default();
