@@ -21,6 +21,14 @@ pub fn hlt() {
     unsafe { asm!("hlt") }
 }
 
+pub fn disable_interrupt() {
+    unsafe { asm!("cli") }
+}
+
+pub fn enable_interrupt() {
+    unsafe { asm!("sti") }
+}
+
 pub fn busy_loop_hint() {
     unsafe { asm!("pause") }
 }
@@ -585,6 +593,10 @@ pub fn read_cr2() -> u64 {
 
 #[no_mangle]
 extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
+    if index == 32 {
+        info!("Timer!");
+        return;
+    }
     error!("Interrupt Info: {:?}", info);
     error!("Exception {index:#04X}: ");
     match index {
@@ -1029,5 +1041,145 @@ pub fn disable_cache_slice<T>(slice: &[T]) {
             pt.create_mapping(start, end, start, PageAttr::ReadWriteIo)
                 .expect("Failed to create mapping")
         })
+    }
+}
+
+pub mod msr {
+    pub const MSR_IA32_APIC_BASE: u32 = 0x1b;
+    pub const MSR_FSB_FREQ: u32 = 0xcd;
+    pub const MSR_PLATFORM_INFO: u32 = 0xce;
+    pub const MSR_X2APIC_EOI: u32 = 0x80b;
+    pub const MSR_EFER: u32 = 0xC0000080;
+    pub const MSR_STAR: u32 = 0xC0000081;
+    pub const MSR_LSTAR: u32 = 0xC0000082;
+    pub const MSR_FMASK: u32 = 0xC0000084;
+    pub const MSR_FS_BASE: u32 = 0xC0000100;
+    pub const MSR_KERNEL_GS_BASE: u32 = 0xC0000102;
+}
+
+/// # Safety
+/// rdmsr will cause #GP(0) if the specified MSR is not implemented.
+pub unsafe fn read_msr(msr: u32) -> u64 {
+    let mut high: u32;
+    let mut low: u32;
+    asm!("rdmsr",
+            in("ecx") msr,
+            out("edx") high,
+            out("eax") low);
+    ((high as u64) << 32) | low as u64
+}
+
+/// # Safety
+/// wrmsr will cause #GP(0) if the specified MSR is not implemented,
+/// reserved fields have non-zero values and
+/// non-canonical address values are being set to address fields.
+pub unsafe fn write_msr(port: u32, data: u64) {
+    asm!("wrmsr",
+            in("ecx") port,
+            in("edx") (data >> 32),
+            in("eax") data as u32);
+}
+
+#[derive(Copy, Clone)]
+pub struct CpuidRequest {
+    pub eax: u32,
+    pub ecx: u32,
+}
+impl fmt::Display for CpuidRequest {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "CpuidRequest(EAX: {:#010X}, ECX:{:#010X})",
+            self.eax, self.ecx,
+        )
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct CpuidResponse {
+    // Do not reorder the members!
+    // This order matches the internal
+    // encodings of the registers.
+    pub ebx: u32,
+    pub edx: u32,
+    pub ecx: u32,
+    pub eax: u32,
+}
+impl fmt::Display for CpuidResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CpuidResponse(")
+            .and_then(|_| write!(f, "EAX: {:#010X}, ", self.eax))
+            .and_then(|_| write!(f, "EBX: {:#010X}, ", self.ebx))
+            .and_then(|_| write!(f, "ECX: {:#010X}, ", self.ecx))
+            .and_then(|_| write!(f, "EDX: {:#010X}, ", self.edx))
+    }
+}
+
+// Returned values will be all zero if the requested leaf
+// does not exist.
+pub fn read_cpuid(request: CpuidRequest) -> CpuidResponse {
+    let mut eax: u32 = request.eax;
+    let mut ebx: u32;
+    let mut ecx: u32 = request.ecx;
+    let mut edx: u32;
+    unsafe {
+        asm!(
+            "xchg rsi,rbx",
+            "cpuid",
+            "xchg rsi,rbx",
+            inout("eax") eax,
+            out("esi") ebx,
+            inout("ecx") ecx,
+            out("edx") edx,
+            clobber_abi("C"),
+        );
+    }
+    CpuidResponse { eax, ebx, ecx, edx }
+}
+
+pub mod apic {
+    pub const APIC_SPURIOUS: u32 = 0xf0;
+    pub const APIC_LVT_TMR: u32 = 0x320;
+    pub const APIC_TMRDIV: u32 = 0x3e0;
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct LocalApic {
+    apic_global_enable: bool,
+    is_bsp: bool,
+    x2apic_mode_enable: bool,
+    x2apic_id: u32,
+    base_addr: u64,
+}
+
+impl LocalApic {
+    /// Creates an instance to manage Local APIC for the current processor
+    pub fn new() -> Self {
+        let apic_base = unsafe {
+            // This is safe since IA32_APIC_BASE is one of IA-32 Architectural
+            // MSRs so it always exists on x86_64 platform.
+            read_msr(msr::MSR_IA32_APIC_BASE)
+        };
+        let apic_global_enable = apic_base & (1u64 << 11) != 0;
+        let is_bsp = apic_base & (1u64 << 8) != 0;
+        let x2apic_mode_enable = apic_base & (1u64 << 10) != 0;
+        Self {
+            apic_global_enable,
+            is_bsp,
+            x2apic_mode_enable,
+            x2apic_id: if x2apic_mode_enable {
+                read_cpuid(CpuidRequest { eax: 0x0b, ecx: 0 }).edx
+            } else {
+                0
+            },
+            base_addr: apic_base & !((1u64 << 12) - 1),
+        }
+    }
+}
+impl Default for LocalApic {
+    fn default() -> Self {
+        Self::new()
     }
 }
