@@ -20,6 +20,7 @@ use crate::uefi::MemoryMapHolder;
 use crate::uefi::VramBufferInfo;
 use crate::warn;
 use crate::x86::write_cr3;
+use crate::x86::LocalApic;
 use crate::x86::PageAttr;
 use crate::x86::PAGE_SIZE;
 use crate::x86::PML4;
@@ -129,4 +130,11 @@ pub fn init_acpi(acpi: &AcpiRsdpStruct) {
     } else {
         info!("FADT not found");
     }
+}
+
+pub fn init_apic() {
+    let bsp_local_apic = LocalApic::default();
+    info!("{bsp_local_apic:?}");
+    bsp_local_apic.init_timer_interrupt();
+    LocalApic::set_bsp_local_apic(bsp_local_apic);
 }
