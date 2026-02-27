@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::error;
 use crate::info;
 use crate::mmio::IoBox;
+use crate::mutex::Mutex;
 use crate::result::Result;
 use alloc::boxed::Box;
 use core::arch::asm;
@@ -15,6 +16,8 @@ use core::mem::size_of_val;
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
+use core::ptr::read_volatile;
+use core::ptr::write_volatile;
 
 pub fn hlt() {
     unsafe { asm!("hlt") }
@@ -542,6 +545,8 @@ pub fn read_cr2() -> u64 {
 extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
     if index == 32 {
         info!("Timer!");
+        LocalApic::set_bsp_timer_count(10000);
+        LocalApic::bsp_notify_end_of_interrupt();
         return;
     }
     error!("Interrupt Info: {:?}", info);
@@ -1073,9 +1078,12 @@ pub fn read_cpuid(request: CpuidRequest) -> CpuidResponse {
 }
 
 pub mod apic {
-    pub const APIC_SPURIOUS: u32 = 0xf0;
-    pub const APIC_LVT_TMR: u32 = 0x320;
-    pub const APIC_TMRDIV: u32 = 0x3e0;
+    pub const APIC_EOI: usize = 0xb0;
+    pub const APIC_SPURIOUS: usize = 0xf0;
+    pub const APIC_LVT_TMR: usize = 0x320;
+    pub const APIC_TMRINITCNT: usize = 0x380;
+    pub const APIC_TMRCURRCNT: usize = 0x390;
+    pub const APIC_TMRDIV: usize = 0x3e0;
 }
 
 #[derive(Debug)]
@@ -1085,7 +1093,7 @@ pub struct LocalApic {
     is_bsp: bool,
     x2apic_mode_enable: bool,
     x2apic_id: u32,
-    base_addr: u64,
+    base_addr: *mut u32,
 }
 
 impl LocalApic {
@@ -1108,8 +1116,52 @@ impl LocalApic {
             } else {
                 0
             },
-            base_addr: apic_base & !((1u64 << 12) - 1),
+            base_addr: (apic_base & !((1u64 << 12) - 1)) as *mut u32,
         }
+    }
+    pub fn current_timer_count(&self) -> u32 {
+        unsafe { read_volatile(self.base_addr.byte_add(apic::APIC_TMRCURRCNT)) }
+    }
+    pub fn set_timer_count(&self, newcnt: u32) {
+        unsafe {
+            write_volatile(
+                self.base_addr.byte_add(apic::APIC_TMRINITCNT),
+                newcnt,
+            )
+        }
+    }
+    pub fn init_timer_interrupt(&self) {
+        let apic = self.base_addr;
+        unsafe {
+            *apic.byte_add(apic::APIC_SPURIOUS) = 39 + 0x100;
+            *apic.byte_add(apic::APIC_LVT_TMR) = 32 | (1 << 17);
+            // bit[0..8] = interrupt vector number
+            // bit[17..19] =  Timer Mode (0b00:One shot, 0b01:Periodic)
+            *apic.byte_add(apic::APIC_TMRDIV) = 3;
+        }
+        info!("cnt: {}", self.current_timer_count());
+        info!("cnt: {}", self.current_timer_count());
+        info!("cnt: {}", self.current_timer_count());
+    }
+    pub fn notify_end_of_interrupt(&self) {
+        let apic = self.base_addr;
+        unsafe {
+            write_volatile(apic.byte_add(apic::APIC_EOI), 0);
+        }
+    }
+    pub fn bsp_notify_end_of_interrupt() {
+        if let Some(apic) = &*BSP_LOCAL_APIC.lock() {
+            apic.notify_end_of_interrupt()
+        }
+    }
+    pub fn set_bsp_timer_count(newcnt: u32) {
+        if let Some(apic) = &*BSP_LOCAL_APIC.lock() {
+            apic.set_timer_count(newcnt)
+        }
+    }
+    pub fn set_bsp_local_apic(apic: LocalApic) {
+        assert!(BSP_LOCAL_APIC.lock().is_none());
+        *BSP_LOCAL_APIC.lock() = Some(apic);
     }
 }
 impl Default for LocalApic {
@@ -1117,3 +1169,4 @@ impl Default for LocalApic {
         Self::new()
     }
 }
+static BSP_LOCAL_APIC: Mutex<Option<LocalApic>> = Mutex::new(None);
