@@ -2,6 +2,8 @@ extern crate alloc;
 
 use crate::x86::disable_cache;
 use alloc::boxed::Box;
+use core::fmt;
+use core::fmt::Debug;
 use core::marker::PhantomPinned;
 use core::mem::ManuallyDrop;
 use core::pin::Pin;
@@ -29,6 +31,16 @@ impl<T: Sized> Mmio<T> {
 impl<T> AsRef<T> for Mmio<T> {
     fn as_ref(&self) -> &T {
         self.inner.as_ref().get_ref()
+    }
+}
+impl<T> Debug for Mmio<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Mmio<{}> @ {:#p}",
+            core::any::type_name::<T>(),
+            self.as_ref()
+        )
     }
 }
 
