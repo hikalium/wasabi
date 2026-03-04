@@ -60,7 +60,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     init_paging(&memory_map);
     init_hpet(acpi);
     init_pci(acpi);
-    init_apic();
+    init_apic().expect("failed to init APIC");
 
     let serial_task = async {
         let sp = SerialPort::default();
