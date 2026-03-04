@@ -11,6 +11,7 @@ use crate::hpet::Hpet;
 use crate::info;
 use crate::mutex::Mutex;
 use crate::pci::Pci;
+use crate::result::Result;
 use crate::uefi::exit_from_efi_boot_services;
 use crate::uefi::EfiHandle;
 use crate::uefi::EfiMemoryType;
@@ -132,9 +133,10 @@ pub fn init_acpi(acpi: &AcpiRsdpStruct) {
     }
 }
 
-pub fn init_apic() {
-    let bsp_local_apic = LocalApic::default();
+pub fn init_apic() -> Result<()> {
+    let bsp_local_apic = LocalApic::new()?;
     info!("{bsp_local_apic:?}");
     bsp_local_apic.init_timer_interrupt();
     LocalApic::set_bsp_local_apic(bsp_local_apic);
+    Ok(())
 }
