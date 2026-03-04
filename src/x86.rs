@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::error;
 use crate::info;
 use crate::mmio::IoBox;
+use crate::mmio::Mmio;
 use crate::mutex::Mutex;
 use crate::result::Result;
 use alloc::boxed::Box;
@@ -1160,11 +1161,12 @@ pub struct LocalApic {
     x2apic_mode_enable: bool,
     x2apic_id: u32,
     base_addr: *mut u32,
+    regs: Mmio<u32>,
 }
 
 impl LocalApic {
     /// Creates an instance to manage Local APIC for the current processor
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self> {
         let apic_base = unsafe {
             // This is safe since IA32_APIC_BASE is one of IA-32 Architectural
             // MSRs so it always exists on x86_64 platform.
@@ -1173,7 +1175,12 @@ impl LocalApic {
         let apic_global_enable = apic_base & (1u64 << 11) != 0;
         let is_bsp = apic_base & (1u64 << 8) != 0;
         let x2apic_mode_enable = apic_base & (1u64 << 10) != 0;
-        Self {
+        let base_addr = (apic_base & !((1u64 << 12) - 1)) as *mut u32;
+        if !apic_global_enable || base_addr.is_null() {
+            return Err("LocalAPIC not enabled");
+        }
+        let regs = unsafe { Mmio::from_raw(base_addr) };
+        Ok(Self {
             apic_global_enable,
             is_bsp,
             x2apic_mode_enable,
@@ -1182,8 +1189,9 @@ impl LocalApic {
             } else {
                 0
             },
-            base_addr: (apic_base & !((1u64 << 12) - 1)) as *mut u32,
-        }
+            base_addr,
+            regs,
+        })
     }
     pub fn current_timer_count(&self) -> u32 {
         unsafe { read_volatile(self.base_addr.byte_add(apic::APIC_TMRCURRCNT)) }
@@ -1198,6 +1206,7 @@ impl LocalApic {
     }
     pub fn init_timer_interrupt(&self) {
         let apic = self.base_addr;
+        self.set_timer_count(4096);
         unsafe {
             *apic.byte_add(apic::APIC_SPURIOUS) = 39 + 0x100;
             *apic.byte_add(apic::APIC_LVT_TMR) = 32 | (1 << 17);
@@ -1228,11 +1237,6 @@ impl LocalApic {
     pub fn set_bsp_local_apic(apic: LocalApic) {
         assert!(BSP_LOCAL_APIC.lock().is_none());
         *BSP_LOCAL_APIC.lock() = Some(apic);
-    }
-}
-impl Default for LocalApic {
-    fn default() -> Self {
-        Self::new()
     }
 }
 static BSP_LOCAL_APIC: Mutex<Option<LocalApic>> = Mutex::new(None);
