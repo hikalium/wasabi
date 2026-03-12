@@ -1888,7 +1888,7 @@ impl TransferRing {
     pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }
-    fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
+    pub fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
         // Calling get_unchecked_mut() here is safe
         // as far as this function does not move the ring out.
         let ring = unsafe { self.ring.get_unchecked_mut() };
