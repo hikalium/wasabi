@@ -284,6 +284,7 @@ impl PciXhciDriver {
                 xhc,
                 slot,
                 &mut ctrl_ep_ring,
+                0,
             )
             .await?;
             info!("xhci: {descriptors:?}");

@@ -29,13 +29,17 @@ pub enum UsbDescriptorType {
     Report = 0x22,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum UsbDescriptor {
     Config(ConfigDescriptor),
     Endpoint(EndpointDescriptor),
     Interface(InterfaceDescriptor),
     Hid(HidDescriptor),
-    Unknown { desc_len: u8, desc_type: u8 },
+    Unknown {
+        desc_len: u8,
+        desc_type: u8,
+        payload: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -126,6 +130,7 @@ impl<'a> Iterator for DescriptorIterator<'a> {
                 _ => UsbDescriptor::Unknown {
                     desc_len,
                     desc_type,
+                    payload: buf[2..(desc_len as usize)].to_vec(),
                 },
             };
             self.index += desc_len as usize;
@@ -192,9 +197,11 @@ pub struct EndpointDescriptor {
     pub max_packet_size: u16,
     // interval:
     // [xhci] Table 6-12
-    // interval_ms = interval (For FS/LS Interrupt)
-    // interval_ms = 2^(interval-1) (For FS Isoch)
-    // interval_ms = 2^(interval-1) (For SSP/SS/HS)
+    // interval_ms = interval (For FS/LS Interrupt) (1-255) (3-10)
+    // interval_ms = 2^(interval-1) (For FS Isoch) (1-16) (3-18)
+    // interval_us = 2^(interval-1) * 125us (For SSP/SS/HS) (1-16) (0-15)
+    //
+    // For example, if bInterval = 11 for SS Interrupt, Interval will be 10.
     pub interval: u8,
 }
 impl EndpointDescriptor {
@@ -253,11 +260,27 @@ const _: () = assert!(size_of::<EndpointDescriptor>() == 7);
 unsafe impl Sliceable for EndpointDescriptor {}
 
 // [hid_1_11]:
+pub const TRIPLE_FOR_HID_BOOT_KBD: (u8, u8, u8) = (
+    3, /* HID Class */
+    1, /* Boot Interface Subclass */
+    1, /* Keyboard */
+);
+
+// [hid_1_11]:
 // 7.2.5 Get_Protocol Request
 // 7.2.6 Set_Protocol Request
 #[repr(u8)]
 pub enum UsbHidProtocol {
     BootProtocol = 0,
+    ReportProtocol = 1,
+}
+
+// [hid_1_11] 7.2.1
+#[repr(u8)]
+pub enum UsbHidReportType {
+    Input = 1,
+    Output = 2,
+    Feature = 3,
 }
 
 pub async fn request_device_descriptor(
@@ -323,6 +346,7 @@ pub async fn request_config_descriptor_and_rest(
     xhc: &Rc<Controller>,
     slot: u8,
     ctrl_ep_ring: &mut TransferRing,
+    desc_index: u8,
 ) -> Result<Vec<UsbDescriptor>> {
     let buf = vec![0u8; size_of::<ConfigDescriptor>()];
     let mut buf = Box::into_pin(buf.into_boxed_slice());
@@ -330,7 +354,7 @@ pub async fn request_config_descriptor_and_rest(
         slot,
         ctrl_ep_ring,
         UsbDescriptorType::Config,
-        0,
+        desc_index,
         0,
         &mut buf,
     )
@@ -343,7 +367,7 @@ pub async fn request_config_descriptor_and_rest(
         slot,
         ctrl_ep_ring,
         UsbDescriptorType::Config,
-        0,
+        desc_index,
         0,
         &mut buf,
     )
@@ -387,7 +411,7 @@ pub fn pick_interface_with_triple(
             }
             e => {
                 if interface.is_some() {
-                    desc_list.push(*e)
+                    desc_list.push(e.clone())
                 }
             }
         }
@@ -397,6 +421,57 @@ pub fn pick_interface_with_triple(
     } else {
         None
     }
+}
+pub fn descriptors_under_config(
+    descriptors: &[UsbDescriptor],
+    config_value: u8,
+) -> Vec<UsbDescriptor> {
+    let mut in_target_config = false;
+    let mut desc_list: Vec<UsbDescriptor> = Vec::new();
+    for d in descriptors {
+        if let UsbDescriptor::Config(e) = d {
+            if in_target_config {
+                // Next config begins so it's end of the target config
+                break;
+            }
+            if e.config_value() != config_value {
+                // Not this config
+                continue;
+            }
+            in_target_config = true;
+        }
+        if in_target_config {
+            desc_list.push(d.clone())
+        }
+    }
+    desc_list
+}
+pub fn descriptors_under_interface(
+    descriptors: &[UsbDescriptor],
+    interface_number: u8,
+    alt_setting: u8,
+) -> Vec<UsbDescriptor> {
+    let mut in_target_interface = false;
+    let mut desc_list: Vec<UsbDescriptor> = Vec::new();
+    for d in descriptors {
+        if let UsbDescriptor::Interface(e) = d {
+            if in_target_interface {
+                // Next interface begins so it's end of the target interface
+                break;
+            }
+            if e.interface_number != interface_number
+                || e.alt_setting != alt_setting
+            {
+                // Not this config
+                continue;
+            }
+            in_target_interface = true;
+        }
+        if in_target_interface {
+            desc_list.push(d.clone())
+        }
+    }
+    desc_list
 }
 pub async fn request_hid_report_descriptor(
     xhc: &Rc<Controller>,
