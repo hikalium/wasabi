@@ -33,6 +33,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::cmp::max;
+use core::fmt::Debug;
 use core::future::Future;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
@@ -585,6 +586,28 @@ impl ScratchpadBuffers {
     }
 }
 
+#[derive(Debug)]
+pub enum EndpointState {
+    Disabled,
+    Running,
+    Halted,
+    Stopped,
+    Error,
+    Invalid(u32),
+}
+impl From<u32> for EndpointState {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => Self::Disabled,
+            1 => Self::Running,
+            2 => Self::Halted,
+            3 => Self::Stopped,
+            4 => Self::Error,
+            e => Self::Invalid(e),
+        }
+    }
+}
+
 #[repr(C, align(32))]
 #[derive(Default, Debug)]
 struct EndpointContext {
@@ -1006,7 +1029,7 @@ impl EventRing {
             wait_list: Default::default(),
         })
     }
-    fn ring_phys_addr(&self) -> u64 {
+    pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }
     fn set_erdp(&mut self, erdp: *mut u64) {
@@ -1046,7 +1069,27 @@ impl EventRing {
                 }
             }
             if !consumed {
-                info!("unhandled event: {e:?}");
+                let slot = e.slot_id();
+                info!(
+                    "unhandled event: ttype={} {}, cc={} ({}), slot={slot}",
+                    e.trb_type(),
+                    e.trb_type_description(),
+                    e.completion_code(),
+                    e.completion_code_description(),
+                );
+                if e.completion_code()
+                    == GenericTrbEntry::TRB_CC_ENDPOINT_NOT_ENABLED_ERROR
+                {
+                    if e.event_data() {
+                        info!("  event data: {:#018X}", e.data());
+                    } else {
+                        info!("  for TRB at: {:#018X}", e.data());
+                    }
+                    info!("  at endpoint {}", e.endpoint_id());
+                }
+                if e.trb_type() == TrbType::TransferEvent as u32 {
+                    info!("  for TRB at: {:#018X}", e.data());
+                }
             }
             // cleanup stale waiters
             let stale_waiter_indices = self
@@ -1192,6 +1235,18 @@ impl GenericTrbEntry {
     const CTRL_BIT_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
     const CTRL_BIT_IMMEDIATE_DATA: u32 = 1 << 6;
     const CTRL_BIT_DATA_DIR_IN: u32 = 1 << 16;
+    pub const TRB_CC_SUCCESS: u32 = 1;
+    // "Babble" means the controller received more data from the device than
+    // expected.
+    pub const TRB_CC_BABBLE_DETECTED: u32 = 3;
+    pub const TRB_CC_USB_TRANSACTION_ERROR: u32 = 4;
+    pub const TRB_CC_TRB_ERROR: u32 = 5;
+    pub const TRB_CC_STALL_ERROR: u32 = 6;
+    pub const TRB_CC_BANDWIDTH_ERROR: u32 = 8;
+    pub const TRB_CC_ENDPOINT_NOT_ENABLED_ERROR: u32 = 12;
+    pub const TRB_CC_PARAM_ERROR: u32 = 17;
+    pub const TRB_CC_CONTEXT_STATE_ERROR: u32 = 19;
+    pub const TRB_CC_STOPPED: u32 = 26;
     fn trb_link(ring: &TrbRing) -> Self {
         let mut trb = GenericTrbEntry::default();
         trb.set_trb_type(TrbType::Link);
@@ -1225,8 +1280,39 @@ impl GenericTrbEntry {
         trb.set_trb_type(TrbType::EnableSlotCommand);
         trb
     }
+    pub fn trb_type_description(&self) -> &str {
+        match self.trb_type() {
+            32 => "TransferEvent",
+            33 => "CommandCompletionEvent",
+            34 => "PortStatusChangeEvent",
+            _ => "?",
+        }
+    }
     pub fn completion_code(&self) -> u32 {
         self.option.read_bits(24, 8)
+    }
+    /// true if the `data` field contains a data from Event Data TRB.
+    /// false if the `data` points to the TRB generated this event.
+    pub fn event_data(&self) -> bool {
+        self.control.read_bits(2, 1) != 0
+    }
+    pub fn completion_code_description(&self) -> &str {
+        match self.completion_code() {
+            Self::TRB_CC_SUCCESS => "Success",
+            Self::TRB_CC_BABBLE_DETECTED => "Babble Detected Error",
+            Self::TRB_CC_USB_TRANSACTION_ERROR => "USB Transaction Error",
+            Self::TRB_CC_TRB_ERROR => "TRB Error",
+            Self::TRB_CC_ENDPOINT_NOT_ENABLED_ERROR => "Endpoint Not Enabled",
+            Self::TRB_CC_STALL_ERROR => "Stall Error",
+            Self::TRB_CC_BANDWIDTH_ERROR => "Bandwidth Error",
+            Self::TRB_CC_PARAM_ERROR => "Parameter Error",
+            Self::TRB_CC_CONTEXT_STATE_ERROR => "Context State Error",
+            Self::TRB_CC_STOPPED => "Stopped",
+            _ => "?",
+        }
+    }
+    pub fn endpoint_id(&self) -> u32 {
+        self.control.read_bits(16, 5)
     }
     fn cmd_result_ok(&self) -> Result<()> {
         if self.trb_type() != TrbType::CommandCompletionEvent as u32 {
@@ -1289,7 +1375,7 @@ pub struct TransferRing {
     cycle_state_ours: bool,
 }
 impl TransferRing {
-    fn ring_phys_addr(&self) -> u64 {
+    pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }
     fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
@@ -1396,8 +1482,45 @@ impl PortSc {
         self.entries.get(port.wrapping_sub(1)).cloned()
     }
 }
+// Disabled -- Wr(PR=1) -> Reset
+// Reset -- PR=0 -> Enabled
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum PortState {
+    // Values: (PP, CCS, PED, PR)
+    PoweredOff,   // (0, 0, 0, 0)
+    Disconnected, // (1, 0, 0, 0)
+    Disabled,     // (1, 1, 0, 0)
+    Enabled,      // (1, 1, 1, 0)
+    Reset,        // (1, 1, 0, 1)
+    TestMode,     // (1, _, _, 1)
+    Unknown {
+        pp: bool,
+        ccs: bool,
+        ped: bool,
+        pr: bool,
+    },
+}
+impl From<&PortScEntry> for PortState {
+    fn from(portsc: &PortScEntry) -> Self {
+        let pp = portsc.pp();
+        let ccs = portsc.ccs();
+        let ped = portsc.ped();
+        let pr = portsc.pr();
+        match (pp as u8, ccs as u8, ped as u8, pr as u8) {
+            (0, 0, 0, 0) => Self::PoweredOff,
+            (1, 0, 0, 0) => Self::Disconnected,
+            (1, 1, 0, 0) => Self::Disabled,
+            (1, 1, 1, 0) => Self::Enabled,
+            (1, 1, 0, 1) => Self::Reset,
+            (1, _, _, 1) => Self::TestMode,
+            (_, _, _, _) => Self::Unknown { pp, ccs, ped, pr },
+        }
+    }
+}
+
 #[repr(C)]
-struct PortScEntry {
+pub struct PortScEntry {
     ptr: Mutex<*mut u32>,
 }
 impl PortScEntry {
@@ -1406,7 +1529,7 @@ impl PortScEntry {
             ptr: Mutex::new(ptr),
         }
     }
-    fn value(&self) -> u32 {
+    pub fn value(&self) -> u32 {
         let portsc = self.ptr.lock();
         unsafe { read_volatile(*portsc) }
     }
@@ -1471,6 +1594,13 @@ impl PortScEntry {
             _ => Err("Unknown Protocol Speeed ID"),
         }
     }
+    pub fn pls(&self) -> u32 {
+        // PLS - Port Link State - RWS
+        extract_bits(self.value(), 5, 4)
+    }
+    pub fn port_state(&self) -> PortState {
+        PortState::from(self)
+    }
     pub fn port_speed(&self) -> UsbMode {
         // Port Speed - ROS
         // Returns Protocol Speed ID (PSI). See 7.2.1 of xhci spec.
@@ -1482,6 +1612,18 @@ impl PortScEntry {
             4 => UsbMode::SuperSpeed,
             v => UsbMode::Unknown(v),
         }
+    }
+}
+impl Debug for PortScEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "PortSc {{ value:{:#010X}, speed:{:?}, state:{:?}, PLS: {:?} }}",
+            self.value(),
+            self.port_speed(),
+            self.port_state(),
+            self.pls(),
+        )
     }
 }
 
