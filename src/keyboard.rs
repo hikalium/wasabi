@@ -63,6 +63,7 @@ impl UsbDeviceDriver for UsbKeyboardDriver {
     fn start(
         &self,
         xhc: Rc<Controller>,
+        _port: usize,
         slot: u8,
         mut ctrl_ep_ring: TransferRing,
         descriptors: Vec<UsbDescriptor>,
@@ -104,7 +105,14 @@ pub async fn start_usb_keyboard(
     let mut console = Console::default();
     loop {
         let pressed = {
-            let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
+            let report = request_hid_input_report(
+                xhc,
+                slot,
+                ctrl_ep_ring,
+                1,
+                interface_desc.interface_number,
+            )
+            .await?;
             BTreeSet::from_iter(
                 report.into_iter().skip(2).filter(|id| *id != 0),
             )
