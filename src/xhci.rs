@@ -44,6 +44,7 @@ use core::pin::Pin;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::slice;
+use core::sync::atomic::Ordering;
 use core::task::Context;
 use core::task::Poll;
 use core::time::Duration;
@@ -91,14 +92,15 @@ impl PciXhciDriver {
                 as *mut RuntimeRegisters)
         };
         let portsc = PortSc::new(bar0, cap_regs.as_ref());
-        let num_slots = cap_regs.as_ref().num_of_ports();
+        let num_slots = cap_regs.as_ref().num_of_device_slots();
         let mut doorbell_regs = Vec::new();
-        for i in 0..=num_slots {
-            let ptr = unsafe {
-                bar0.addr().add(cap_regs.as_ref().dboff()).add(4 * i)
-                    as *mut u32
-            };
-            doorbell_regs.push(Rc::new(Doorbell::new(ptr)))
+        let db_base = unsafe { bar0.addr().add(cap_regs.as_ref().dboff()) };
+        for slot in 0..=num_slots {
+            // SAFETY: db_base is pointing a non-null memory address for the
+            // doorbells as given by the xHCI's capability register and slot
+            // number is also valid (0 for xHC's command ring and 1..=num_slots
+            // for each slots)
+            unsafe { doorbell_regs.push(Rc::new(Doorbell::new(db_base, slot))) }
         }
         // number of doorbells will be 1 + num_slots since doorbell[] is for the
         // host controller.
@@ -914,7 +916,7 @@ impl Controller {
         unsafe { self.regs.op_regs.get_unchecked_mut() }
             .set_dcbaa_ptr(&mut self.device_context_base_array.lock())
     }
-    async fn send_command(
+    pub async fn send_command(
         &self,
         cmd: GenericTrbEntry,
     ) -> Result<GenericTrbEntry> {
@@ -923,6 +925,7 @@ impl Controller {
         EventFuture::new_for_trb(&self.primary_event_ring, cmd_ptr).await
     }
     fn notify_xhc(&self) {
+        core::sync::atomic::fence(Ordering::SeqCst);
         self.regs.doorbell_regs[0].notify(0, 0);
     }
     pub fn notify_ep(&self, slot: u8, dci: usize) -> Result<()> {
@@ -932,6 +935,7 @@ impl Controller {
             .get(slot as usize)
             .ok_or("invalid slot")?;
         let dci = u8::try_from(dci).or(Err("invalid dci"))?;
+        core::sync::atomic::fence(Ordering::SeqCst);
         db.notify(dci, 0);
         Ok(())
     }
@@ -947,6 +951,36 @@ impl Controller {
     pub fn output_context_for_slot(&self, slot: u8) -> Result<OutputContext> {
         self.device_context_base_array.lock().output_context(slot)
     }
+    /// returns actually transferred size
+    async fn request_control_in_transfer(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        setup_trb: SetupStageTrb,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        let data_trb = DataStageTrb::new_in(buf);
+        let status_trb = StatusStageTrb::new_out();
+        ep_ring.push(setup_trb.into())?;
+        let data_trb_addr = ep_ring.push(data_trb.into())?;
+        let status_trb_addr = ep_ring.push(status_trb.into())?;
+        let data_future =
+            EventFuture::new_for_trb(&self.primary_event_ring, data_trb_addr);
+        let status_future =
+            EventFuture::new_for_trb(&self.primary_event_ring, status_trb_addr);
+        let waiter = async {
+            let rem = data_future.await?.transfer_result_ok()?;
+            status_future.await?.transfer_result_ok()?;
+            if buf.len() < rem {
+                Err("rem transfer size is larger than buf len")
+            } else {
+                Ok(buf.len() - rem)
+            }
+        };
+        self.notify_ep(slot, dci)?;
+        waiter.await
+    }
     pub async fn request_descriptor(
         &self,
         slot: u8,
@@ -955,24 +989,16 @@ impl Controller {
         desc_index: u8,
         lang_id: u16,
         buf: &mut Pin<Box<[u8]>>,
-    ) -> Result<()> {
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
-                SetupStageTrb::REQ_GET_DESCRIPTOR,
-                (desc_type as u16) << 8 | (desc_index as u16),
-                lang_id,
-                buf.len() as u16,
-            )
-            .into(),
-        )?;
-        let trb_ptr_waiting =
-            ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1)?;
-        EventFuture::new_for_trb(&self.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .transfer_result_ok()
+    ) -> Result<usize> {
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
+            SetupStageTrb::REQ_GET_DESCRIPTOR,
+            (desc_type as u16) << 8 | (desc_index as u16),
+            lang_id,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
+            .await
     }
     pub async fn request_descriptor_for_interface(
         &self,
@@ -982,59 +1008,44 @@ impl Controller {
         desc_index: u8,
         w_index: u16,
         buf: &mut Pin<Box<[u8]>>,
-    ) -> Result<()> {
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
-                    | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
-                SetupStageTrb::REQ_GET_DESCRIPTOR,
-                (desc_type as u16) << 8 | (desc_index as u16),
-                w_index,
-                buf.len() as u16,
-            )
-            .into(),
-        )?;
-        let trb_ptr_waiting =
-            ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1)?;
-        EventFuture::new_for_trb(&self.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .transfer_result_ok()
+    ) -> Result<usize> {
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+            SetupStageTrb::REQ_GET_DESCRIPTOR,
+            (desc_type as u16) << 8 | (desc_index as u16),
+            w_index,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
+            .await
     }
     pub async fn request_report_bytes(
         &self,
         slot: u8,
         ctrl_ep_ring: &mut TransferRing,
         buf: &mut Pin<Box<[u8]>>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         // [HID] 7.2.1 Get_Report Request
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
-                    | SetupStageTrb::REQ_TYPE_TYPE_CLASS
-                    | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
-                SetupStageTrb::REQ_GET_REPORT,
-                0x0200, /* Report Type | Report ID */
-                0,
-                buf.len() as u16,
-            )
-            .into(),
-        )?;
-        let trb_ptr_waiting =
-            ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1)?;
-        EventFuture::new_for_trb(&self.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .transfer_result_ok()
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | SetupStageTrb::REQ_TYPE_TYPE_CLASS
+                | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+            SetupStageTrb::REQ_GET_REPORT,
+            0x0200, /* Report Type | Report ID */
+            0,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
+            .await
     }
     pub async fn request_set_config(
         &self,
         slot: u8,
         ctrl_ep_ring: &mut TransferRing,
         config_value: u8,
-    ) -> Result<()> {
+    ) -> Result<usize> {
+        info!("SET_CONFIGURATION: slot={slot}, config_value={config_value}");
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 0,
@@ -1058,7 +1069,11 @@ impl Controller {
         ctrl_ep_ring: &mut TransferRing,
         interface_number: u8,
         alt_setting: u8,
-    ) -> Result<()> {
+    ) -> Result<usize> {
+        info!(
+            "SET_INTERFACE: slot={slot}, int,alt={},{}",
+            interface_number, alt_setting
+        );
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 SetupStageTrb::REQ_TYPE_TO_INTERFACE,
@@ -1082,7 +1097,7 @@ impl Controller {
         ctrl_ep_ring: &mut TransferRing,
         interface_number: u8,
         protocol: u8,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         // protocol:
         // 0: Boot Protocol
         // 1: Report Protocol
@@ -1310,6 +1325,9 @@ enum TrbType {
     AddressDeviceCommand = 11,
     ConfigureEndpointCommand = 12,
     EvaluateContextCommand = 13,
+    ResetEndpointCommand = 14,
+    StopEndpointCommand = 15,
+    ResetDeviceCommand = 17,
     NoOpCommand = 23,
     TransferEvent = 32,
     CommandCompletionEvent = 33,
@@ -1319,7 +1337,7 @@ enum TrbType {
 
 #[derive(Default, Clone, Debug)]
 #[repr(C, align(16))]
-struct GenericTrbEntry {
+pub struct GenericTrbEntry {
     data: Volatile<u64>,
     option: Volatile<u32>,
     control: Volatile<u32>,
@@ -1339,6 +1357,7 @@ impl GenericTrbEntry {
     pub const TRB_CC_STALL_ERROR: u32 = 6;
     pub const TRB_CC_BANDWIDTH_ERROR: u32 = 8;
     pub const TRB_CC_ENDPOINT_NOT_ENABLED_ERROR: u32 = 12;
+    pub const TRB_CC_SHORT_PACKET: u32 = 13;
     pub const TRB_CC_PARAM_ERROR: u32 = 17;
     pub const TRB_CC_CONTEXT_STATE_ERROR: u32 = 19;
     pub const TRB_CC_STOPPED: u32 = 26;
@@ -1386,6 +1405,10 @@ impl GenericTrbEntry {
     pub fn completion_code(&self) -> u32 {
         self.option.read_bits(24, 8)
     }
+    pub fn transfer_length(&self) -> u32 {
+        // For TransferEvent TRB
+        self.option.read_bits(0, 24)
+    }
     /// true if the `data` field contains a data from Event Data TRB.
     /// false if the `data` points to the TRB generated this event.
     pub fn event_data(&self) -> bool {
@@ -1406,33 +1429,49 @@ impl GenericTrbEntry {
             _ => "?",
         }
     }
+    /// Returns if the transfer itself succeeded regardless the actual bytes
+    /// transferred. ( = allowing TRB_CC_SHORT_PACKET and
+    /// TRB_CC_BABBLE_DETECTED)
+    fn is_completion_code_transfer_ok(&self) -> bool {
+        matches!(
+            self.completion_code(),
+            Self::TRB_CC_SUCCESS
+                | Self::TRB_CC_SHORT_PACKET
+                | Self::TRB_CC_BABBLE_DETECTED
+        )
+    }
     pub fn endpoint_id(&self) -> u32 {
         self.control.read_bits(16, 5)
     }
-    fn cmd_result_ok(&self) -> Result<()> {
+    pub fn cmd_result_ok(&self) -> Result<()> {
         if self.trb_type() != TrbType::CommandCompletionEvent as u32 {
             Err("Not a CommandCompletionEvent")
-        } else if self.completion_code() != 1 {
+        } else if self.is_completion_code_transfer_ok() {
+            Ok(())
+        } else {
             info!(
-                "Completion code was not Success. actual = {}",
-                self.completion_code()
+                "Completion code was not Success. actual = {} ({})",
+                self.completion_code(),
+                self.completion_code_description()
             );
             Err("CompletionCode was not Success")
-        } else {
-            Ok(())
         }
     }
-    fn transfer_result_ok(&self) -> Result<()> {
+    /// returns remaining transfer length (diff against requested transfer
+    /// length)
+    pub fn transfer_result_ok(&self) -> Result<usize> {
         if self.trb_type() != TrbType::TransferEvent as u32 {
             Err("Not a TransferEvent")
-        } else if self.completion_code() != 1 && self.completion_code() != 13 {
+        } else if self.is_completion_code_transfer_ok() {
+            Ok(self.transfer_length() as usize)
+        } else {
             info!(
-                "Transfer failed. Actual CompletionCode = {}",
-                self.completion_code()
+                "Failed TRB @ {:#018X}. CompletionCode = {} ({})",
+                self.data(),
+                self.completion_code(),
+                self.completion_code_description()
             );
             Err("CompletionCode was not Success")
-        } else {
-            Ok(())
         }
     }
     fn set_slot_id(&mut self, slot: u8) {
@@ -1734,7 +1773,11 @@ pub struct Doorbell {
     ptr: Mutex<*mut u32>,
 }
 impl Doorbell {
-    pub fn new(ptr: *mut u32) -> Self {
+    /// # Safety
+    /// `db_base` should be a valid doorbell base address and `for_slot` should
+    /// be less than or equal num_slots
+    pub unsafe fn new(db_base: *mut u8, for_slot: usize) -> Self {
+        let ptr = db_base.add(4 * for_slot) as *mut u32;
         Self {
             ptr: Mutex::new(ptr),
         }
@@ -1754,7 +1797,7 @@ impl Doorbell {
     }
 }
 #[derive(Clone)]
-struct EventFuture {
+pub struct EventFuture {
     wait_on: Rc<EventWaitInfo>,
     _pinned: PhantomPinned,
 }
@@ -1771,7 +1814,7 @@ impl EventFuture {
             _pinned: PhantomPinned,
         }
     }
-    fn new_for_trb(event_ring: &Mutex<EventRing>, trb_addr: u64) -> Self {
+    pub fn new_for_trb(event_ring: &Mutex<EventRing>, trb_addr: u64) -> Self {
         let trb_addr = Some(trb_addr);
         Self::new(
             event_ring,
