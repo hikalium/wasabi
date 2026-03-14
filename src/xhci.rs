@@ -61,13 +61,14 @@ pub struct XhcRegisters {
     pub portsc: PortSc,
 }
 
-pub struct PciXhciDriver {}
 #[derive(PartialEq, Eq, Clone)]
 enum HostPortDriverState {
     NotConnected,
     ConnectedAndRunning,
     ConnectedButFailed,
 }
+
+pub struct PciXhciDriver {}
 impl PciXhciDriver {
     pub fn supports(pcicc: ClassCode, vdi: VendorDeviceId) -> bool {
         const VDI_LIST: [VendorDeviceId; 4] = [
@@ -1234,7 +1235,8 @@ impl Controller {
         // 1: Report Protocol
         ctrl_ep_ring.push(
             SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+                SetupStageTrb::REQ_TYPE_TO_INTERFACE
+                    | SetupStageTrb::REQ_TYPE_TYPE_CLASS,
                 SetupStageTrb::REQ_SET_PROTOCOL,
                 protocol as u16,
                 interface_number as u16,
@@ -1609,7 +1611,9 @@ impl TrbRing {
         if self.current().cycle_state() == new_cycle {
             return Err("cycle state does not change");
         }
-        self.trb[self.current_index].set_cycle_state(new_cycle);
+        let mut current = self.current();
+        current.set_cycle_state(new_cycle);
+        self.write_current(current);
         self.current_index = (self.current_index + 1) % self.trb.len();
         Ok(())
     }
@@ -2501,7 +2505,8 @@ impl StatusStageTrb {
         Self {
             reserved: 0,
             option: 0,
-            control: (TrbType::StatusStage as u32) << 10,
+            control: (TrbType::StatusStage as u32) << 10
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION,
         }
     }
     pub fn new_in() -> Self {
