@@ -598,7 +598,6 @@ pub fn read_cr2() -> u64 {
 #[no_mangle]
 extern "sysv64" fn inthandler(info: &InterruptInfo, index: usize) {
     if index == 32 {
-        info!("Timer!");
         LocalApic::set_bsp_timer_count(10000);
         LocalApic::bsp_notify_end_of_interrupt();
         return;
