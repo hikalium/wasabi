@@ -18,6 +18,7 @@ pub mod executor;
 pub mod font;
 pub mod graphics;
 pub mod hpet;
+pub mod ime;
 pub mod init;
 pub mod keyboard;
 pub mod mmio;
