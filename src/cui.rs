@@ -113,6 +113,39 @@ pub fn run_cmd_show(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+// Cfg-selected at the consumer's compile time — proc-macros don't
+// see the consumer's target_arch in their environment, but `cfg`
+// attributes do.
+#[cfg(target_arch = "x86_64")]
+const TARGET_ARCH: &str = "x86_64";
+#[cfg(not(target_arch = "x86_64"))]
+const TARGET_ARCH: &str = "unknown";
+
+pub fn run_cmd_uname(_args: &[&str]) -> Result<()> {
+    println!(
+        "WasabiOS {} ({}) {}",
+        env!("CARGO_PKG_VERSION"),
+        version_macro::git_hash!(),
+        TARGET_ARCH,
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod uname_tests {
+    use super::TARGET_ARCH;
+
+    #[test_case]
+    fn target_arch_is_known() {
+        assert_ne!(TARGET_ARCH, "unknown");
+    }
+
+    #[test_case]
+    fn git_hash_is_known() {
+        assert_ne!(version_macro::git_hash!(), "unknown");
+    }
+}
+
 pub fn run_cmd_reboot(_args: &[&str]) -> Result<()> {
     let params = (*REBOOT_PARAMS.lock())
         .as_ref()
@@ -143,6 +176,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             "debug" => run_cmd_debug(&args),
             "show" => run_cmd_show(&args),
             "reboot" | "r" => run_cmd_reboot(&args),
+            "uname" => run_cmd_uname(&args),
             "" => Ok(()),
             _ => Err("Unknown command"),
         }
