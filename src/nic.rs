@@ -31,6 +31,7 @@ use crate::usb::UsbDeviceDriver;
 use crate::warn;
 use crate::xhci::Controller;
 use crate::xhci::EventFuture;
+use crate::xhci::GenericTrbEntry;
 use crate::xhci::NormalTrb;
 use crate::xhci::TransferRing;
 use alloc::boxed::Box;
@@ -426,6 +427,38 @@ impl UsbNcmDriver {
             }
         }
     }
+    /// Recover a stuck bulk endpoint by issuing the xHCI
+    /// Stop Endpoint + Set TR Dequeue Pointer dance per spec
+    /// §4.6.9 / §4.6.10. After this returns successfully the ring
+    /// has been wiped back to its initial state and `push()` works
+    /// from the start of the ring again. Any orphan TRBs the
+    /// controller hadn't gotten around to are discarded; their
+    /// `mem::forget`-ed buffers remain leaked but stop being
+    /// dangling references.
+    async fn recover_endpoint(
+        xhc: &Rc<Controller>,
+        slot: u8,
+        ring: &mut TransferRing,
+        desc: &EndpointDescriptor,
+    ) -> Result<()> {
+        let dci = desc.dci();
+        warn!("NCM: recovering endpoint dci={dci} (Stop + Set TR Deq)");
+        xhc.send_command(GenericTrbEntry::cmd_stop_endpoint(slot, dci))
+            .await?
+            .cmd_result_ok()?;
+        ring.reset();
+        xhc.send_command(GenericTrbEntry::cmd_set_tr_dequeue_pointer(
+            slot,
+            dci,
+            ring.ring_phys_addr(),
+            ring.cycle_state(),
+        ))
+        .await?
+        .cmd_result_ok()?;
+        warn!("NCM: endpoint dci={dci} recovered");
+        Ok(())
+    }
+
     /// Bulk-OUT side. Owns the bulk-OUT transfer ring; sends the
     /// initial gratuitous ARP, then drains NET_TX_QUEUE one frame at
     /// a time.
@@ -471,6 +504,22 @@ impl UsbNcmDriver {
                             "NCM send_datagram: {e:?}; reply dropped \
                              (bytes_tx so far = {bytes_tx})"
                         );
+                        // send_datagram gave up after waiting on a
+                        // wedged TRB. Run the spec-correct recovery
+                        // dance so subsequent pushes work again. If
+                        // even recovery fails, log and keep trying —
+                        // the alternative is a permanently silent
+                        // tx pipeline.
+                        if let Err(rec) = Self::recover_endpoint(
+                            &xhc,
+                            slot,
+                            &mut bulk_out_ring,
+                            &bulk_out_desc,
+                        )
+                        .await
+                        {
+                            warn!("NCM bulk-OUT recovery failed: {rec:?}");
+                        }
                     } else {
                         bytes_tx = bytes_tx.saturating_add(frame_len);
                     }
@@ -579,12 +628,12 @@ impl UsbNcmDriver {
         let buf = Box::into_pin(ntb.into_boxed_slice());
         let trb_ptr_waiting = ring.push(NormalTrb::new_out(&buf).into())?;
         xhc.notify_ep(slot, desc.dci())?;
-        // Same orphan-avoidance dance as the bulk-in path: keep
-        // waiting on the original TRB instead of pushing a duplicate.
-        // See the comment in `poll_bulk_in` for the full reasoning.
-        // On each timeout we also re-ring the doorbell — cheap, and
-        // sometimes nudges the controller into noticing a TRB it
-        // missed during a burst.
+        // Don't push duplicate TRBs on timeout (orphans corrupt the
+        // ring — see `poll_bulk_in`'s comment). Wait on the original
+        // TRB, re-ring the doorbell each tick, and after a bounded
+        // patience give up so the caller can run the proper xHCI
+        // recovery (Stop Endpoint + Set TR Dequeue Pointer).
+        const SEND_GIVE_UP_AFTER: u32 = 10; // 10 * 2s = 20s
         let mut waited: u32 = 0;
         let event = loop {
             let fut = EventFuture::new_for_trb(
@@ -595,6 +644,22 @@ impl UsbNcmDriver {
                 Ok(ev) => break ev,
                 Err(_) => {
                     waited = waited.wrapping_add(1);
+                    if waited >= SEND_GIVE_UP_AFTER {
+                        warn!(
+                            "send_datagram: TRB {trb_ptr_waiting:#x} \
+                             gave up after {}s; controller appears \
+                             stuck — caller should recover the \
+                             endpoint",
+                            waited * 2
+                        );
+                        // The TRB is still in the ring referring to
+                        // this buf. We can't free it until the
+                        // caller does Stop Endpoint + Set TR
+                        // Dequeue Pointer, which retires the orphan.
+                        // Leak now; the caller will clear the ring.
+                        core::mem::forget(buf);
+                        return Err("send_datagram: gave up");
+                    }
                     warn!(
                         "send_datagram: TRB {trb_ptr_waiting:#x} \
                          still waiting (#{waited}, len={}); \
