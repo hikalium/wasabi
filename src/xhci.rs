@@ -202,37 +202,40 @@ impl PciXhciDriver {
         }
         for port in port_range {
             if let Some(e) = xhc.regs.portsc.get(port) {
+                // Acknowledge any pending change bit, but drive detection
+                // from the cached state vs. observed CCS so devices already
+                // connected at boot (CCS=1, CSC=0 after BIOS hand-off) are
+                // still picked up. [xHCI] 4.3 step 4.
                 if e.csc() {
-                    // Connection status has changed
                     e.clear_csc();
-                    if host_port_driver_state[port]
-                        == HostPortDriverState::NotConnected
-                        && e.ccs()
+                }
+                let was_connected = !matches!(
+                    host_port_driver_state[port],
+                    HostPortDriverState::NotConnected
+                );
+                if e.ccs() && !was_connected {
+                    info!("  {port:3}: Connected: {:#010X}", e.value());
+                    new_port_connected = Some(port);
+                    break;
+                }
+                if !e.ccs() && was_connected {
+                    // Disconnect: reset the per-port state so a future
+                    // re-plug is detected, and free any allocated slot.
+                    // TODO: tear down running drivers properly.
+                    let prev = core::mem::replace(
+                        &mut host_port_driver_state[port],
+                        HostPortDriverState::NotConnected,
+                    );
+                    if let HostPortDriverState::ConnectedAndRunning(slot) = prev
                     {
-                        info!("  {port:3}: Connected: {:#010X}", e.value());
-                        new_port_connected = Some(port);
-                        break;
-                    }
-                    if !e.ccs() {
-                        // Disconnect: reset the per-port state so a future
-                        // re-plug is detected, and free any allocated slot.
-                        // TODO: tear down running drivers properly.
-                        let prev = core::mem::replace(
-                            &mut host_port_driver_state[port],
-                            HostPortDriverState::NotConnected,
-                        );
-                        if let HostPortDriverState::ConnectedAndRunning(slot) =
-                            prev
-                        {
-                            info!("  {port:3}: Disconnected (slot {slot})");
-                            let _ = xhc
-                                .send_command(
-                                    GenericTrbEntry::cmd_disable_slot(slot),
-                                )
-                                .await;
-                        } else {
-                            info!("  {port:3}: Disconnected");
-                        }
+                        info!("  {port:3}: Disconnected (slot {slot})");
+                        let _ = xhc
+                            .send_command(GenericTrbEntry::cmd_disable_slot(
+                                slot,
+                            ))
+                            .await;
+                    } else {
+                        info!("  {port:3}: Disconnected");
                     }
                 }
             }
