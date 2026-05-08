@@ -1,11 +1,15 @@
 extern crate alloc;
 
+use crate::arp::ArpPacket;
+use crate::eth::EthernetAddr;
 use crate::executor::spawn_global;
 use crate::executor::with_timeout;
 use crate::info;
+use crate::ip::IpV4Addr;
 use crate::ncm;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
+use crate::slice::Sliceable;
 use crate::usb;
 use crate::usb::descriptors_under_config;
 use crate::usb::descriptors_under_interface;
@@ -24,6 +28,23 @@ use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
+
+const OUR_IP: IpV4Addr = IpV4Addr::new([10, 10, 10, 83]);
+
+// Parse a 12-character upper-case hex MAC string from the device's
+// iMacAddress descriptor (CDC ECM 1.2 §5.4) into the 6 raw bytes.
+fn parse_mac_hex_str(s: &str) -> Result<EthernetAddr> {
+    if s.len() != 12 {
+        return Err("MAC: expected 12-char hex string");
+    }
+    let mut mac = [0u8; 6];
+    for (i, byte) in mac.iter_mut().enumerate() {
+        let chunk = s.get(i * 2..i * 2 + 2).ok_or("MAC: short")?;
+        *byte =
+            u8::from_str_radix(chunk, 16).map_err(|_| "MAC: bad hex digit")?;
+    }
+    Ok(EthernetAddr::new(mac))
+}
 
 pub struct UsbNcmDriver;
 impl UsbNcmDriver {
@@ -169,6 +190,40 @@ impl UsbNcmDriver {
             info!("NTB(seq={}): recv", nth.sequence);
             hexdump_bytes(&buf[0..ntb_len]);
         }
+    }
+    async fn send_datagram(
+        xhc: &Rc<Controller>,
+        slot: u8,
+        ring: &mut TransferRing,
+        desc: &EndpointDescriptor,
+        datagram: &[u8],
+        seq: u16,
+    ) -> Result<()> {
+        let ntb = ncm::build_ntb16(datagram, seq);
+        let buf = Box::into_pin(ntb.into_boxed_slice());
+        let trb_ptr_waiting = ring.push(NormalTrb::new_out(&buf).into())?;
+        xhc.notify_ep(slot, desc.dci())?;
+        EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting)
+            .await?
+            .transfer_result_ok()?;
+        Ok(())
+    }
+    async fn run_tx(
+        xhc: Rc<Controller>,
+        slot: u8,
+        mut ring: TransferRing,
+        desc: EndpointDescriptor,
+        our_mac: EthernetAddr,
+    ) -> Result<()> {
+        // Announce ourselves so the host learns our MAC <-> IP binding.
+        let arp = ArpPacket::gratuitous(our_mac, OUR_IP);
+        Self::send_datagram(&xhc, slot, &mut ring, &desc, arp.as_slice(), 0)
+            .await?;
+        info!("NCM: sent gratuitous ARP for {OUR_IP}");
+        // Keep this task alive forever so `ring`'s memory stays valid; later
+        // milestones will replace this with a real transmit loop.
+        core::future::pending::<()>().await;
+        Ok(())
     }
     async fn run(
         xhc: &Rc<Controller>,
@@ -329,7 +384,7 @@ impl UsbNcmDriver {
         let bulk_in_ep_ring = ring_list
             .remove(&bulk_in_ep_desc.dci())
             .ok_or("ep_ring for bulk in was not populated")?;
-        let _bulk_out_ep_ring = ring_list
+        let bulk_out_ep_ring = ring_list
             .remove(&bulk_out_ep_desc.dci())
             .ok_or("ep_ring for bulk out was not populated")?;
 
@@ -342,6 +397,9 @@ impl UsbNcmDriver {
             Self::request_get_ntb_parameters(xhc, slot, ctrl_ep_ring).await?;
         info!("ntbparams: {ntbparams:?}");
 
+        let our_mac = parse_mac_hex_str(&mac_addr)?;
+        info!("NCM: our MAC = {our_mac:?}, IP = {OUR_IP}");
+
         spawn_global(Self::poll_int_in(
             xhc.clone(),
             slot,
@@ -353,6 +411,13 @@ impl UsbNcmDriver {
             slot,
             bulk_in_ep_ring,
             bulk_in_ep_desc,
+        ));
+        spawn_global(Self::run_tx(
+            xhc.clone(),
+            slot,
+            bulk_out_ep_ring,
+            bulk_out_ep_desc,
+            our_mac,
         ));
         Ok(())
     }
