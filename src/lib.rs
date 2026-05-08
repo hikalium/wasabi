@@ -22,6 +22,7 @@ pub mod hpet;
 pub mod ime;
 pub mod ime_dict;
 pub mod init;
+pub mod ip;
 pub mod keyboard;
 pub mod mmio;
 pub mod mutex;
