@@ -762,6 +762,11 @@ pub async fn configure_endpoint(
                 ep_desc.max_packet_size,
                 ep_ring.ring_phys_addr(),
             )?
+        } else if ep_desc.is_bulk_endpoint() && !ep_desc.is_dir_in() {
+            EndpointContext::new_bulk_out_endpoint(
+                ep_desc.max_packet_size,
+                ep_ring.ring_phys_addr(),
+            )?
         } else {
             return Err("Unsupported ep type / dir");
         };
