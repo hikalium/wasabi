@@ -1,13 +1,16 @@
 extern crate alloc;
 
 use crate::arp::ArpPacket;
+use crate::cui::Console;
 use crate::eth::EthernetAddr;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
 use crate::executor::with_timeout;
+use crate::executor::yield_execution;
 use crate::icmp;
 use crate::icmp::IcmpPacket;
 use crate::info;
+use crate::keyboard::KeyEvent;
 use crate::ip::IpV4Addr;
 use crate::ip::IpV4Packet;
 use crate::ip::IpV4Protocol;
@@ -16,7 +19,7 @@ use crate::ncm;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
 use crate::slice::Sliceable;
-use crate::tcp::TcpSocket;
+use crate::tcp::TCP_SOCKET;
 use alloc::collections::VecDeque;
 use crate::usb;
 use crate::usb::descriptors_under_config;
@@ -38,12 +41,6 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 const OUR_IP: IpV4Addr = IpV4Addr::new([10, 10, 10, 83]);
-const TCP_LISTEN_PORT: u16 = 23;
-
-// Listener socket used by `poll_bulk` (rx dispatch) and `poll_tcp_tx`
-// (periodic transmit). One global instance — we accept a single
-// connection at a time.
-static TCP_SOCKET: TcpSocket = TcpSocket::new_server(TCP_LISTEN_PORT);
 
 // Frames produced asynchronously (e.g. by the TCP TX poller) that
 // `poll_bulk` drains and ships out the bulk-OUT endpoint at the bottom
@@ -318,6 +315,33 @@ impl UsbNcmDriver {
             sleep(Duration::from_millis(20)).await;
         }
     }
+    /// Drive a Console from bytes the TCP peer types. The Console's
+    /// `print!` calls are picked up by the TcpMirror tee in print.rs,
+    /// so output reaches the remote without any explicit forwarding
+    /// here.
+    async fn drive_remote_console() -> Result<()> {
+        let mut console = Console::default();
+        loop {
+            match TCP_SOCKET.pop_rx_byte() {
+                Some(b) => {
+                    let event = match b {
+                        b'\r' | b'\n' => KeyEvent::Enter,
+                        // Most terminals (cooked-mode tty, telnet,
+                        // most ssh clients) send DEL=0x7F for the
+                        // Backspace key. Map both to our "erase prev
+                        // char" event.
+                        0x7F | 0x08 => KeyEvent::Char('\x08'),
+                        b if b.is_ascii_graphic() || b == b' ' => {
+                            KeyEvent::Char(b as char)
+                        }
+                        _ => continue,
+                    };
+                    console.handle_key_down(event);
+                }
+                None => yield_execution().await,
+            }
+        }
+    }
     async fn send_datagram(
         xhc: &Rc<Controller>,
         slot: u8,
@@ -526,6 +550,7 @@ impl UsbNcmDriver {
             our_mac,
         ));
         spawn_global(Self::poll_tcp_tx(our_mac));
+        spawn_global(Self::drive_remote_console());
         Ok(())
     }
 }
