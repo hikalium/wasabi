@@ -3,7 +3,11 @@ name = "wasabi"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["version_macro"]
+
 [dependencies]
+version_macro = { path = "version_macro" }
 
 [[bin]]
 name = "wasabi"
