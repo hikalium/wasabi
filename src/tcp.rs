@@ -22,6 +22,11 @@ use core::time::Duration;
 // duplicates; too high makes a lost segment feel like a hang.
 const TCP_RTO: Duration = Duration::from_millis(500);
 
+// How long the connection can sit idle (no rx and no tx) before we
+// emit a keepalive probe. Picked low enough that the USB link on the
+// host stays out of autosuspend (default ~2s on Linux).
+const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_millis(1000);
+
 // TCP header per RFC 9293 §3.1, layered over IpV4Packet (which itself
 // embeds the Ethernet header). Total prefix is 14 + 20 + 20 = 54 bytes
 // before the TCP payload.
@@ -154,6 +159,8 @@ struct TcpSocketInner {
     send_buffer: VecDeque<u8>,
     unacked_len: usize,
     last_tx_at: Option<Duration>,
+    // Updated on every rx and every tx; drives the keepalive timer.
+    last_active_at: Option<Duration>,
 }
 
 pub struct TcpSocket {
@@ -182,6 +189,7 @@ impl TcpSocket {
                 send_buffer: VecDeque::new(),
                 unacked_len: 0,
                 last_tx_at: None,
+                last_active_at: None,
             }),
         }
     }
@@ -205,11 +213,13 @@ impl TcpSocket {
     /// Drive the state machine for one received frame
     /// (Ethernet+IPv4+TCP+data). Returns the immediate reply frame, if
     /// any (SYN+ACK on SYN, ACK on data, FIN+ACK on FIN, etc.).
+    /// `now` records arrival time for the keepalive timer.
     pub fn handle_rx(
         &self,
         frame: &[u8],
         our_mac: EthernetAddr,
         our_ip: IpV4Addr,
+        now: Duration,
     ) -> Option<Vec<u8>> {
         if frame.len() < size_of::<TcpPacket>() {
             return None;
@@ -237,6 +247,25 @@ impl TcpSocket {
         };
 
         let mut inner = self.inner.lock();
+        inner.last_active_at = Some(now);
+
+        // RST teardown: if the peer reset us at any point, drop straight
+        // back to Listen so the next SYN can be accepted. Without this
+        // the socket can wedge in Established forever after a peer
+        // crash or middlebox reset.
+        if in_tcp.is_rst() {
+            inner.state = TcpSocketState::Listen;
+            inner.peer_mac = EthernetAddr::zero();
+            inner.peer_ip = IpV4Addr::new([0, 0, 0, 0]);
+            inner.peer_port = 0;
+            inner.last_seq_to_ack = 0;
+            inner.rx_data.clear();
+            inner.send_buffer.clear();
+            inner.unacked_len = 0;
+            inner.last_tx_at = None;
+            return None;
+        }
+
         let prev_state = inner.state;
         let mut seq_to_ack = in_tcp.seq_num();
         let seq = inner.my_next_seq;
@@ -357,7 +386,10 @@ impl TcpSocket {
             return None;
         }
 
-        // Decide whether this tick retransmits or sends fresh data.
+        // Three things this tick might do, in priority order:
+        //   1. retransmit unacked bytes whose RTO has elapsed
+        //   2. ship newly queued bytes
+        //   3. emit a keepalive probe if the connection has been idle
         let need_retransmit = inner.unacked_len > 0
             && inner
                 .last_tx_at
@@ -373,6 +405,7 @@ impl TcpSocket {
                 .collect();
             let first_unacked_seq =
                 inner.my_next_seq.wrapping_sub(inner.unacked_len as u32);
+            inner.last_tx_at = Some(now);
             (bytes, first_unacked_seq)
         } else if has_fresh {
             let bytes: Vec<u8> = inner
@@ -384,12 +417,22 @@ impl TcpSocket {
             let seq = inner.my_next_seq;
             inner.my_next_seq = seq.wrapping_add(bytes.len() as u32);
             inner.unacked_len += bytes.len();
+            inner.last_tx_at = Some(now);
             (bytes, seq)
         } else {
-            return None;
+            // Keepalive: nothing to send, but if the connection has
+            // been idle for KEEPALIVE_INTERVAL, send a pure ACK with
+            // seq = SND.NXT - 1. Peer treats it as a duplicate of an
+            // already-received byte and responds with a current ACK,
+            // which lands as activity and resets our timer.
+            let last = inner.last_active_at.unwrap_or(Duration::ZERO);
+            if now.saturating_sub(last) < TCP_KEEPALIVE_INTERVAL {
+                return None;
+            }
+            (Vec::new(), inner.my_next_seq.wrapping_sub(1))
         };
 
-        inner.last_tx_at = Some(now);
+        inner.last_active_at = Some(now);
         let seq_to_ack = inner.last_seq_to_ack;
         let peer_mac = inner.peer_mac;
         let peer_ip = inner.peer_ip;
@@ -563,7 +606,9 @@ mod tests {
             false,
             &[],
         );
-        let reply = sock.handle_rx(&syn, OUR_MAC, OUR_IP).unwrap();
+        let reply = sock
+            .handle_rx(&syn, OUR_MAC, OUR_IP, Duration::ZERO)
+            .unwrap();
         let r = parse_reply(&reply);
         assert!(r.is_syn() && r.is_ack());
         assert_eq!(r.ack_num(), 5001); // SYN consumed one seq
@@ -588,7 +633,9 @@ mod tests {
             false,
             &[],
         );
-        let synack = sock.handle_rx(&syn, OUR_MAC, OUR_IP).unwrap();
+        let synack = sock
+            .handle_rx(&syn, OUR_MAC, OUR_IP, Duration::ZERO)
+            .unwrap();
         let r = parse_reply(&synack);
         let our_seq_plus_1 = r.seq_num().wrapping_add(1);
 
@@ -606,7 +653,7 @@ mod tests {
             false,
             &[],
         );
-        let reply = sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        let reply = sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::ZERO);
         assert!(reply.is_none());
         assert_eq!(sock.state(), TcpSocketState::Established);
     }
@@ -626,7 +673,9 @@ mod tests {
             false,
             &[],
         );
-        let synack = sock.handle_rx(&syn, OUR_MAC, OUR_IP).unwrap();
+        let synack = sock
+            .handle_rx(&syn, OUR_MAC, OUR_IP, Duration::ZERO)
+            .unwrap();
         let our_seq_plus_1 = parse_reply(&synack).seq_num().wrapping_add(1);
         let ack = build_client_segment(
             PEER_MAC,
@@ -641,7 +690,7 @@ mod tests {
             false,
             &[],
         );
-        sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::ZERO);
         (sock, 5001)
     }
 
@@ -662,7 +711,9 @@ mod tests {
             false,
             data,
         );
-        let reply = sock.handle_rx(&seg, OUR_MAC, OUR_IP).unwrap();
+        let reply = sock
+            .handle_rx(&seg, OUR_MAC, OUR_IP, Duration::ZERO)
+            .unwrap();
         let r = parse_reply(&reply);
         assert!(r.is_ack());
         assert!(!r.is_syn() && !r.is_fin());
@@ -703,10 +754,11 @@ mod tests {
             false,
             &[],
         );
-        sock.handle_rx(&ack, OUR_MAC, OUR_IP);
-        // No retransmit even after RTO, because there's nothing unacked.
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::from_millis(700));
+        // Past RTO but still within the keepalive window, with nothing
+        // unacked: no segment to send.
         assert!(sock
-            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(2000))
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(900))
             .is_none());
     }
 
@@ -761,7 +813,7 @@ mod tests {
             false,
             &[],
         );
-        sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::ZERO);
         sock.push_tx_bytes(b"abc");
 
         // Next poll sends the fresh 3 bytes with seq right after "hello".
@@ -771,6 +823,65 @@ mod tests {
         let p2 = parse_reply(&seg2);
         assert_eq!(p2.seq_num(), first_seq.wrapping_add(5));
         assert_eq!(&seg2[size_of::<TcpPacket>()..], b"abc");
+    }
+
+    #[test_case]
+    fn poll_tx_emits_keepalive_when_idle() {
+        let (sock, _) = established_socket();
+        // Right after connect, we're not yet "idle" — last_active_at
+        // was set during the handshake (Duration::ZERO).
+        // Inside KEEPALIVE_INTERVAL: nothing to send.
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(500))
+            .is_none());
+        // Past KEEPALIVE_INTERVAL: send a keepalive.
+        let seg = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(1500))
+            .unwrap();
+        let r = parse_reply(&seg);
+        assert!(r.is_ack());
+        assert!(!r.is_syn() && !r.is_fin());
+        // No data payload — segment is just the TCP header.
+        assert_eq!(seg.len(), size_of::<TcpPacket>());
+        // seq is SND.NXT - 1 (the "old byte" probe trick).
+        // After established_socket, my_next_seq is the original ISN+1
+        // from the SYN, with no data sent yet. So keepalive seq is
+        // my_next_seq - 1 = ISN.
+        // The exact ISN is internal, so check the relationship:
+        // a fresh push then poll_tx uses my_next_seq, which == seq + 1.
+        sock.push_tx_bytes(b"x");
+        let next = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(1500))
+            .unwrap();
+        let r2 = parse_reply(&next);
+        assert_eq!(r2.seq_num(), r.seq_num().wrapping_add(1));
+    }
+
+    #[test_case]
+    fn handle_rx_rst_returns_to_listen() {
+        let (sock, client_seq) = established_socket();
+        // Build a RST segment from the peer.
+        let rst = {
+            let mut bytes = build_client_segment(
+                PEER_MAC,
+                PEER_IP,
+                12345,
+                OUR_MAC,
+                OUR_IP,
+                23,
+                client_seq,
+                Some(0),
+                false,
+                false,
+                &[],
+            );
+            // Patch flags byte to set RST and clear ACK.
+            let flags_off = size_of::<IpV4Packet>() + 13;
+            bytes[flags_off] = 1 << 2; // RST only
+            bytes
+        };
+        sock.handle_rx(&rst, OUR_MAC, OUR_IP, Duration::ZERO);
+        assert_eq!(sock.state(), TcpSocketState::Listen);
     }
 
     #[test_case]
@@ -789,7 +900,9 @@ mod tests {
             true,
             &[],
         );
-        let reply = sock.handle_rx(&fin, OUR_MAC, OUR_IP).unwrap();
+        let reply = sock
+            .handle_rx(&fin, OUR_MAC, OUR_IP, Duration::ZERO)
+            .unwrap();
         let r = parse_reply(&reply);
         assert!(r.is_fin() && r.is_ack());
         assert_eq!(r.ack_num(), client_seq.wrapping_add(1));
@@ -810,7 +923,7 @@ mod tests {
             false,
             &[],
         );
-        sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::ZERO);
         assert_eq!(sock.state(), TcpSocketState::Listen);
     }
 
