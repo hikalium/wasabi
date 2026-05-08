@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::arp::ArpPacket;
 use crate::eth::EthernetAddr;
+use crate::executor::sleep;
 use crate::executor::spawn_global;
 use crate::executor::with_timeout;
 use crate::icmp;
@@ -15,6 +16,7 @@ use crate::ncm;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
 use crate::slice::Sliceable;
+use crate::tcp::TcpSocket;
 use crate::usb;
 use crate::usb::descriptors_under_config;
 use crate::usb::descriptors_under_interface;
@@ -82,6 +84,13 @@ pub fn learn_arp(ip: IpV4Addr, mac: EthernetAddr) {
 // Frames produced asynchronously by other tasks that `poll_bulk`
 // drains and ships out the bulk-OUT endpoint at the bottom of each
 // rx iteration.
+
+const TCP_LISTEN_PORT: u16 = 23;
+
+// Listener socket used by `poll_bulk` (rx dispatch) and `poll_tcp_tx`
+// (periodic transmit). One global instance — we accept a single
+// connection at a time.
+static TCP_SOCKET: TcpSocket = TcpSocket::new_server(TCP_LISTEN_PORT);
 static NET_TX_QUEUE: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
 
 pub fn enqueue_tx_frame(frame: Vec<u8>) {
@@ -289,7 +298,7 @@ impl UsbNcmDriver {
                         }
                     }
                 } else if eth_type == [0x08, 0x00]
-                    && frame.len() >= core::mem::size_of::<IcmpPacket>()
+                    && frame.len() >= core::mem::size_of::<IpV4Packet>()
                 {
                     if let Ok(ip) = IpV4Packet::copy_from_slice(
                         &frame[..core::mem::size_of::<IpV4Packet>()],
@@ -349,12 +358,18 @@ impl UsbNcmDriver {
                                     }
                                 }
                             }
+                        } else if ip.protocol() == IpV4Protocol::tcp() {
+                            if let Some(reply) =
+                                TCP_SOCKET.handle_rx(frame, our_mac, OUR_IP)
+                            {
+                                replies.push(reply);
+                            }
                         }
                     }
                 }
             }
-            // Frames produced asynchronously by other tasks ride out
-            // on the same iteration.
+            // Frames produced asynchronously by other tasks (e.g. the
+            // periodic TCP TX poller) ride out on the same iteration.
             replies.extend(NET_TX_QUEUE.lock().drain(..));
             for reply in replies {
                 Self::send_datagram(
@@ -368,6 +383,14 @@ impl UsbNcmDriver {
                 .await?;
                 tx_seq = tx_seq.wrapping_add(1);
             }
+        }
+    }
+    async fn poll_tcp_tx(our_mac: EthernetAddr) -> Result<()> {
+        loop {
+            if let Some(frame) = TCP_SOCKET.poll_tx(our_mac, OUR_IP) {
+                enqueue_tx_frame(frame);
+            }
+            sleep(Duration::from_millis(20)).await;
         }
     }
     async fn send_datagram(
@@ -578,6 +601,7 @@ impl UsbNcmDriver {
             bulk_out_ep_desc,
             our_mac,
         ));
+        spawn_global(Self::poll_tcp_tx(our_mac));
         Ok(())
     }
 }
