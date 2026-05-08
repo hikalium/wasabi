@@ -93,6 +93,12 @@ impl EthernetHeader {
     ) -> Self {
         Self { dst, src, eth_type }
     }
+    pub fn src(&self) -> EthernetAddr {
+        self.src
+    }
+    pub fn dst(&self) -> EthernetAddr {
+        self.dst
+    }
     pub fn eth_type(&self) -> EthernetType {
         self.eth_type
     }
