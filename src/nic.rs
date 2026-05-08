@@ -245,6 +245,11 @@ impl UsbNcmDriver {
         info!("NCM: poll_bulk loop starting");
         let mut tx_seq: u16 = 1;
         let mut timeout_count: u32 = 0;
+        // Cumulative byte counters since task start. Logged on every
+        // bulk-in timeout so we can spot "stalls every N MB" patterns
+        // tied to a specific buffer size.
+        let mut bytes_rx: u64 = 0;
+        let mut bytes_tx: u64 = 0;
         loop {
             // Big enough to hold an NTB wrapping a full Ethernet
             // frame (1514 + ~28 bytes of NCM headers). The previous
@@ -280,6 +285,7 @@ impl UsbNcmDriver {
                         warn!(
                             "NCM bulk-in: TRB {trb_ptr_waiting:#x} timed out \
                          after 2s (#{timeout_count}); recycling buffer. \
+                         bytes_rx={bytes_rx}, bytes_tx={bytes_tx}, \
                          tcp={dbg:?}, net_tx_queue={queued}"
                         );
                         core::mem::forget(buf);
@@ -306,6 +312,7 @@ impl UsbNcmDriver {
                 );
                 continue;
             }
+            bytes_rx = bytes_rx.saturating_add(ntb_len as u64);
 
             // Collect responses first so we don't borrow `buf` across an
             // await (`send_datagram` is async).
@@ -409,6 +416,7 @@ impl UsbNcmDriver {
             // periodic TCP TX poller) ride out on the same iteration.
             replies.extend(NET_TX_QUEUE.lock().drain(..));
             for reply in replies {
+                let reply_len = reply.len() as u64;
                 // Don't propagate send errors out of the loop —
                 // dropping the task on a single bad TX would lose
                 // the whole NCM pipeline. Log and keep going.
@@ -423,6 +431,8 @@ impl UsbNcmDriver {
                 .await
                 {
                     warn!("NCM send_datagram: {e:?}; reply dropped");
+                } else {
+                    bytes_tx = bytes_tx.saturating_add(reply_len);
                 }
                 tx_seq = tx_seq.wrapping_add(1);
             }
