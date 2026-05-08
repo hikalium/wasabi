@@ -382,7 +382,7 @@ impl UsbNcmDriver {
             slot,
             dci,
             ring.ring_phys_addr(),
-            ring.cycle_state(),
+            ring.dequeue_cycle_state(),
         ))
         .await?
         .cmd_result_ok()?;
