@@ -243,7 +243,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             }
             "debug" => run_cmd_debug(&args),
             "show" => run_cmd_show(&args),
-            "reboot" => run_cmd_reboot(&args),
+            "reboot" | "r" => run_cmd_reboot(&args),
             "demo" => run_cmd_demo(&args),
             "hello" => {
                 println!("こんにちは");
