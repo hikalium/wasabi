@@ -244,7 +244,12 @@ impl UsbNcmDriver {
 
         let mut tx_seq: u16 = 1;
         loop {
-            let buf = vec![0u8; 1024];
+            // Big enough to hold an NTB wrapping a full Ethernet
+            // frame (1514 + ~28 bytes of NCM headers). The previous
+            // 1024-byte buffer silently dropped any NTB longer than
+            // that, which forced the peer's TCP stack into its own
+            // retransmit/backoff loop on every large segment.
+            let buf = vec![0u8; 4096];
             let mut buf = Box::into_pin(buf.into_boxed_slice());
             let trb_ptr_waiting =
                 bulk_in_ring.push(NormalTrb::new_in(&mut buf).into())?;
