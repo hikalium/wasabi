@@ -92,6 +92,6 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    error!("PANIC: {info:?}");
+    wasabi::print::panic_print(format_args!("[ERROR] PANIC: {info:?}\n"));
     exit_qemu(QemuExitCode::Fail);
 }
