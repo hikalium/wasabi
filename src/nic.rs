@@ -84,13 +84,28 @@ pub fn learn_arp(ip: IpV4Addr, mac: EthernetAddr) {
     ARP_CACHE.lock().insert(ip, mac);
 }
 
-// Frames produced asynchronously by other tasks that `poll_bulk`
-// drains and ships out the bulk-OUT endpoint at the bottom of each
-// rx iteration.
+// Frames produced anywhere in the kernel that need to ride out on the
+// NCM bulk-OUT endpoint. `poll_bulk_tx` drains this; everyone else
+// (rx-path replies, the periodic TCP TX poller, anything else later)
+// just enqueues.
 static NET_TX_QUEUE: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
+// Bound on the queue depth so that a stuck bulk-OUT endpoint can't
+// pile up unbounded memory. When full we drop the oldest pending
+// frame: the newer reply (e.g. a SYN+ACK for a fresh connection)
+// matters more than a stale one already obsoleted by the peer's
+// retries.
+const MAX_TX_QUEUE_DEPTH: usize = 256;
 
 pub fn enqueue_tx_frame(frame: Vec<u8>) {
-    NET_TX_QUEUE.lock().push_back(frame);
+    let mut q = NET_TX_QUEUE.lock();
+    if q.len() >= MAX_TX_QUEUE_DEPTH {
+        q.pop_front();
+        warn!(
+            "NET_TX_QUEUE: depth {MAX_TX_QUEUE_DEPTH} reached; \
+             dropped oldest frame"
+        );
+    }
+    q.push_back(frame);
 }
 
 // Parse a 12-character upper-case hex MAC string from the device's
@@ -220,36 +235,26 @@ impl UsbNcmDriver {
             }
         }
     }
-    async fn poll_bulk(
+    /// Bulk-IN side of the NCM driver. Receives NTBs, dispatches per
+    /// Ethernet frame, and *enqueues* any reply into NET_TX_QUEUE
+    /// instead of sending it inline. The actual TX is owned by
+    /// `poll_bulk_tx`; decoupling means a stuck bulk-OUT endpoint no
+    /// longer prevents us from processing inbound FIN/RST/SYN, so the
+    /// TCP state machine can still progress and a fresh connection
+    /// has a chance once tx recovers.
+    async fn poll_bulk_in(
         xhc: Rc<Controller>,
         slot: u8,
         mut bulk_in_ring: TransferRing,
         bulk_in_desc: EndpointDescriptor,
-        mut bulk_out_ring: TransferRing,
-        bulk_out_desc: EndpointDescriptor,
         our_mac: EthernetAddr,
     ) -> Result<()> {
-        // Announce ourselves so the host learns our MAC <-> IP binding.
-        let arp = ArpPacket::gratuitous(our_mac, OUR_IP);
-        Self::send_datagram(
-            &xhc,
-            slot,
-            &mut bulk_out_ring,
-            &bulk_out_desc,
-            arp.as_slice(),
-            0,
-        )
-        .await?;
-        info!("NCM: sent gratuitous ARP for {OUR_IP}");
-
-        info!("NCM: poll_bulk loop starting");
-        let mut tx_seq: u16 = 1;
+        info!("NCM: poll_bulk_in loop starting");
         let mut timeout_count: u32 = 0;
-        // Cumulative byte counters since task start. Logged on every
-        // bulk-in timeout so we can spot "stalls every N MB" patterns
+        // Cumulative byte counter since task start. Logged on every
+        // long-wait warning so we can spot "stalls every N MB" patterns
         // tied to a specific buffer size.
         let mut bytes_rx: u64 = 0;
-        let mut bytes_tx: u64 = 0;
         loop {
             // Big enough to hold an NTB wrapping a full Ethernet
             // frame (1514 + ~28 bytes of NCM headers). The previous
@@ -290,8 +295,7 @@ impl UsbNcmDriver {
                         warn!(
                             "NCM bulk-in: TRB {trb_ptr_waiting:#x} \
                              still waiting (#{timeout_count}); \
-                             bytes_rx={bytes_rx}, \
-                             bytes_tx={bytes_tx}, tcp={dbg:?}, \
+                             bytes_rx={bytes_rx}, tcp={dbg:?}, \
                              net_tx_queue={queued}"
                         );
                     }
@@ -417,29 +421,62 @@ impl UsbNcmDriver {
                     }
                 }
             }
-            // Frames produced asynchronously by other tasks (e.g. the
-            // periodic TCP TX poller) ride out on the same iteration.
-            replies.extend(NET_TX_QUEUE.lock().drain(..));
             for reply in replies {
-                let reply_len = reply.len() as u64;
-                // Don't propagate send errors out of the loop —
-                // dropping the task on a single bad TX would lose
-                // the whole NCM pipeline. Log and keep going.
-                if let Err(e) = Self::send_datagram(
-                    &xhc,
-                    slot,
-                    &mut bulk_out_ring,
-                    &bulk_out_desc,
-                    &reply,
-                    tx_seq,
-                )
-                .await
-                {
-                    warn!("NCM send_datagram: {e:?}; reply dropped");
-                } else {
-                    bytes_tx = bytes_tx.saturating_add(reply_len);
+                enqueue_tx_frame(reply);
+            }
+        }
+    }
+    /// Bulk-OUT side. Owns the bulk-OUT transfer ring; sends the
+    /// initial gratuitous ARP, then drains NET_TX_QUEUE one frame at
+    /// a time.
+    async fn poll_bulk_tx(
+        xhc: Rc<Controller>,
+        slot: u8,
+        mut bulk_out_ring: TransferRing,
+        bulk_out_desc: EndpointDescriptor,
+        our_mac: EthernetAddr,
+    ) -> Result<()> {
+        // Announce ourselves so the host learns our MAC <-> IP binding.
+        let arp = ArpPacket::gratuitous(our_mac, OUR_IP);
+        Self::send_datagram(
+            &xhc,
+            slot,
+            &mut bulk_out_ring,
+            &bulk_out_desc,
+            arp.as_slice(),
+            0,
+        )
+        .await?;
+        info!("NCM: sent gratuitous ARP for {OUR_IP}");
+
+        info!("NCM: poll_bulk_tx loop starting");
+        let mut tx_seq: u16 = 1;
+        let mut bytes_tx: u64 = 0;
+        loop {
+            let frame = NET_TX_QUEUE.lock().pop_front();
+            match frame {
+                Some(f) => {
+                    let frame_len = f.len() as u64;
+                    if let Err(e) = Self::send_datagram(
+                        &xhc,
+                        slot,
+                        &mut bulk_out_ring,
+                        &bulk_out_desc,
+                        &f,
+                        tx_seq,
+                    )
+                    .await
+                    {
+                        warn!(
+                            "NCM send_datagram: {e:?}; reply dropped \
+                             (bytes_tx so far = {bytes_tx})"
+                        );
+                    } else {
+                        bytes_tx = bytes_tx.saturating_add(frame_len);
+                    }
+                    tx_seq = tx_seq.wrapping_add(1);
                 }
-                tx_seq = tx_seq.wrapping_add(1);
+                None => yield_execution().await,
             }
         }
     }
@@ -544,7 +581,10 @@ impl UsbNcmDriver {
         xhc.notify_ep(slot, desc.dci())?;
         // Same orphan-avoidance dance as the bulk-in path: keep
         // waiting on the original TRB instead of pushing a duplicate.
-        // See the comment in `poll_bulk` for the full reasoning.
+        // See the comment in `poll_bulk_in` for the full reasoning.
+        // On each timeout we also re-ring the doorbell — cheap, and
+        // sometimes nudges the controller into noticing a TRB it
+        // missed during a burst.
         let mut waited: u32 = 0;
         let event = loop {
             let fut = EventFuture::new_for_trb(
@@ -557,9 +597,11 @@ impl UsbNcmDriver {
                     waited = waited.wrapping_add(1);
                     warn!(
                         "send_datagram: TRB {trb_ptr_waiting:#x} \
-                         still waiting (#{waited}, len={})",
+                         still waiting (#{waited}, len={}); \
+                         re-ringing doorbell",
                         buf.len()
                     );
+                    let _ = xhc.notify_ep(slot, desc.dci());
                 }
             }
         };
@@ -748,11 +790,16 @@ impl UsbNcmDriver {
             int_in_ep_ring,
             int_in_ep_desc,
         ));
-        spawn_global(Self::poll_bulk(
+        spawn_global(Self::poll_bulk_in(
             xhc.clone(),
             slot,
             bulk_in_ep_ring,
             bulk_in_ep_desc,
+            our_mac,
+        ));
+        spawn_global(Self::poll_bulk_tx(
+            xhc.clone(),
+            slot,
             bulk_out_ep_ring,
             bulk_out_ep_desc,
             our_mac,
