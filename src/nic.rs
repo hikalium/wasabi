@@ -180,6 +180,7 @@ impl UsbNcmDriver {
         .await?;
         info!("NCM: sent gratuitous ARP for {OUR_IP}");
 
+        let mut tx_seq: u16 = 1;
         loop {
             let buf = vec![0u8; 1024];
             let mut buf = Box::into_pin(buf.into_boxed_slice());
@@ -203,8 +204,43 @@ impl UsbNcmDriver {
                 );
                 continue;
             }
-            info!("NTB(seq={}): recv", nth.sequence);
-            hexdump_bytes(&buf[0..ntb_len]);
+
+            // Collect responses first so we don't borrow `buf` across an
+            // await (`send_datagram` is async).
+            let mut replies: Vec<Vec<u8>> = Vec::new();
+            for frame in ncm::iter_ntb16_datagrams(&buf[..ntb_len]) {
+                if frame.len() < 14 {
+                    continue;
+                }
+                let eth_type = [frame[12], frame[13]];
+                if eth_type == [0x08, 0x06] && frame.len() >= 42 {
+                    if let Ok(req) = ArpPacket::copy_from_slice(&frame[..42]) {
+                        if req.is_request_for(OUR_IP) {
+                            info!(
+                                "ARP: request for {} from {} ({:?})",
+                                OUR_IP,
+                                req.sender_ip(),
+                                req.sender_mac(),
+                            );
+                            replies.push(
+                                req.reply_to(our_mac).as_slice().to_vec(),
+                            );
+                        }
+                    }
+                }
+            }
+            for reply in replies {
+                Self::send_datagram(
+                    &xhc,
+                    slot,
+                    &mut bulk_out_ring,
+                    &bulk_out_desc,
+                    &reply,
+                    tx_seq,
+                )
+                .await?;
+                tx_seq = tx_seq.wrapping_add(1);
+            }
         }
     }
     async fn send_datagram(
