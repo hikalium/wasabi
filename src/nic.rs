@@ -4,8 +4,12 @@ use crate::arp::ArpPacket;
 use crate::eth::EthernetAddr;
 use crate::executor::spawn_global;
 use crate::executor::with_timeout;
+use crate::icmp;
+use crate::icmp::IcmpPacket;
 use crate::info;
 use crate::ip::IpV4Addr;
+use crate::ip::IpV4Packet;
+use crate::ip::IpV4Protocol;
 use crate::ncm;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
@@ -225,6 +229,37 @@ impl UsbNcmDriver {
                             replies.push(
                                 req.reply_to(our_mac).as_slice().to_vec(),
                             );
+                        }
+                    }
+                } else if eth_type == [0x08, 0x00]
+                    && frame.len() >= core::mem::size_of::<IcmpPacket>()
+                {
+                    if let Ok(ip) = IpV4Packet::copy_from_slice(
+                        &frame[..core::mem::size_of::<IpV4Packet>()],
+                    ) {
+                        if ip.dst() == OUR_IP
+                            && ip.protocol() == IpV4Protocol::icmp()
+                        {
+                            // Trim to ip.total_length() to drop any
+                            // Ethernet-layer padding (frames < 60 bytes).
+                            let frame_total = core::mem::size_of::<
+                                crate::eth::EthernetHeader,
+                            >() + ip.total_length();
+                            let frame_total = frame_total.min(frame.len());
+                            match icmp::echo_reply_from_request(
+                                &frame[..frame_total],
+                                our_mac,
+                                OUR_IP,
+                            ) {
+                                Ok(reply) => {
+                                    info!(
+                                        "ICMP: echo request from {} -> reply",
+                                        ip.src(),
+                                    );
+                                    replies.push(reply);
+                                }
+                                Err(e) => warn!("ICMP reply build: {e}"),
+                            }
                         }
                     }
                 }
