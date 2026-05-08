@@ -235,31 +235,40 @@ impl PciXhciDriver {
             Duration::from_secs(1),
             Self::address_device(xhc, port, slot),
         )
-        .await?;
-        let device_descriptor = with_timeout(
-            Duration::from_secs(1),
-            usb::request_device_descriptor(xhc, slot, &mut ctrl_ep_ring),
-        )
-        .await?;
-
-        // Update Max Packet Size for Default Control EP
-        // (FullSpeed devices only)
+        .await
+        .or(Err("address_device failed"))?;
+        // [USB 2.0] 9.6.1: read only the first 8 bytes of the device
+        // descriptor first to learn bMaxPacketSize0, then update the EP0
+        // context for FullSpeed devices before reading the full descriptor.
         let portsc = xhc.regs.portsc.get(port).ok_or("invalid portsc")?;
         let speed = portsc.port_speed();
         info!("slot={slot} port={port}: speed={speed:?}");
         if speed == UsbMode::FullSpeed {
-            info!(
-                "port {port}: updating max packet size to {}",
-                device_descriptor.max_packet_size
-            );
+            let mps = with_timeout(
+                Duration::from_secs(1),
+                usb::request_device_descriptor_first_8_bytes(
+                    xhc,
+                    slot,
+                    &mut ctrl_ep_ring,
+                ),
+            )
+            .await
+            .or(Err("request_device_descriptor (first 8 bytes) failed"))?;
+            info!("port {port}: updating max packet size to {mps}");
             Self::update_ctrl_ep_max_packet_size(
                 xhc,
                 slot,
-                device_descriptor.max_packet_size as u16,
+                mps as u16,
                 &ctrl_ep_ring,
             )
             .await?;
         }
+        let device_descriptor = with_timeout(
+            Duration::from_secs(1),
+            usb::request_device_descriptor(xhc, slot, &mut ctrl_ep_ring),
+        )
+        .await
+        .or(Err("request_device_descriptor failed"))?;
 
         let vid = device_descriptor.vendor_id;
         let pid = device_descriptor.product_id;
