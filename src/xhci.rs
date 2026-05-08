@@ -1737,6 +1737,7 @@ enum TrbType {
     EvaluateContextCommand = 13,
     ResetEndpointCommand = 14,
     StopEndpointCommand = 15,
+    SetTRDequeuePointerCommand = 16,
     ResetDeviceCommand = 17,
     NoOpCommand = 23,
     TransferEvent = 32,
@@ -1955,6 +1956,26 @@ impl GenericTrbEntry {
         hexdump_struct(&trb);
         trb
     }
+    /// [xhci] 4.6.10 / 6.4.3.9 — used after Stop Endpoint to point the
+    /// controller's per-endpoint dequeue pointer at the start of a
+    /// freshly reset transfer ring. `new_deq_ptr` must be 16-byte
+    /// aligned; `cycle_state` is the producer cycle state we want the
+    /// controller to expect at that position.
+    pub fn cmd_set_tr_dequeue_pointer(
+        slot: u8,
+        dci: usize,
+        new_deq_ptr: u64,
+        cycle_state: bool,
+    ) -> Self {
+        let mut trb = Self::default();
+        trb.set_trb_type(TrbType::SetTRDequeuePointerCommand);
+        // Dword 0/1: New TR Dequeue Pointer (>>4-aligned), bit 0 = DCS.
+        let dcs_bit = if cycle_state { 1u64 } else { 0u64 };
+        trb.data.write((new_deq_ptr & !0xFu64) | dcs_bit);
+        trb.set_slot_id(slot);
+        trb.set_endpoint_id(dci);
+        trb
+    }
     pub fn cmd_reset_device(slot: u8) -> Self {
         let mut trb = Self::default();
         trb.set_trb_type(TrbType::ResetDeviceCommand);
@@ -1997,6 +2018,26 @@ pub struct TransferRing {
 impl TransferRing {
     pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
+    }
+    pub fn cycle_state(&self) -> bool {
+        self.cycle_state_ours
+    }
+    /// Wipe the ring back to its post-`Default::default()` shape:
+    /// every slot zeroed, current_index back to 0, cycle bit reset,
+    /// Link TRB at the last slot reinstated. Intended to be paired
+    /// with the xHCI Stop Endpoint + Set TR Dequeue Pointer dance —
+    /// after the controller acknowledges Set TR Dequeue Pointer
+    /// pointing at this fresh ring, push() will operate cleanly
+    /// again.
+    pub fn reset(&mut self) {
+        let link_trb = GenericTrbEntry::trb_link(self.ring.as_ref());
+        let ring = unsafe { self.ring.get_unchecked_mut() };
+        for i in 0..TrbRing::NUM_TRB - 1 {
+            let _ = ring.write(i, GenericTrbEntry::default());
+        }
+        let _ = ring.write(TrbRing::NUM_TRB - 1, link_trb);
+        ring.current_index = 0;
+        self.cycle_state_ours = false;
     }
     pub fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
         // Calling get_unchecked_mut() here is safe
