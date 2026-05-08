@@ -242,7 +242,9 @@ impl UsbNcmDriver {
         .await?;
         info!("NCM: sent gratuitous ARP for {OUR_IP}");
 
+        info!("NCM: poll_bulk loop starting");
         let mut tx_seq: u16 = 1;
+        let mut timeout_count: u32 = 0;
         loop {
             // Big enough to hold an NTB wrapping a full Ethernet
             // frame (1514 + ~28 bytes of NCM headers). The previous
@@ -255,9 +257,42 @@ impl UsbNcmDriver {
                 bulk_in_ring.push(NormalTrb::new_in(&mut buf).into())?;
 
             xhc.notify_ep(slot, bulk_in_desc.dci())?;
-            EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting)
-                .await?
-                .transfer_result_ok()?;
+
+            // Bound the wait so that a lost xHCI event (event-ring
+            // overflow during a burst, or a halted bulk-IN endpoint)
+            // doesn't park `poll_bulk` forever. On timeout we leak
+            // `buf` deliberately: the TRB we just pushed still holds
+            // a pointer into it, and the controller may eventually
+            // DMA into that memory if the endpoint comes back to
+            // life. Freeing it would invite UB; one 4 KiB leak per
+            // timeout is the cheap price of forward progress.
+            let event_fut = EventFuture::new_for_trb(
+                &xhc.primary_event_ring,
+                trb_ptr_waiting,
+            );
+            let event =
+                match with_timeout(Duration::from_secs(2), event_fut).await {
+                    Ok(ev) => ev,
+                    Err(_) => {
+                        timeout_count = timeout_count.wrapping_add(1);
+                        let dbg = TCP_SOCKET.debug_summary();
+                        let queued = NET_TX_QUEUE.lock().len();
+                        warn!(
+                            "NCM bulk-in: TRB {trb_ptr_waiting:#x} timed out \
+                         after 2s (#{timeout_count}); recycling buffer. \
+                         tcp={dbg:?}, net_tx_queue={queued}"
+                        );
+                        core::mem::forget(buf);
+                        continue;
+                    }
+                };
+            if let Err(e) = event.transfer_result_ok() {
+                warn!(
+                    "NCM bulk-in: transfer error {e:?} on TRB \
+                     {trb_ptr_waiting:#x}; dropping NTB"
+                );
+                continue;
+            }
             let nth = match ncm::parse_nth16(&buf) {
                 Ok(nth) => nth,
                 Err(_) => continue,
@@ -374,7 +409,10 @@ impl UsbNcmDriver {
             // periodic TCP TX poller) ride out on the same iteration.
             replies.extend(NET_TX_QUEUE.lock().drain(..));
             for reply in replies {
-                Self::send_datagram(
+                // Don't propagate send errors out of the loop —
+                // dropping the task on a single bad TX would lose
+                // the whole NCM pipeline. Log and keep going.
+                if let Err(e) = Self::send_datagram(
                     &xhc,
                     slot,
                     &mut bulk_out_ring,
@@ -382,7 +420,10 @@ impl UsbNcmDriver {
                     &reply,
                     tx_seq,
                 )
-                .await?;
+                .await
+                {
+                    warn!("NCM send_datagram: {e:?}; reply dropped");
+                }
                 tx_seq = tx_seq.wrapping_add(1);
             }
         }
@@ -486,9 +527,25 @@ impl UsbNcmDriver {
         let buf = Box::into_pin(ntb.into_boxed_slice());
         let trb_ptr_waiting = ring.push(NormalTrb::new_out(&buf).into())?;
         xhc.notify_ep(slot, desc.dci())?;
-        EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .transfer_result_ok()?;
+        let event_fut =
+            EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting);
+        // Bound the wait. On timeout we leak `buf` for the same
+        // reason the bulk-in path does: the controller may still DMA
+        // into it later if the endpoint un-stalls.
+        let event = match with_timeout(Duration::from_secs(2), event_fut).await
+        {
+            Ok(ev) => ev,
+            Err(_) => {
+                warn!(
+                    "send_datagram: TRB {trb_ptr_waiting:#x} timed out; \
+                     leaking {} bytes",
+                    buf.len()
+                );
+                core::mem::forget(buf);
+                return Err("send_datagram: timeout");
+            }
+        };
+        event.transfer_result_ok()?;
         Ok(())
     }
     async fn run(
