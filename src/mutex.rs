@@ -87,8 +87,13 @@ impl<T: Sized> Mutex<T> {
             created_at_line: Location::caller().line(),
         }
     }
+    /// Non-blocking lock attempt — returns `Err` immediately if another
+    /// holder has the lock. Use this from paths where it's safer to drop
+    /// output than to spin (e.g. inside `global_print`, where a lock
+    /// contended by the caller's own panic chain would otherwise spin
+    /// 10000 times and re-panic).
     #[track_caller]
-    fn try_lock(&self) -> Result<MutexGuard<T>> {
+    pub fn try_lock(&self) -> Result<MutexGuard<T>> {
         if self
             .is_taken
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
