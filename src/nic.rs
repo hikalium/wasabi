@@ -158,19 +158,35 @@ impl UsbNcmDriver {
             }
         }
     }
-    async fn poll_bulk_in(
+    async fn poll_bulk(
         xhc: Rc<Controller>,
         slot: u8,
-        mut ring: TransferRing,
-        desc: EndpointDescriptor,
+        mut bulk_in_ring: TransferRing,
+        bulk_in_desc: EndpointDescriptor,
+        mut bulk_out_ring: TransferRing,
+        bulk_out_desc: EndpointDescriptor,
+        our_mac: EthernetAddr,
     ) -> Result<()> {
+        // Announce ourselves so the host learns our MAC <-> IP binding.
+        let arp = ArpPacket::gratuitous(our_mac, OUR_IP);
+        Self::send_datagram(
+            &xhc,
+            slot,
+            &mut bulk_out_ring,
+            &bulk_out_desc,
+            arp.as_slice(),
+            0,
+        )
+        .await?;
+        info!("NCM: sent gratuitous ARP for {OUR_IP}");
+
         loop {
             let buf = vec![0u8; 1024];
             let mut buf = Box::into_pin(buf.into_boxed_slice());
             let trb_ptr_waiting =
-                ring.push(NormalTrb::new_in(&mut buf).into())?;
+                bulk_in_ring.push(NormalTrb::new_in(&mut buf).into())?;
 
-            xhc.notify_ep(slot, desc.dci())?;
+            xhc.notify_ep(slot, bulk_in_desc.dci())?;
             EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting)
                 .await?
                 .transfer_result_ok()?;
@@ -206,23 +222,6 @@ impl UsbNcmDriver {
         EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting)
             .await?
             .transfer_result_ok()?;
-        Ok(())
-    }
-    async fn run_tx(
-        xhc: Rc<Controller>,
-        slot: u8,
-        mut ring: TransferRing,
-        desc: EndpointDescriptor,
-        our_mac: EthernetAddr,
-    ) -> Result<()> {
-        // Announce ourselves so the host learns our MAC <-> IP binding.
-        let arp = ArpPacket::gratuitous(our_mac, OUR_IP);
-        Self::send_datagram(&xhc, slot, &mut ring, &desc, arp.as_slice(), 0)
-            .await?;
-        info!("NCM: sent gratuitous ARP for {OUR_IP}");
-        // Keep this task alive forever so `ring`'s memory stays valid; later
-        // milestones will replace this with a real transmit loop.
-        core::future::pending::<()>().await;
         Ok(())
     }
     async fn run(
@@ -406,15 +405,11 @@ impl UsbNcmDriver {
             int_in_ep_ring,
             int_in_ep_desc,
         ));
-        spawn_global(Self::poll_bulk_in(
+        spawn_global(Self::poll_bulk(
             xhc.clone(),
             slot,
             bulk_in_ep_ring,
             bulk_in_ep_desc,
-        ));
-        spawn_global(Self::run_tx(
-            xhc.clone(),
-            slot,
             bulk_out_ep_ring,
             bulk_out_ep_desc,
             our_mac,
