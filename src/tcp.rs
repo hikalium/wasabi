@@ -149,6 +149,10 @@ pub struct TcpSocket {
     inner: Mutex<TcpSocketInner>,
 }
 
+/// Global TCP listener used by the NCM driver for the remote terminal.
+/// One connection at a time on port 23.
+pub static TCP_SOCKET: TcpSocket = TcpSocket::new_server(23);
+
 impl TcpSocket {
     pub const fn new_server(listen_port: u16) -> Self {
         Self {
@@ -173,8 +177,15 @@ impl TcpSocket {
     pub fn pop_rx_byte(&self) -> Option<u8> {
         self.inner.lock().rx_data.pop_front()
     }
+    /// Append bytes to the TX queue, but only while a connection is
+    /// Established. Bytes produced before the first connect or after
+    /// disconnect are dropped on the floor — we don't want to dump a
+    /// boot-time backlog into a freshly-connected client.
     pub fn push_tx_bytes(&self, data: &[u8]) {
-        self.inner.lock().tx_data.extend(data.iter().copied());
+        let mut inner = self.inner.lock();
+        if inner.state == TcpSocketState::Established {
+            inner.tx_data.extend(data.iter().copied());
+        }
     }
 
     /// Drive the state machine for one received frame
@@ -243,8 +254,6 @@ impl TcpSocket {
             TcpSocketState::Established => {
                 if !data.is_empty() {
                     inner.rx_data.extend(data.iter().copied());
-                    // M2 echo: queue the same bytes back. Removed in M3.
-                    inner.tx_data.extend(data.iter().copied());
                     seq_to_ack = seq_to_ack.wrapping_add(data.len() as u32);
                 }
                 if in_tcp.is_fin() {
