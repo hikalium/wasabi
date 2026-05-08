@@ -346,6 +346,27 @@ pub async fn request_device_descriptor(
     .await?;
     UsbDeviceDescriptor::copy_from_slice(buf.as_ref().get_ref())
 }
+// [USB 2.0] 9.6.1: the host first reads only the first 8 bytes of the
+// device descriptor so that bMaxPacketSize0 (offset 7) can be learned
+// before issuing transfers that depend on the actual EP0 packet size.
+pub async fn request_device_descriptor_first_8_bytes(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut TransferRing,
+) -> Result<u8> {
+    let buf = vec![0u8; 8];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    xhc.request_descriptor(
+        slot,
+        ctrl_ep_ring,
+        UsbDescriptorType::Device,
+        0,
+        0,
+        &mut buf,
+    )
+    .await?;
+    Ok(buf[7])
+}
 pub async fn request_string_descriptor(
     xhc: &Rc<Controller>,
     slot: u8,
