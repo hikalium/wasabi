@@ -14,6 +14,7 @@ pub mod allocator;
 pub mod bitmap;
 pub mod bits;
 pub mod cui;
+pub mod eth;
 pub mod executor;
 pub mod font;
 pub mod graphics;
