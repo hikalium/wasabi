@@ -22,6 +22,7 @@ pub mod font;
 pub mod graphics;
 pub mod gui;
 pub mod hpet;
+pub mod icmp;
 pub mod ime;
 pub mod init;
 pub mod input;
