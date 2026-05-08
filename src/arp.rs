@@ -53,6 +53,43 @@ impl ArpPacket {
     pub fn gratuitous(our_eth: EthernetAddr, our_ip: IpV4Addr) -> Self {
         Self::request(our_eth, our_ip, our_ip)
     }
+    pub fn op_is_request(&self) -> bool {
+        let op = self.op;
+        op == [0x00, 0x01]
+    }
+    pub fn target_ip(&self) -> IpV4Addr {
+        self.target_ip
+    }
+    pub fn sender_ip(&self) -> IpV4Addr {
+        self.sender_ip
+    }
+    pub fn sender_mac(&self) -> EthernetAddr {
+        self.sender_mac
+    }
+    pub fn is_request_for(&self, ip: IpV4Addr) -> bool {
+        self.op_is_request() && self.target_ip == ip
+    }
+    /// Build an ARP reply (op = 2) addressed back to the original requester.
+    /// `our_eth` is the MAC we want the requester to associate with the
+    /// IP they were asking about (= the original target_ip).
+    pub fn reply_to(&self, our_eth: EthernetAddr) -> ArpPacket {
+        ArpPacket {
+            eth_header: EthernetHeader::new(
+                self.sender_mac,
+                our_eth,
+                EthernetType::arp(),
+            ),
+            hw_type: [0x00, 0x01],
+            proto_type: [0x08, 0x00],
+            hw_addr_size: 6,
+            proto_addr_size: 4,
+            op: [0x00, 0x02],
+            sender_mac: our_eth,
+            sender_ip: self.target_ip,
+            target_mac: self.sender_mac,
+            target_ip: self.sender_ip,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -99,5 +136,42 @@ mod tests {
         // sender_ip at 28..32, target_ip at 38..42, both equal 10.10.10.83.
         assert_eq!(&bytes[28..32], &[10, 10, 10, 83]);
         assert_eq!(&bytes[38..42], &[10, 10, 10, 83]);
+    }
+
+    #[test_case]
+    fn arp_is_request_for_match_and_mismatch() {
+        let our_ip = IpV4Addr::new([10, 10, 10, 83]);
+        let other_ip = IpV4Addr::new([10, 10, 10, 1]);
+        let req = ArpPacket::request(
+            EthernetAddr::new([1, 2, 3, 4, 5, 6]),
+            other_ip,
+            our_ip,
+        );
+        assert!(req.is_request_for(our_ip));
+        assert!(!req.is_request_for(other_ip));
+    }
+
+    #[test_case]
+    fn arp_reply_to_layout() {
+        let peer_mac = EthernetAddr::new([0xAA; 6]);
+        let peer_ip = IpV4Addr::new([10, 10, 10, 1]);
+        let our_ip = IpV4Addr::new([10, 10, 10, 83]);
+        let our_mac = EthernetAddr::new([0x11; 6]);
+
+        let req = ArpPacket::request(peer_mac, peer_ip, our_ip);
+        let reply = req.reply_to(our_mac);
+        let bytes = reply.as_slice().to_vec();
+
+        // Ethernet: dst = peer, src = us, type = ARP.
+        assert_eq!(&bytes[0..6], &[0xAA; 6]);
+        assert_eq!(&bytes[6..12], &[0x11; 6]);
+        assert_eq!(&bytes[12..14], &[0x08, 0x06]);
+        // op = 2 (reply)
+        assert_eq!(&bytes[20..22], &[0x00, 0x02]);
+        // sender = us, target = peer
+        assert_eq!(&bytes[22..28], &[0x11; 6]);
+        assert_eq!(&bytes[28..32], &[10, 10, 10, 83]);
+        assert_eq!(&bytes[32..38], &[0xAA; 6]);
+        assert_eq!(&bytes[38..42], &[10, 10, 10, 1]);
     }
 }
