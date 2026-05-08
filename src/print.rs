@@ -47,6 +47,36 @@ pub fn global_print(args: fmt::Arguments) {
     let _ = fmt::write(&mut TcpMirror, args);
 }
 
+/// Print path used from the `#[panic_handler]`. Always reaches the
+/// serial port (no Mutex), and uses `try_lock` for the lockable sinks
+/// — if a sink's lock is held by the very chain that's now panicking,
+/// we skip that sink instead of spinning into a recursive panic that
+/// would triple-fault the box.
+pub fn panic_print(args: fmt::Arguments) {
+    let mut writer = SerialPort::default();
+    let _ = fmt::write(&mut writer, args);
+    match GLOBAL_VRAM_WRITER.try_lock() {
+        Ok(mut printer) => {
+            if let Some(printer) = &mut *printer {
+                let _ = fmt::write(printer, args);
+            }
+        }
+        Err(_) => {
+            let _ = fmt::write(
+                &mut writer,
+                format_args!(
+                    "[panic_print] GLOBAL_VRAM_WRITER is already locked — \
+                     panic likely originated inside the print path; \
+                     screen output skipped\n"
+                ),
+            );
+        }
+    }
+    // Skip the TCP mirror entirely: `push_tx_bytes` itself uses a
+    // blocking lock and would defeat the point of panic_print. Serial
+    // is the authoritative place to look for a panic message anyway.
+}
+
 #[macro_export]
 macro_rules! print {
         ($($arg:tt)*) => ($crate::print::global_print(format_args!($($arg)*)));
