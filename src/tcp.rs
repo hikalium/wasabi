@@ -201,6 +201,13 @@ impl TcpSocket {
     pub fn state(&self) -> TcpSocketState {
         self.inner.lock().state
     }
+    /// Snapshot of socket state for diagnostics. Uses `try_lock` so
+    /// this can be called from log / panic paths without risking the
+    /// 10000-spin-then-panic cycle if the socket is already locked.
+    pub fn debug_summary(&self) -> Option<(TcpSocketState, usize, usize)> {
+        let inner = self.inner.try_lock().ok()?;
+        Some((inner.state, inner.unacked_len, inner.send_buffer.len()))
+    }
     pub fn pop_rx_byte(&self) -> Option<u8> {
         self.inner.lock().rx_data.pop_front()
     }
