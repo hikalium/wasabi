@@ -11,6 +11,7 @@
 #![no_main]
 pub mod acpi;
 pub mod allocator;
+pub mod arp;
 pub mod bitmap;
 pub mod bits;
 pub mod cui;
