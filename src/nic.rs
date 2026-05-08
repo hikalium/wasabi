@@ -303,11 +303,29 @@ impl UsbNcmDriver {
                 .ok_or("bulk_in_ep_desc not found")
         }?;
 
+        let bulk_out_ep_desc = {
+            let desc_under_com_interface =
+                descriptors_under_interface(&desc_under_config, 1, 1);
+
+            desc_under_com_interface
+                .iter()
+                .find_map(|d| {
+                    if let usb::UsbDescriptor::Endpoint(d) = d {
+                        if !d.is_dir_in() && d.is_bulk_endpoint() {
+                            return Some(d);
+                        }
+                    }
+                    None
+                })
+                .cloned()
+                .ok_or("bulk_out_ep_desc not found")
+        }?;
+
         let mut ring_list = usb::configure_endpoint(
             xhc,
             port,
             slot,
-            &[int_in_ep_desc, bulk_in_ep_desc],
+            &[int_in_ep_desc, bulk_in_ep_desc, bulk_out_ep_desc],
         )
         .await?;
         let int_in_ep_ring = ring_list
@@ -316,6 +334,9 @@ impl UsbNcmDriver {
         let bulk_in_ep_ring = ring_list
             .remove(&bulk_in_ep_desc.dci())
             .ok_or("ep_ring for bulk in was not populated")?;
+        let _bulk_out_ep_ring = ring_list
+            .remove(&bulk_out_ep_desc.dci())
+            .ok_or("ep_ring for bulk out was not populated")?;
 
         xhc.request_set_config(slot, ctrl_ep_ring, 2).await?;
         xhc.request_set_interface(slot, ctrl_ep_ring, 0, 0).await?;
