@@ -84,6 +84,65 @@ pub fn build_ntb16(datagram: &[u8], seq: u16) -> Vec<u8> {
     out
 }
 
+// [ncm_1_1] 3.3.1: walk an NTB's first NDP16 (no-CRC variant) and yield each
+// datagram as a slice into the original buffer. Multi-NDP chaining via
+// wNextNdpIndex is not followed; in practice devices put all datagrams in
+// the first NDP. Returns an empty iterator on any framing error so callers
+// can simply loop without explicit error handling.
+pub struct Ntb16DatagramIter<'a> {
+    ntb: &'a [u8],
+    ndp_offset: usize,
+    pair_index: usize,
+}
+
+impl<'a> Iterator for Ntb16DatagramIter<'a> {
+    type Item = &'a [u8];
+    fn next(&mut self) -> Option<&'a [u8]> {
+        let entry_off = self.ndp_offset + 8 + self.pair_index * 4;
+        if entry_off + 4 > self.ntb.len() {
+            return None;
+        }
+        let idx =
+            u16::from_le_bytes([self.ntb[entry_off], self.ntb[entry_off + 1]])
+                as usize;
+        let len = u16::from_le_bytes([
+            self.ntb[entry_off + 2],
+            self.ntb[entry_off + 3],
+        ]) as usize;
+        if idx == 0 && len == 0 {
+            return None; // (0,0) end-of-list terminator
+        }
+        if idx
+            .checked_add(len)
+            .map_or(true, |end| end > self.ntb.len())
+        {
+            return None;
+        }
+        self.pair_index += 1;
+        Some(&self.ntb[idx..idx + len])
+    }
+}
+
+pub fn iter_ntb16_datagrams(ntb: &[u8]) -> Ntb16DatagramIter<'_> {
+    if let Ok(nth) = parse_nth16(ntb) {
+        let ndp_offset = nth.ndp_index as usize;
+        if ntb.len() >= ndp_offset + 8
+            && &ntb[ndp_offset..ndp_offset + 4] == b"NCM0"
+        {
+            return Ntb16DatagramIter {
+                ntb,
+                ndp_offset,
+                pair_index: 0,
+            };
+        }
+    }
+    Ntb16DatagramIter {
+        ntb,
+        ndp_offset: ntb.len(),
+        pair_index: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +216,56 @@ mod tests {
         assert_eq!(nth.sequence, 7);
         assert_eq!(nth.block_length as usize, ntb.len());
         assert_eq!(nth.ndp_index, 12);
+    }
+
+    #[test_case]
+    fn iter_datagrams_single_via_build_ntb16() {
+        let frame = [0xCDu8; 50];
+        let ntb = build_ntb16(&frame, 0);
+        let dgrams: alloc::vec::Vec<&[u8]> =
+            iter_ntb16_datagrams(&ntb).collect();
+        assert_eq!(dgrams.len(), 1);
+        assert_eq!(dgrams[0], &frame[..]);
+    }
+
+    #[test_case]
+    fn iter_datagrams_multi() {
+        // Two 6-byte datagrams in a single NDP16.
+        // Layout:
+        //  0..12  : NTH16
+        // 12..32  : NDP16 (NCM0 + len + next + 2 entries + (0,0) terminator)
+        // 32..38  : datagram 0
+        // 38..44  : datagram 1
+        let mut ntb = alloc::vec![0u8; 44];
+        // NTH16
+        ntb[0..4].copy_from_slice(b"NCMH");
+        ntb[4..6].copy_from_slice(&12u16.to_le_bytes());
+        ntb[6..8].copy_from_slice(&0u16.to_le_bytes());
+        ntb[8..10].copy_from_slice(&44u16.to_le_bytes());
+        ntb[10..12].copy_from_slice(&12u16.to_le_bytes());
+        // NDP16
+        ntb[12..16].copy_from_slice(b"NCM0");
+        ntb[16..18].copy_from_slice(&20u16.to_le_bytes()); // wLength
+        ntb[18..20].copy_from_slice(&0u16.to_le_bytes()); // wNextNdpIndex
+        ntb[20..22].copy_from_slice(&32u16.to_le_bytes()); // dgram0 idx
+        ntb[22..24].copy_from_slice(&6u16.to_le_bytes()); // dgram0 len
+        ntb[24..26].copy_from_slice(&38u16.to_le_bytes()); // dgram1 idx
+        ntb[26..28].copy_from_slice(&6u16.to_le_bytes()); // dgram1 len
+
+        // ntb[28..32] = (0,0) terminator (already zero)
+        ntb[32..38].copy_from_slice(&[1, 2, 3, 4, 5, 6]);
+        ntb[38..44].copy_from_slice(&[7, 8, 9, 10, 11, 12]);
+
+        let dgrams: alloc::vec::Vec<&[u8]> =
+            iter_ntb16_datagrams(&ntb).collect();
+        assert_eq!(dgrams.len(), 2);
+        assert_eq!(dgrams[0], &[1u8, 2, 3, 4, 5, 6][..]);
+        assert_eq!(dgrams[1], &[7u8, 8, 9, 10, 11, 12][..]);
+    }
+
+    #[test_case]
+    fn iter_datagrams_bad_ntb_yields_nothing() {
+        let buf = [0u8; 12]; // valid byte count but no NCMH signature
+        assert_eq!(iter_ntb16_datagrams(&buf).count(), 0);
     }
 }
