@@ -2,6 +2,7 @@ use crate::graphics::Bitmap;
 use crate::graphics::BitmapTextWriter;
 use crate::mutex::Mutex;
 use crate::serial::SerialPort;
+use crate::tcp::TCP_SOCKET;
 use crate::uefi::VramBufferInfo;
 use core::fmt;
 use core::mem::size_of;
@@ -26,12 +27,24 @@ pub fn get_global_vram_resolutions() -> Option<(i64, i64)> {
         .as_ref()
         .map(|vram| (vram.buf().width(), vram.buf().height()))
 }
+// Mirrors `print!`/`println!` output into the TCP socket's tx queue
+// when a connection is Established. `push_tx_bytes` is itself a no-op
+// in any other state, so this is safe to call unconditionally.
+struct TcpMirror;
+impl fmt::Write for TcpMirror {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        TCP_SOCKET.push_tx_bytes(s.as_bytes());
+        Ok(())
+    }
+}
+
 pub fn global_print(args: fmt::Arguments) {
     let mut writer = SerialPort::default();
     fmt::write(&mut writer, args).unwrap();
     if let Some(w) = &mut *GLOBAL_VRAM_WRITER.lock() {
         fmt::write(w, args).expect("Failed to write to GLOBAL_VRAM_WRITER");
     }
+    let _ = fmt::write(&mut TcpMirror, args);
 }
 
 #[macro_export]
