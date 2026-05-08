@@ -263,35 +263,40 @@ impl UsbNcmDriver {
 
             xhc.notify_ep(slot, bulk_in_desc.dci())?;
 
-            // Bound the wait so that a lost xHCI event (event-ring
-            // overflow during a burst, or a halted bulk-IN endpoint)
-            // doesn't park `poll_bulk` forever. On timeout we leak
-            // `buf` deliberately: the TRB we just pushed still holds
-            // a pointer into it, and the controller may eventually
-            // DMA into that memory if the endpoint comes back to
-            // life. Freeing it would invite UB; one 4 KiB leak per
-            // timeout is the cheap price of forward progress.
-            let event_fut = EventFuture::new_for_trb(
-                &xhc.primary_event_ring,
-                trb_ptr_waiting,
-            );
-            let event =
-                match with_timeout(Duration::from_secs(2), event_fut).await {
-                    Ok(ev) => ev,
+            // Bound the wait *only* for periodic diagnostic logging.
+            // We do NOT recycle the buffer or push a duplicate TRB
+            // here: the ring has 15 usable slots, and an orphan TRB
+            // permanently occupies its slot until the controller
+            // generates a completion event for it. Once the producer
+            // wraps to that slot the cycle-state check refuses to
+            // overwrite, `push` returns "Command Ring is Full", and
+            // the whole task dies — exactly the symptom we used to
+            // ship. Instead we keep waiting on the same TRB; the
+            // most common cause of a long wait is just "the device
+            // hasn't started delivering NTBs yet" (idle period or
+            // pre-link-up), which resolves itself once traffic
+            // arrives.
+            let event = loop {
+                let fut = EventFuture::new_for_trb(
+                    &xhc.primary_event_ring,
+                    trb_ptr_waiting,
+                );
+                match with_timeout(Duration::from_secs(2), fut).await {
+                    Ok(ev) => break ev,
                     Err(_) => {
                         timeout_count = timeout_count.wrapping_add(1);
                         let dbg = TCP_SOCKET.debug_summary();
                         let queued = NET_TX_QUEUE.lock().len();
                         warn!(
-                            "NCM bulk-in: TRB {trb_ptr_waiting:#x} timed out \
-                         after 2s (#{timeout_count}); recycling buffer. \
-                         bytes_rx={bytes_rx}, bytes_tx={bytes_tx}, \
-                         tcp={dbg:?}, net_tx_queue={queued}"
+                            "NCM bulk-in: TRB {trb_ptr_waiting:#x} \
+                             still waiting (#{timeout_count}); \
+                             bytes_rx={bytes_rx}, \
+                             bytes_tx={bytes_tx}, tcp={dbg:?}, \
+                             net_tx_queue={queued}"
                         );
-                        core::mem::forget(buf);
-                        continue;
                     }
-                };
+                }
+            };
             if let Err(e) = event.transfer_result_ok() {
                 warn!(
                     "NCM bulk-in: transfer error {e:?} on TRB \
@@ -537,22 +542,25 @@ impl UsbNcmDriver {
         let buf = Box::into_pin(ntb.into_boxed_slice());
         let trb_ptr_waiting = ring.push(NormalTrb::new_out(&buf).into())?;
         xhc.notify_ep(slot, desc.dci())?;
-        let event_fut =
-            EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting);
-        // Bound the wait. On timeout we leak `buf` for the same
-        // reason the bulk-in path does: the controller may still DMA
-        // into it later if the endpoint un-stalls.
-        let event = match with_timeout(Duration::from_secs(2), event_fut).await
-        {
-            Ok(ev) => ev,
-            Err(_) => {
-                warn!(
-                    "send_datagram: TRB {trb_ptr_waiting:#x} timed out; \
-                     leaking {} bytes",
-                    buf.len()
-                );
-                core::mem::forget(buf);
-                return Err("send_datagram: timeout");
+        // Same orphan-avoidance dance as the bulk-in path: keep
+        // waiting on the original TRB instead of pushing a duplicate.
+        // See the comment in `poll_bulk` for the full reasoning.
+        let mut waited: u32 = 0;
+        let event = loop {
+            let fut = EventFuture::new_for_trb(
+                &xhc.primary_event_ring,
+                trb_ptr_waiting,
+            );
+            match with_timeout(Duration::from_secs(2), fut).await {
+                Ok(ev) => break ev,
+                Err(_) => {
+                    waited = waited.wrapping_add(1);
+                    warn!(
+                        "send_datagram: TRB {trb_ptr_waiting:#x} \
+                         still waiting (#{waited}, len={})",
+                        buf.len()
+                    );
+                }
             }
         };
         event.transfer_result_ok()?;
