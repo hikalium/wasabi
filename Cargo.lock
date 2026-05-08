@@ -3,5 +3,12 @@
 version = 3
 
 [[package]]
+name = "version_macro"
+version = "0.1.0"
+
+[[package]]
 name = "wasabi"
 version = "0.1.0"
+dependencies = [
+ "version_macro",
+]
