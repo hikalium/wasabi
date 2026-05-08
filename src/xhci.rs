@@ -834,6 +834,20 @@ impl EndpointContext {
         ep.average_trb_length.write(max_packet_size);
         Ok(ep)
     }
+    pub fn new_bulk_out_endpoint(
+        max_packet_size: u16,
+        tr_dequeue_ptr: u64,
+    ) -> Result<Self> {
+        let mut ep = Self::new();
+        ep.set_ep_type(EndpointType::BulkOut)?;
+        ep.set_dequeue_cycle_state(true)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size)?;
+        ep.set_interval(10);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.average_trb_length.write(max_packet_size);
+        Ok(ep)
+    }
     fn set_ring_dequeue_pointer(&mut self, tr_dequeue_ptr: u64) -> Result<()> {
         self.tr_dequeue_ptr.write_bits(4, 60, tr_dequeue_ptr >> 4)
     }
@@ -2587,6 +2601,14 @@ impl NormalTrb {
                 | GenericTrbEntry::CTRL_BIT_DATA_DIR_IN
                 | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION
                 | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_SHORT_PACKET,
+        }
+    }
+    pub fn new_out(buf: &Pin<Box<[u8]>>) -> Self {
+        Self {
+            buf: buf.as_ptr() as u64,
+            option: buf.len() as u32,
+            control: (TrbType::Normal as u32) << 10
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION,
         }
     }
 }
