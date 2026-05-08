@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::executor::spawn_global;
 use crate::executor::with_timeout;
 use crate::info;
+use crate::ncm;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
 use crate::usb;
@@ -152,26 +153,20 @@ impl UsbNcmDriver {
             EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting)
                 .await?
                 .transfer_result_ok()?;
-            if &buf[0..4] != b"NCMH" {
-                continue;
-            }
-
-            let mut ntb_seq = [0u8; 2];
-            ntb_seq.copy_from_slice(&buf[6..8]);
-            let ntb_seq = u16::from_le_bytes(ntb_seq) as usize;
-
-            let mut ntb_len = [0u8; 2];
-            ntb_len.copy_from_slice(&buf[8..10]);
-            let ntb_len = u16::from_le_bytes(ntb_len) as usize;
-
+            let nth = match ncm::parse_nth16(&buf) {
+                Ok(nth) => nth,
+                Err(_) => continue,
+            };
+            let ntb_len = nth.block_length as usize;
             if ntb_len > buf.len() {
                 warn!(
-                    "NTB(seq={ntb_seq}): ntb_len {ntb_len} is larger than {}",
+                    "NTB(seq={}): block_length {ntb_len} > buf {}",
+                    nth.sequence,
                     buf.len()
                 );
                 continue;
             }
-            info!("NTB(seq={ntb_seq}): recv");
+            info!("NTB(seq={}): recv", nth.sequence);
             hexdump_bytes(&buf[0..ntb_len]);
         }
     }
