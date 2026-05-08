@@ -163,6 +163,7 @@ impl Console {
                 let mut prev_cmd = String::new();
                 swap(&mut prev_cmd, &mut self.input_buf);
                 self.prev_cmd = Some(prev_cmd);
+                print!("> ");
             }
             KeyEvent::CtrlLeft => {
                 self.ctrl_is_pressed = true;
