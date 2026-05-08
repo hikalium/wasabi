@@ -63,7 +63,7 @@ pub struct XhcRegisters {
 #[derive(PartialEq, Eq, Clone)]
 enum HostPortDriverState {
     NotConnected,
-    ConnectedAndRunning,
+    ConnectedAndRunning(u8),
     ConnectedButFailed,
 }
 
@@ -213,23 +213,43 @@ impl PciXhciDriver {
                         new_port_connected = Some(port);
                         break;
                     }
-                    // TODO: Do driver destruction
+                    if !e.ccs() {
+                        // Disconnect: reset the per-port state so a future
+                        // re-plug is detected, and free any allocated slot.
+                        // TODO: tear down running drivers properly.
+                        let prev = core::mem::replace(
+                            &mut host_port_driver_state[port],
+                            HostPortDriverState::NotConnected,
+                        );
+                        if let HostPortDriverState::ConnectedAndRunning(slot) =
+                            prev
+                        {
+                            info!("  {port:3}: Disconnected (slot {slot})");
+                            let _ = xhc
+                                .send_command(
+                                    GenericTrbEntry::cmd_disable_slot(slot),
+                                )
+                                .await;
+                        } else {
+                            info!("  {port:3}: Disconnected");
+                        }
+                    }
                 }
             }
         }
         if let Some(port) = new_port_connected {
             host_port_driver_state[port] =
                 HostPortDriverState::ConnectedButFailed;
-            Self::handle_port_connect(xhc, port).await?;
+            let slot = Self::handle_port_connect(xhc, port).await?;
             host_port_driver_state[port] =
-                HostPortDriverState::ConnectedAndRunning;
+                HostPortDriverState::ConnectedAndRunning(slot);
         }
         Ok(())
     }
     async fn handle_port_connect(
         xhc: &Rc<Controller>,
         port: usize,
-    ) -> Result<()> {
+    ) -> Result<u8> {
         let slot = Self::init_port(xhc, port).await?;
         let mut ctrl_ep_ring = with_timeout(
             Duration::from_secs(1),
@@ -370,9 +390,14 @@ impl PciXhciDriver {
                 descriptors,
             ) {
                 warn!("Failed to start USB device driver: {e:?}");
+                // Release the slot so it can be reused on the next connect.
+                let _ = xhc
+                    .send_command(GenericTrbEntry::cmd_disable_slot(slot))
+                    .await;
+                return Err(e);
             }
         }
-        Ok(())
+        Ok(slot)
     }
     fn start_device_driver(
         xhc: Rc<Controller>,
@@ -1685,6 +1710,7 @@ enum TrbType {
     Link = 6,
     NoOpTransfer = 8,
     EnableSlotCommand = 9,
+    DisableSlotCommand = 10,
     AddressDeviceCommand = 11,
     ConfigureEndpointCommand = 12,
     EvaluateContextCommand = 13,
@@ -1742,6 +1768,12 @@ impl GenericTrbEntry {
     pub fn cmd_enable_slot() -> Self {
         let mut trb = Self::default();
         trb.set_trb_type(TrbType::EnableSlotCommand);
+        trb
+    }
+    pub fn cmd_disable_slot(slot: u8) -> Self {
+        let mut trb = Self::default();
+        trb.set_trb_type(TrbType::DisableSlotCommand);
+        trb.set_slot_id(slot);
         trb
     }
     pub const TRB_CC_SUCCESS: u32 = 1;
