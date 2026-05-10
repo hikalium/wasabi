@@ -396,26 +396,77 @@ impl UsbNcmDriver {
     /// so output reaches the remote without any explicit forwarding
     /// here.
     async fn drive_remote_console() -> Result<()> {
-        let mut console = Console::default();
-        loop {
-            match TCP_SOCKET.pop_rx_byte() {
-                Some(b) => {
-                    let event = match b {
-                        b'\r' | b'\n' => KeyEvent::Enter,
-                        // Most terminals (cooked-mode tty, telnet,
-                        // most ssh clients) send DEL=0x7F for the
-                        // Backspace key. Map both to our "erase prev
-                        // char" event.
-                        0x7F | 0x08 => KeyEvent::Char('\x08'),
-                        b if b.is_ascii_graphic() || b == b' ' => {
-                            KeyEvent::Char(b as char)
-                        }
-                        _ => continue,
-                    };
-                    console.handle_key_down(event);
+        // Three-state ANSI escape decoder for the cursor keys: a
+        // terminal emits `ESC [ A` for Up, `ESC [ B` for Down, etc.
+        // Without this the literal 'A' would slip through as input
+        // and the leading ESC + '[' would be silently dropped.
+        enum Ansi {
+            Normal,
+            SeenEsc,
+            SeenCsi,
+        }
+        fn plain_byte_event(b: u8) -> Option<KeyEvent> {
+            match b {
+                b'\r' | b'\n' => Some(KeyEvent::Enter),
+                // Most terminals (cooked-mode tty, telnet, most ssh
+                // clients) send DEL=0x7F for the Backspace key. Map
+                // both to our "erase prev char" event.
+                0x7F | 0x08 => Some(KeyEvent::Char('\x08')),
+                b if b.is_ascii_graphic() || b == b' ' => {
+                    Some(KeyEvent::Char(b as char))
                 }
-                None => yield_execution().await,
+                _ => None,
             }
+        }
+
+        let mut console = Console::default();
+        let mut ansi = Ansi::Normal;
+        loop {
+            let b = match TCP_SOCKET.pop_rx_byte() {
+                Some(b) => b,
+                None => {
+                    yield_execution().await;
+                    continue;
+                }
+            };
+            ansi = match ansi {
+                Ansi::Normal => {
+                    if b == 0x1B {
+                        Ansi::SeenEsc
+                    } else {
+                        if let Some(e) = plain_byte_event(b) {
+                            console.handle_key_down(e);
+                        }
+                        Ansi::Normal
+                    }
+                }
+                Ansi::SeenEsc => {
+                    if b == b'[' {
+                        Ansi::SeenCsi
+                    } else {
+                        // Stray ESC — fall back to handling this
+                        // byte as if it had arrived in Normal state
+                        // so we don't eat the user's next keystroke.
+                        if let Some(e) = plain_byte_event(b) {
+                            console.handle_key_down(e);
+                        }
+                        Ansi::Normal
+                    }
+                }
+                Ansi::SeenCsi => {
+                    let ev = match b {
+                        b'A' => Some(KeyEvent::CursorUp),
+                        b'B' => Some(KeyEvent::CursorDown),
+                        b'C' => Some(KeyEvent::CursorRight),
+                        b'D' => Some(KeyEvent::CursorLeft),
+                        _ => None,
+                    };
+                    if let Some(e) = ev {
+                        console.handle_key_down(e);
+                    }
+                    Ansi::Normal
+                }
+            };
         }
     }
     async fn send_datagram(
