@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::keyboard::KeyEvent;
 use crate::print;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 #[derive(Default, PartialEq, Eq, Debug)]
@@ -15,9 +16,56 @@ pub enum InputEditResult {
 #[derive(Default)]
 pub struct InputMethodEditor {
     pending_string: String,
+    romaji_map2: BTreeMap<char, [&'static str; 5]>,
+    romaji_map3: BTreeMap<(char, char), [&'static str; 5]>,
 }
 
 impl InputMethodEditor {
+    pub fn init_romaji_map(&mut self) {
+        self.romaji_map2.insert('k', ["か", "き", "く", "け", "こ"]);
+        self.romaji_map2.insert('s', ["さ", "し", "す", "せ", "そ"]);
+        self.romaji_map2.insert('t', ["た", "ち", "つ", "て", "と"]);
+        self.romaji_map2.insert('n', ["な", "に", "ぬ", "ね", "の"]);
+        self.romaji_map2.insert('h', ["は", "ひ", "ふ", "へ", "ほ"]);
+        self.romaji_map2.insert('m', ["ま", "み", "む", "め", "も"]);
+        self.romaji_map2.insert('y', ["や", "", "ゆ", "いぇ", "よ"]);
+        self.romaji_map2.insert('r', ["ら", "り", "る", "れ", "ろ"]);
+        self.romaji_map2
+            .insert('w', ["わ", "うぃ", "う", "うぇ", "を"]);
+        self.romaji_map2.insert('g', ["が", "ぎ", "ぐ", "げ", "ご"]);
+        self.romaji_map2.insert('z', ["ざ", "じ", "ず", "ぜ", "ぞ"]);
+        self.romaji_map2.insert('d', ["だ", "ぢ", "づ", "で", "ど"]);
+        self.romaji_map2.insert('b', ["ば", "び", "ぶ", "べ", "ぼ"]);
+        self.romaji_map2.insert('p', ["ぱ", "ぴ", "ぷ", "ぺ", "ぽ"]);
+        self.romaji_map2
+            .insert('j', ["じゃ", "じ", "じゅ", "じぇ", "じょ"]);
+        self.romaji_map2.insert('d', ["だ", "ぢ", "づ", "で", "ど"]);
+
+        self.romaji_map3
+            .insert(('k', 'y'), ["きゃ", "きぃ", "きゅ", "きぇ", "きょ"]);
+        self.romaji_map3
+            .insert(('s', 'y'), ["しゃ", "しぃ", "しゅ", "しぇ", "しょ"]);
+        self.romaji_map3
+            .insert(('s', 'h'), ["しゃ", "し", "しゅ", "しぇ", "しょ"]);
+        self.romaji_map3
+            .insert(('c', 'h'), ["ちゃ", "ち", "ちゅ", "ちぇ", "ちょ"]);
+        self.romaji_map3
+            .insert(('n', 'y'), ["にゃ", "にぃ", "にゅ", "にぇ", "にょ"]);
+        self.romaji_map3
+            .insert(('h', 'y'), ["ひゃ", "ひぃ", "ひゅ", "ひぇ", "ひょ"]);
+        self.romaji_map3
+            .insert(('m', 'y'), ["みゃ", "みぃ", "みゅ", "みぇ", "みょ"]);
+        self.romaji_map3
+            .insert(('r', 'y'), ["りゃ", "りぃ", "りゅ", "りぇ", "りょ"]);
+        self.romaji_map3
+            .insert(('g', 'y'), ["ぎゃ", "ぎぃ", "ぎゅ", "ぎぇ", "ぎょ"]);
+        self.romaji_map3
+            .insert(('d', 'y'), ["ぢゃ", "ぢぃ", "ぢゅ", "ぢぇ", "ぢょ"]);
+        self.romaji_map3
+            .insert(('b', 'y'), ["びゃ", "びぃ", "びゅ", "びぇ", "びょ"]);
+        self.romaji_map3
+            .insert(('p', 'y'), ["ぴゃ", "ぴぃ", "ぴゅ", "ぴぇ", "ぴょ"]);
+    }
     pub fn boin_index(e: char) -> Option<usize> {
         match e {
             'a' => Some(0),
@@ -25,27 +73,6 @@ impl InputMethodEditor {
             'u' => Some(2),
             'e' => Some(3),
             'o' => Some(4),
-            _ => None,
-        }
-    }
-    pub fn shiin_index(e: char) -> Option<usize> {
-        match e {
-            'k' => Some(0),
-            's' => Some(1),
-            't' => Some(2),
-            'n' => Some(3),
-            'h' => Some(4),
-            'm' => Some(5),
-            'y' => Some(6),
-            'r' => Some(7),
-            'w' => Some(8),
-            // dakuon
-            'g' => Some(9),
-            'z' => Some(10),
-            'd' => Some(11),
-            'b' => Some(12),
-            // handakuon
-            'p' => Some(13),
             _ => None,
         }
     }
@@ -61,51 +88,58 @@ impl InputMethodEditor {
                     InputEditResult::PassThrough
                 }
             }
-            KeyEvent::Char(c) => {
+            KeyEvent::Char(prev1) => {
                 let c = {
-                    let prev1_char = c;
-                    let prev1 = Self::boin_index(c);
-                    let prev2_char = self.pending_string.chars().last();
-                    let prev2 = if !self.pending_string.is_empty() {
-                        self.pending_string
-                            .chars()
-                            .last()
-                            .and_then(Self::shiin_index)
-                    } else {
-                        None
+                    let (prev3, prev2) = {
+                        let mut it = self.pending_string.chars().rev();
+                        let prev2 = it.next();
+                        let prev3 = it.next();
+                        (prev3, prev2)
                     };
-                    if let (_, '-') = (prev2_char, prev1_char) {
-                        self.pending_string.pop();
+                    if '-' == prev1 {
                         'ー'
-                    } else if let (Some('n'), 'n') = (prev2_char, prev1_char) {
-                        self.pending_string.pop();
+                    } else if let (Some('n'), Some('n')) = (prev3, prev2) {
                         print!("\x08");
+                        self.pending_string.pop();
                         'ん'
-                    } else {
-                        match (prev2, prev1) {
-                            (Some(si), Some(bi)) => {
-                                self.pending_string.pop();
-                                print!("\x08");
-                                [
-                                    ['か', 'き', 'く', 'け', 'こ'],
-                                    ['さ', 'し', 'す', 'せ', 'そ'],
-                                    ['た', 'ち', 'つ', 'て', 'と'],
-                                    ['な', 'に', 'ぬ', 'ね', 'の'],
-                                    ['は', 'ひ', 'ふ', 'へ', 'ほ'],
-                                    ['ま', 'み', 'む', 'め', 'も'],
-                                    ['や', '　', 'ゆ', '　', 'よ'],
-                                    ['ら', 'り', 'る', 'れ', 'ろ'],
-                                    ['わ', '　', '　', '　', 'を'],
-                                    ['が', 'ぎ', 'ぐ', 'げ', 'ご'],
-                                    ['ざ', 'じ', 'ず', 'ぜ', 'ぞ'],
-                                    ['だ', 'ぢ', 'づ', 'で', 'ど'],
-                                    ['ば', 'び', 'ぶ', 'べ', 'ぼ'],
-                                    ['ぱ', 'ぴ', 'ぷ', 'ぺ', 'ぽ'],
-                                ][si][bi]
+                    } else if let Some(boin_index) = Self::boin_index(prev1) {
+                        let mut after = None;
+                        if let (Some(prev3), Some(prev2)) = (prev3, prev2) {
+                            if let Some(res) =
+                                self.romaji_map3.get(&(prev3, prev2))
+                            {
+                                let res = res[boin_index];
+                                if !res.is_empty() {
+                                    after = Some(res);
+                                    self.pending_string.pop();
+                                    self.pending_string.pop();
+                                }
                             }
-                            (_, Some(bi)) => ['あ', 'い', 'う', 'え', 'お'][bi],
-                            _ => c,
                         }
+                        if after.is_none() {
+                            if let Some(prev2) = prev2 {
+                                if let Some(res) = self.romaji_map2.get(&prev2)
+                                {
+                                    let res = res[boin_index];
+                                    if !res.is_empty() {
+                                        after = Some(res);
+                                        self.pending_string.pop();
+                                    }
+                                }
+                            }
+                        }
+                        if after.is_none() {
+                            after = Some(
+                                ["あ", "い", "う", "え", "お"][boin_index],
+                            );
+                        }
+                        if let Some(after) = after {
+                            after.chars().last().unwrap()
+                        } else {
+                            prev1
+                        }
+                    } else {
+                        prev1
                     }
                 };
                 self.pending_string.push(c);
@@ -161,5 +195,17 @@ fn basic_romaji_conversion() {
     assert_eq!(
         ime.send_key_down(KeyEvent::Char('\x08')),
         InputEditResult::PassThrough
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('t')),
+        InputEditResult::UpdatePendingString("t".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('y')),
+        InputEditResult::UpdatePendingString("y".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('a')),
+        InputEditResult::UpdatePendingString("ちゃ".to_string())
     );
 }
