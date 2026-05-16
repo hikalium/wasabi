@@ -42,7 +42,8 @@ use core::time::Duration;
 // IME on/off is global state shared by every Console instance (the USB
 // keyboard and the remote console each own their own Console), and is
 // also driven by the `ime` command which runs outside any Console.
-static IS_IME_ENABLED: AtomicBool = AtomicBool::new(false);
+// TEMPORARY: IME on by default at boot; revert to `false`.
+static IS_IME_ENABLED: AtomicBool = AtomicBool::new(true);
 pub fn is_ime_enabled() -> bool {
     IS_IME_ENABLED.load(Ordering::Relaxed)
 }
