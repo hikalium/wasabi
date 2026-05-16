@@ -1,8 +1,8 @@
 extern crate alloc;
 
 use crate::keyboard::KeyEvent;
-use crate::print;
 use alloc::string::String;
+use alloc::string::ToString;
 
 #[derive(Default, PartialEq, Eq, Debug)]
 pub enum InputEditResult {
@@ -28,24 +28,53 @@ impl InputMethodEditor {
             _ => None,
         }
     }
-    pub fn shiin_index(e: char) -> Option<usize> {
-        match e {
-            'k' => Some(0),
-            's' => Some(1),
-            't' => Some(2),
-            'n' => Some(3),
-            'h' => Some(4),
-            'm' => Some(5),
-            'y' => Some(6),
-            'r' => Some(7),
-            'w' => Some(8),
-            // dakuon
-            'g' => Some(9),
-            'z' => Some(10),
-            'd' => Some(11),
-            'b' => Some(12),
-            // handakuon
-            'p' => Some(13),
+
+    pub fn is_consonant(e: char) -> bool {
+        e.is_ascii_lowercase() && Self::boin_index(e).is_none()
+    }
+    /// Replace the pending (pre-conversion) string. Used by callers to
+    /// keep the IME in sync after they reset or reload the input line.
+    pub fn set_pending(&mut self, s: String) {
+        self.pending_string = s;
+    }
+    // The kana row (a, i, u, e, o) that a consonant spells. An empty
+    // string means the row has no kana for that vowel.
+    fn romaji_row2(c: char) -> Option<[&'static str; 5]> {
+        match c {
+            'k' => Some(["か", "き", "く", "け", "こ"]),
+            's' => Some(["さ", "し", "す", "せ", "そ"]),
+            't' => Some(["た", "ち", "つ", "て", "と"]),
+            'n' => Some(["な", "に", "ぬ", "ね", "の"]),
+            'h' => Some(["は", "ひ", "ふ", "へ", "ほ"]),
+            'm' => Some(["ま", "み", "む", "め", "も"]),
+            'y' => Some(["や", "", "ゆ", "いぇ", "よ"]),
+            'r' => Some(["ら", "り", "る", "れ", "ろ"]),
+            'w' => Some(["わ", "うぃ", "う", "うぇ", "を"]),
+            'g' => Some(["が", "ぎ", "ぐ", "げ", "ご"]),
+            'z' => Some(["ざ", "じ", "ず", "ぜ", "ぞ"]),
+            'd' => Some(["だ", "ぢ", "づ", "で", "ど"]),
+            'b' => Some(["ば", "び", "ぶ", "べ", "ぼ"]),
+            'p' => Some(["ぱ", "ぴ", "ぷ", "ぺ", "ぽ"]),
+            'j' => Some(["じゃ", "じ", "じゅ", "じぇ", "じょ"]),
+            _ => None,
+        }
+    }
+    // The kana row that a pair of consonants spells, such as ky or sh.
+    fn romaji_row3(c1: char, c2: char) -> Option<[&'static str; 5]> {
+        match (c1, c2) {
+            ('k', 'y') => Some(["きゃ", "きぃ", "きゅ", "きぇ", "きょ"]),
+            ('s', 'y') => Some(["しゃ", "しぃ", "しゅ", "しぇ", "しょ"]),
+            ('s', 'h') => Some(["しゃ", "し", "しゅ", "しぇ", "しょ"]),
+            ('c', 'h') => Some(["ちゃ", "ち", "ちゅ", "ちぇ", "ちょ"]),
+            ('t', 'y') => Some(["ちゃ", "ち", "ちゅ", "ちぇ", "ちょ"]),
+            ('n', 'y') => Some(["にゃ", "にぃ", "にゅ", "にぇ", "にょ"]),
+            ('h', 'y') => Some(["ひゃ", "ひぃ", "ひゅ", "ひぇ", "ひょ"]),
+            ('m', 'y') => Some(["みゃ", "みぃ", "みゅ", "みぇ", "みょ"]),
+            ('r', 'y') => Some(["りゃ", "りぃ", "りゅ", "りぇ", "りょ"]),
+            ('g', 'y') => Some(["ぎゃ", "ぎぃ", "ぎゅ", "ぎぇ", "ぎょ"]),
+            ('d', 'y') => Some(["ぢゃ", "ぢぃ", "ぢゅ", "ぢぇ", "ぢょ"]),
+            ('b', 'y') => Some(["びゃ", "びぃ", "びゅ", "びぇ", "びょ"]),
+            ('p', 'y') => Some(["ぴゃ", "ぴぃ", "ぴゅ", "ぴぇ", "ぴょ"]),
             _ => None,
         }
     }
@@ -61,54 +90,65 @@ impl InputMethodEditor {
                     InputEditResult::PassThrough
                 }
             }
-            KeyEvent::Char(c) => {
-                let c = {
-                    let prev1_char = c;
-                    let prev1 = Self::boin_index(c);
-                    let prev2_char = self.pending_string.chars().last();
-                    let prev2 = if !self.pending_string.is_empty() {
-                        self.pending_string
-                            .chars()
-                            .last()
-                            .and_then(Self::shiin_index)
-                    } else {
-                        None
+            KeyEvent::Char(prev1) => {
+                let s = {
+                    let (prev3, prev2) = {
+                        let mut it = self.pending_string.chars().rev();
+                        let prev2 = it.next();
+                        let prev3 = it.next();
+                        (prev3, prev2)
                     };
-                    if let (_, '-') = (prev2_char, prev1_char) {
+                    if '-' == prev1 {
+                        String::from('ー')
+                    } else if let (Some('n'), Some('n')) = (prev3, prev2) {
                         self.pending_string.pop();
-                        'ー'
-                    } else if let (Some('n'), 'n') = (prev2_char, prev1_char) {
-                        self.pending_string.pop();
-                        print!("\x08");
-                        'ん'
-                    } else {
-                        match (prev2, prev1) {
-                            (Some(si), Some(bi)) => {
-                                self.pending_string.pop();
-                                print!("\x08");
-                                [
-                                    ['か', 'き', 'く', 'け', 'こ'],
-                                    ['さ', 'し', 'す', 'せ', 'そ'],
-                                    ['た', 'ち', 'つ', 'て', 'と'],
-                                    ['な', 'に', 'ぬ', 'ね', 'の'],
-                                    ['は', 'ひ', 'ふ', 'へ', 'ほ'],
-                                    ['ま', 'み', 'む', 'め', 'も'],
-                                    ['や', '　', 'ゆ', '　', 'よ'],
-                                    ['ら', 'り', 'る', 'れ', 'ろ'],
-                                    ['わ', '　', '　', '　', 'を'],
-                                    ['が', 'ぎ', 'ぐ', 'げ', 'ご'],
-                                    ['ざ', 'じ', 'ず', 'ぜ', 'ぞ'],
-                                    ['だ', 'ぢ', 'づ', 'で', 'ど'],
-                                    ['ば', 'び', 'ぶ', 'べ', 'ぼ'],
-                                    ['ぱ', 'ぴ', 'ぷ', 'ぺ', 'ぽ'],
-                                ][si][bi]
+                        String::from('ん')
+                    } else if prev2
+                        .map(|prev2| {
+                            prev2 == prev1 && Self::is_consonant(prev1)
+                        })
+                        .unwrap_or_default()
+                    {
+                        String::from('っ')
+                    } else if let Some(boin_index) = Self::boin_index(prev1) {
+                        let mut after = None;
+                        if let (Some(prev3), Some(prev2)) = (prev3, prev2) {
+                            if let Some(res) = Self::romaji_row3(prev3, prev2) {
+                                let res = res[boin_index];
+                                if !res.is_empty() {
+                                    after = Some(res);
+                                    self.pending_string.pop();
+                                    self.pending_string.pop();
+                                }
                             }
-                            (_, Some(bi)) => ['あ', 'い', 'う', 'え', 'お'][bi],
-                            _ => c,
                         }
+                        if after.is_none() {
+                            if let Some(prev2) = prev2 {
+                                if let Some(res) = Self::romaji_row2(prev2) {
+                                    let res = res[boin_index];
+                                    if !res.is_empty() {
+                                        after = Some(res);
+                                        self.pending_string.pop();
+                                    }
+                                }
+                            }
+                        }
+                        if after.is_none() {
+                            after = Some(
+                                ["あ", "い", "う", "え", "お"][boin_index],
+                            );
+                        }
+                        // after: Option<&str>
+                        if let Some(after) = after {
+                            after.to_string()
+                        } else {
+                            String::from(prev1)
+                        }
+                    } else {
+                        String::from(prev1)
                     }
                 };
-                self.pending_string.push(c);
+                self.pending_string += &s;
                 InputEditResult::UpdatePendingString(
                     self.pending_string.clone(),
                 )
@@ -161,5 +201,17 @@ fn basic_romaji_conversion() {
     assert_eq!(
         ime.send_key_down(KeyEvent::Char('\x08')),
         InputEditResult::PassThrough
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('t')),
+        InputEditResult::UpdatePendingString("t".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('y')),
+        InputEditResult::UpdatePendingString("ty".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('a')),
+        InputEditResult::UpdatePendingString("ちゃ".to_string())
     );
 }
