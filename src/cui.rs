@@ -35,14 +35,37 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::swap;
 use core::ptr::write_volatile;
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 use core::time::Duration;
+
+// IME on/off is global state shared by every Console instance (the USB
+// keyboard and the remote console each own their own Console), and is
+// also driven by the `ime` command which runs outside any Console.
+static IS_IME_ENABLED: AtomicBool = AtomicBool::new(false);
+pub fn is_ime_enabled() -> bool {
+    IS_IME_ENABLED.load(Ordering::Relaxed)
+}
+pub fn set_ime_enabled(choice: bool) {
+    IS_IME_ENABLED.store(choice, Ordering::Relaxed);
+    let (vw, vh) = global_vram_resolutions();
+    let buf = &mut *GLOBAL_VRAM.lock();
+    // Ignore failure (e.g. zero-resolution VRAM under the test harness).
+    let _ = fill_rect(buf, 0x000000, vw - 16, vh - 16, 16, 16);
+    draw_str_fg(
+        buf,
+        vw - 16,
+        vh - 16,
+        0xffffff,
+        if choice { "あ" } else { "Aa" },
+    );
+}
 
 #[derive(Default)]
 pub struct Console {
     prev_cmd: Option<String>,
     input_buf: String,
     ctrl_is_pressed: bool,
-    is_ime_enabled: bool,
 }
 impl Console {
     pub fn boin_index(e: char) -> Option<usize> {
@@ -91,20 +114,10 @@ impl Console {
             }
             KeyEvent::Char(c) => {
                 if c == ' ' && self.ctrl_is_pressed {
-                    self.is_ime_enabled = !self.is_ime_enabled;
-                    let (vw, vh) = global_vram_resolutions();
-                    let buf = &mut *GLOBAL_VRAM.lock();
-                    fill_rect(buf, 0x000000, vw - 16, vh - 16, 16, 16).unwrap();
-                    draw_str_fg(
-                        buf,
-                        vw - 16,
-                        vh - 16,
-                        0xffffff,
-                        if self.is_ime_enabled { "あ" } else { "Aa" },
-                    );
+                    set_ime_enabled(!is_ime_enabled());
                     return;
                 }
-                let c = if self.is_ime_enabled {
+                let c = if is_ime_enabled() {
                     let prev1_char = c;
                     let prev1 = Self::boin_index(c);
                     let prev2_char = self.input_buf.chars().last();
@@ -205,6 +218,29 @@ pub fn run_cmd_debug(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+pub fn run_cmd_ime(args: &[&str]) -> Result<()> {
+    match *args.get(1).unwrap_or(&"") {
+        "on" => {
+            set_ime_enabled(true);
+            info!("ime is on");
+            return Ok(());
+        }
+        "off" => {
+            set_ime_enabled(false);
+            info!("ime is off");
+            return Ok(());
+        }
+        "" => {
+            info!("ime is {}", if is_ime_enabled() { "on" } else { "off" });
+            return Ok(());
+        }
+        _ => error!("Expected on or off"),
+    };
+    info!("Usage:");
+    info!("- ime [on|off]");
+    Ok(())
+}
+
 pub fn run_cmd_show(args: &[&str]) -> Result<()> {
     if "mmap" == *args.get(1).unwrap_or(&"") {
         if let Some(mmap) = EFI_MEMORY_MAP.lock().as_ref() {
@@ -254,6 +290,22 @@ mod uname_tests {
     }
 }
 
+#[cfg(test)]
+mod ime_tests {
+    use super::is_ime_enabled;
+    use super::run_cmd;
+
+    #[test_case]
+    fn ime_command_toggles_state() {
+        run_cmd("ime off").unwrap();
+        assert!(!is_ime_enabled());
+        run_cmd("ime on").unwrap();
+        assert!(is_ime_enabled());
+        run_cmd("ime off").unwrap();
+        assert!(!is_ime_enabled());
+    }
+}
+
 pub fn run_cmd_reboot(_args: &[&str]) -> Result<()> {
     let params = (*REBOOT_PARAMS.lock())
         .as_ref()
@@ -282,6 +334,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
                 Ok(())
             }
             "debug" => run_cmd_debug(&args),
+            "ime" => run_cmd_ime(&args),
             "show" => run_cmd_show(&args),
             "demo" => run_cmd_demo(&args),
             "ping" => run_cmd_ping(&args),
