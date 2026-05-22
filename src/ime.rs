@@ -1,7 +1,6 @@
 extern crate alloc;
 
 use crate::keyboard::KeyEvent;
-use crate::print;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 
@@ -76,11 +75,16 @@ impl InputMethodEditor {
             _ => None,
         }
     }
+    /// Replace the pending (pre-conversion) string. Used by callers to
+    /// keep the IME in sync after they reset or reload the input line.
+    pub fn set_pending(&mut self, s: String) {
+        self.pending_string = s;
+    }
     pub fn send_key_down(&mut self, e: KeyEvent) -> InputEditResult {
         match e {
             KeyEvent::Char('\x08') => {
                 // Backspace
-                if let Some(_) = self.pending_string.pop() {
+                if self.pending_string.pop().is_some() {
                     InputEditResult::UpdatePendingString(
                         self.pending_string.clone(),
                     )
@@ -99,7 +103,6 @@ impl InputMethodEditor {
                     if '-' == prev1 {
                         'ー'
                     } else if let (Some('n'), Some('n')) = (prev3, prev2) {
-                        print!("\x08");
                         self.pending_string.pop();
                         'ん'
                     } else if let Some(boin_index) = Self::boin_index(prev1) {
@@ -156,6 +159,7 @@ impl InputMethodEditor {
 fn basic_romaji_conversion() {
     use alloc::string::ToString;
     let mut ime = InputMethodEditor::default();
+    ime.init_romaji_map();
     assert_eq!(
         ime.send_key_down(KeyEvent::Char('a')),
         InputEditResult::UpdatePendingString("あ".to_string())
