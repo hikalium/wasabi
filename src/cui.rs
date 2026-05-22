@@ -6,6 +6,8 @@ use crate::font::get_glyph_width;
 use crate::graphics::draw_str_fg;
 use crate::graphics::fill_rect;
 use crate::hpet::global_timestamp;
+use crate::ime::InputEditResult;
+use crate::ime::InputMethodEditor;
 use crate::info;
 use crate::init::EFI_MEMORY_MAP;
 use crate::init::REBOOT_PARAMS;
@@ -46,12 +48,25 @@ pub fn set_ime_enabled(choice: bool) {
     });
 }
 
-#[derive(Default)]
 pub struct Console {
     prev_cmd: Option<String>,
     input_buf: String,
     prev_input_was_cr: bool,
     ctrl_is_pressed: bool,
+    ime: InputMethodEditor,
+}
+impl Default for Console {
+    fn default() -> Self {
+        let mut ime = InputMethodEditor::default();
+        ime.init_romaji_map();
+        Self {
+            prev_cmd: None,
+            input_buf: String::new(),
+            prev_input_was_cr: false,
+            ctrl_is_pressed: false,
+            ime,
+        }
+    }
 }
 impl Console {
     /// Maps raw newline characters onto [`KeyEvent::Enter`] so that CR,
@@ -71,36 +86,57 @@ impl Console {
             e => Some(e),
         }
     }
-    pub fn boin_index(e: char) -> Option<usize> {
-        match e {
-            'a' => Some(0),
-            'i' => Some(1),
-            'u' => Some(2),
-            'e' => Some(3),
-            'o' => Some(4),
-            _ => None,
+    // Echo a literal char (or apply a Backspace) with no IME, keeping
+    // input_buf and the on-screen line in step.
+    fn input_plain(&mut self, c: char) {
+        if c == '\x08' {
+            if let Some(prev_char) = self.input_buf.pop() {
+                if get_glyph_width(prev_char) == 16 {
+                    print!("\x08");
+                    print!("\x08");
+                } else {
+                    print!("\x08");
+                }
+            }
+        } else {
+            self.input_buf.push(c);
+            print!("{c}");
         }
     }
-    pub fn shiin_index(e: char) -> Option<usize> {
-        match e {
-            'k' => Some(0),
-            's' => Some(1),
-            't' => Some(2),
-            'n' => Some(3),
-            'h' => Some(4),
-            'm' => Some(5),
-            'y' => Some(6),
-            'r' => Some(7),
-            'w' => Some(8),
-            // dakuon
-            'g' => Some(9),
-            'z' => Some(10),
-            'd' => Some(11),
-            'b' => Some(12),
-            // handakuon
-            'p' => Some(13),
-            _ => None,
+    // Redraw after the IME rewrote the line: back over the changed tail
+    // of the old text, draw the new tail, then blank any leftover cells
+    // when the new tail is shorter (a wide glyph is two cells).
+    fn render_ime_line(&mut self, new: &str) {
+        let cols = |s: &str, skip: usize| -> usize {
+            s.chars()
+                .skip(skip)
+                .map(|ch| if get_glyph_width(ch) == 16 { 2 } else { 1 })
+                .sum()
+        };
+        let common = self
+            .input_buf
+            .chars()
+            .zip(new.chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let old_cols = cols(&self.input_buf, common);
+        for _ in 0..old_cols {
+            print!("\x08");
         }
+        for ch in new.chars().skip(common) {
+            print!("{ch}");
+        }
+        let new_cols = cols(new, common);
+        if old_cols > new_cols {
+            let pad = old_cols - new_cols;
+            for _ in 0..pad {
+                print!(" ");
+            }
+            for _ in 0..pad {
+                print!("\x08");
+            }
+        }
+        self.input_buf = new.into();
     }
     pub fn handle_key_down(&mut self, e: KeyEvent) {
         let e = match self.normalize_newline(e) {
@@ -108,78 +144,36 @@ impl Console {
             None => return,
         };
         match e {
-            KeyEvent::Char('\x08') => {
-                if let Some(prev_char) = self.input_buf.pop() {
-                    let gw = get_glyph_width(prev_char);
-                    if gw == 16 {
-                        print!("\x08");
-                        print!("\x08");
-                    } else {
-                        print!("\x08");
-                    }
-                }
-            }
             KeyEvent::Char(c) => {
                 if c == ' ' && self.ctrl_is_pressed {
-                    set_ime_enabled(!is_ime_enabled());
+                    let enable = !is_ime_enabled();
+                    set_ime_enabled(enable);
+                    // Align the IME's pending text with the line already
+                    // on screen so the next keystroke redraws correctly.
+                    if enable {
+                        self.ime.set_pending(self.input_buf.clone());
+                    }
                     return;
                 }
-                let c = if is_ime_enabled() {
-                    let prev1_char = c;
-                    let prev1 = Self::boin_index(c);
-                    let prev2_char = self.input_buf.chars().last();
-                    let prev2 = if !self.input_buf.is_empty() {
-                        self.input_buf
-                            .chars()
-                            .last()
-                            .and_then(Self::shiin_index)
-                    } else {
-                        None
-                    };
-                    if let (_, '-') = (prev2_char, prev1_char) {
-                        self.input_buf.pop();
-                        'ー'
-                    } else if let (Some('n'), 'n') = (prev2_char, prev1_char) {
-                        self.input_buf.pop();
-                        print!("\x08");
-                        'ん'
-                    } else {
-                        match (prev2, prev1) {
-                            (Some(si), Some(bi)) => {
-                                self.input_buf.pop();
-                                print!("\x08");
-                                [
-                                    ['か', 'き', 'く', 'け', 'こ'],
-                                    ['さ', 'し', 'す', 'せ', 'そ'],
-                                    ['た', 'ち', 'つ', 'て', 'と'],
-                                    ['な', 'に', 'ぬ', 'ね', 'の'],
-                                    ['は', 'ひ', 'ふ', 'へ', 'ほ'],
-                                    ['ま', 'み', 'む', 'め', 'も'],
-                                    ['や', '　', 'ゆ', '　', 'よ'],
-                                    ['ら', 'り', 'る', 'れ', 'ろ'],
-                                    ['わ', '　', '　', '　', 'を'],
-                                    ['が', 'ぎ', 'ぐ', 'げ', 'ご'],
-                                    ['ざ', 'じ', 'ず', 'ぜ', 'ぞ'],
-                                    ['だ', 'ぢ', 'づ', 'で', 'ど'],
-                                    ['ば', 'び', 'ぶ', 'べ', 'ぼ'],
-                                    ['ぱ', 'ぴ', 'ぷ', 'ぺ', 'ぽ'],
-                                ][si][bi]
-                            }
-                            (_, Some(bi)) => ['あ', 'い', 'う', 'え', 'お'][bi],
-                            _ => c,
+                if is_ime_enabled() {
+                    match self.ime.send_key_down(KeyEvent::Char(c)) {
+                        InputEditResult::UpdatePendingString(s)
+                        | InputEditResult::ConfirmString(s) => {
+                            self.render_ime_line(&s)
                         }
+                        InputEditResult::PassThrough => self.input_plain(c),
                     }
                 } else {
-                    c
-                };
-                self.input_buf.push(c);
-                print!("{c}");
+                    self.input_plain(c);
+                }
             }
             KeyEvent::CursorUp => {
                 if let Some(prev_cmd) = self.prev_cmd.as_mut() {
                     swap(prev_cmd, &mut self.input_buf);
                     print!("\n{}", self.input_buf);
                 }
+                // Recalled line replaces the buffer; resync the IME.
+                self.ime.set_pending(self.input_buf.clone());
             }
             KeyEvent::Enter => {
                 println!();
@@ -189,6 +183,7 @@ impl Console {
                 let mut prev_cmd = String::new();
                 swap(&mut prev_cmd, &mut self.input_buf);
                 self.prev_cmd = Some(prev_cmd);
+                self.ime.set_pending(String::new());
                 print!("> ");
             }
             KeyEvent::CtrlLeft => {
