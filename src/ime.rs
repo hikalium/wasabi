@@ -10,7 +10,6 @@ pub enum InputEditResult {
     #[default]
     PassThrough,
     UpdatePendingString(String),
-    ConfirmString(String),
 }
 
 #[derive(Default)]
@@ -109,7 +108,7 @@ impl InputMethodEditor {
                     };
                     if '-' == prev1 {
                         String::from('ー')
-                    } else if let (Some('n'), Some('n')) = (prev3, prev2) {
+                    } else if let (Some('n'), 'n') = (prev2, prev1) {
                         self.pending_string.pop();
                         String::from('ん')
                     } else if prev2
@@ -118,7 +117,8 @@ impl InputMethodEditor {
                         })
                         .unwrap_or_default()
                     {
-                        String::from('っ')
+                        self.pending_string.pop();
+                        String::from('っ') + &String::from(prev1)
                     } else if let Some(boin_index) = Self::boin_index(prev1) {
                         let mut after = None;
                         if let (Some(prev3), Some(prev2)) = (prev3, prev2) {
@@ -226,5 +226,25 @@ fn basic_romaji_conversion() {
     assert_eq!(
         ime.send_key_down(KeyEvent::Char('a')),
         InputEditResult::UpdatePendingString("ちゃ".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('t')),
+        InputEditResult::UpdatePendingString("ちゃt".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('t')),
+        InputEditResult::UpdatePendingString("ちゃっt".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('o')),
+        InputEditResult::UpdatePendingString("ちゃっと".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('n')),
+        InputEditResult::UpdatePendingString("ちゃっとn".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('n')),
+        InputEditResult::UpdatePendingString("ちゃっとん".to_string())
     );
 }
