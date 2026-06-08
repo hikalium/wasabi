@@ -125,6 +125,15 @@ impl InputMethodEditor {
                         String::from('、')
                     } else if '.' == prev1 {
                         String::from('。')
+                    } else if ' ' == prev1 {
+                        if self.pending_string == "きょう" {
+                            self.pending_string.pop();
+                            self.pending_string.pop();
+                            self.pending_string.pop();
+                            "今日".to_string()
+                        } else {
+                            "　".to_string()
+                        }
                     } else if let (Some('n'), 'n') = (prev2, prev1) {
                         self.pending_string.pop();
                         String::from('ん')
@@ -355,4 +364,30 @@ fn comma_and_period_become_japanese_punctuation() {
     );
     assert_eq!(get_glyph_width('、'), 16);
     assert_eq!(get_glyph_width('。'), 16);
+}
+
+#[test_case]
+fn today_conversion() {
+    use alloc::string::ToString;
+    let mut ime = InputMethodEditor::default();
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('k')),
+        InputEditResult::UpdatePendingString("k".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('y')),
+        InputEditResult::UpdatePendingString("ky".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('o')),
+        InputEditResult::UpdatePendingString("きょ".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char('u')),
+        InputEditResult::UpdatePendingString("きょう".to_string())
+    );
+    assert_eq!(
+        ime.send_key_down(KeyEvent::Char(' ')),
+        InputEditResult::UpdatePendingString("今日".to_string())
+    );
 }
