@@ -147,8 +147,7 @@ impl Console {
                 }
                 if is_ime_enabled() {
                     match self.ime.send_key_down(KeyEvent::Char(c)) {
-                        InputEditResult::UpdatePendingString(s)
-                        | InputEditResult::ConfirmString(s) => {
+                        InputEditResult::UpdatePendingString(s) => {
                             self.render_ime_line(&s)
                         }
                         InputEditResult::PassThrough => self.input_plain(c),
