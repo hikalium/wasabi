@@ -126,16 +126,6 @@ impl Console {
         for ch in new.chars().skip(common) {
             print!("{ch}");
         }
-        let new_cols = cols(new, common);
-        if old_cols > new_cols {
-            let pad = old_cols - new_cols;
-            for _ in 0..pad {
-                print!(" ");
-            }
-            for _ in 0..pad {
-                print!("\x08");
-            }
-        }
         self.input_buf = new.into();
     }
     pub fn handle_key_down(&mut self, e: KeyEvent) {
