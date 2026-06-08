@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::keyboard::KeyEvent;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::string::ToString;
 
 #[derive(Default, PartialEq, Eq, Debug)]
 pub enum InputEditResult {
@@ -49,6 +50,8 @@ impl InputMethodEditor {
         self.romaji_map3
             .insert(('c', 'h'), ["ちゃ", "ち", "ちゅ", "ちぇ", "ちょ"]);
         self.romaji_map3
+            .insert(('t', 'y'), ["ちゃ", "ち", "ちゅ", "ちぇ", "ちょ"]);
+        self.romaji_map3
             .insert(('n', 'y'), ["にゃ", "にぃ", "にゅ", "にぇ", "にょ"]);
         self.romaji_map3
             .insert(('h', 'y'), ["ひゃ", "ひぃ", "ひゅ", "ひぇ", "ひょ"]);
@@ -75,6 +78,10 @@ impl InputMethodEditor {
             _ => None,
         }
     }
+
+    pub fn is_consonant(e: char) -> bool {
+        e.is_ascii_lowercase() && Self::boin_index(e).is_none()
+    }
     /// Replace the pending (pre-conversion) string. Used by callers to
     /// keep the IME in sync after they reset or reload the input line.
     pub fn set_pending(&mut self, s: String) {
@@ -93,7 +100,7 @@ impl InputMethodEditor {
                 }
             }
             KeyEvent::Char(prev1) => {
-                let c = {
+                let s = {
                     let (prev3, prev2) = {
                         let mut it = self.pending_string.chars().rev();
                         let prev2 = it.next();
@@ -101,10 +108,17 @@ impl InputMethodEditor {
                         (prev3, prev2)
                     };
                     if '-' == prev1 {
-                        'ー'
+                        String::from('ー')
                     } else if let (Some('n'), Some('n')) = (prev3, prev2) {
                         self.pending_string.pop();
-                        'ん'
+                        String::from('ん')
+                    } else if prev2
+                        .and_then(|prev2| {
+                            Some(prev2 == prev1 && Self::is_consonant(prev1))
+                        })
+                        .unwrap_or_default()
+                    {
+                        String::from('っ')
                     } else if let Some(boin_index) = Self::boin_index(prev1) {
                         let mut after = None;
                         if let (Some(prev3), Some(prev2)) = (prev3, prev2) {
@@ -136,16 +150,17 @@ impl InputMethodEditor {
                                 ["あ", "い", "う", "え", "お"][boin_index],
                             );
                         }
+                        // after: Option<&str>
                         if let Some(after) = after {
-                            after.chars().last().unwrap()
+                            after.to_string()
                         } else {
-                            prev1
+                            String::from(prev1)
                         }
                     } else {
-                        prev1
+                        String::from(prev1)
                     }
                 };
-                self.pending_string.push(c);
+                self.pending_string += &s;
                 InputEditResult::UpdatePendingString(
                     self.pending_string.clone(),
                 )
@@ -206,7 +221,7 @@ fn basic_romaji_conversion() {
     );
     assert_eq!(
         ime.send_key_down(KeyEvent::Char('y')),
-        InputEditResult::UpdatePendingString("y".to_string())
+        InputEditResult::UpdatePendingString("ty".to_string())
     );
     assert_eq!(
         ime.send_key_down(KeyEvent::Char('a')),
