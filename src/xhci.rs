@@ -4,6 +4,7 @@ use crate::allocator::ALLOCATOR;
 use crate::bits::extract_bits;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
+use crate::executor::with_timeout;
 use crate::executor::yield_execution;
 use crate::info;
 use crate::keyboard::UsbKeyboardDriver;
@@ -33,6 +34,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::cmp::max;
+use core::fmt::Debug;
 use core::future::Future;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
@@ -90,14 +92,15 @@ impl PciXhciDriver {
                 as *mut RuntimeRegisters)
         };
         let portsc = PortSc::new(bar0, cap_regs.as_ref());
-        let num_slots = cap_regs.as_ref().num_of_ports();
+        let num_slots = cap_regs.as_ref().num_of_device_slots();
         let mut doorbell_regs = Vec::new();
-        for i in 0..=num_slots {
-            let ptr = unsafe {
-                bar0.addr().add(cap_regs.as_ref().dboff()).add(4 * i)
-                    as *mut u32
-            };
-            doorbell_regs.push(Rc::new(Doorbell::new(ptr)))
+        let db_base = unsafe { bar0.addr().add(cap_regs.as_ref().dboff()) };
+        for slot in 0..=num_slots {
+            // SAFETY: db_base is pointing a non-null memory address for the
+            // doorbells as given by the xHCI's capability register and slot
+            // number is also valid (0 for xHC's command ring and 1..=num_slots
+            // for each slots)
+            unsafe { doorbell_regs.push(Rc::new(Doorbell::new(db_base, slot))) }
         }
         // number of doorbells will be 1 + num_slots since doorbell[] is for the
         // host controller.
@@ -324,18 +327,18 @@ impl PciXhciDriver {
     }
     async fn init_port(xhc: &Rc<Controller>, port: usize) -> Result<u8> {
         let portsc = xhc.regs.portsc.get(port).ok_or("invalid portsc")?;
-        info!("xhci: resetting port {port}");
         portsc.reset_port().await;
-        info!("xhci: port {port} has been reset");
         portsc
             .is_enabled()
             .then_some(())
             .ok_or("port is not enabled")?;
-        info!("xhci: port {port} is enabled");
-        let slot = xhc
-            .send_command(GenericTrbEntry::cmd_enable_slot())
-            .await?
-            .slot_id();
+        info!("port {port} is succesfully enabled");
+        let slot = with_timeout(
+            Duration::from_secs(1),
+            xhc.send_command(GenericTrbEntry::cmd_enable_slot()),
+        )
+        .await?
+        .slot_id();
         let output_context = OutputContext::default();
         xhc.set_output_context_for_slot(slot, output_context);
         Ok(slot)
@@ -798,7 +801,7 @@ impl Controller {
         unsafe { self.regs.op_regs.get_unchecked_mut() }
             .set_dcbaa_ptr(&mut self.device_context_base_array.lock())
     }
-    async fn send_command(
+    pub async fn send_command(
         &self,
         cmd: GenericTrbEntry,
     ) -> Result<GenericTrbEntry> {
@@ -1005,7 +1008,7 @@ impl EventRing {
             wait_list: Default::default(),
         })
     }
-    fn ring_phys_addr(&self) -> u64 {
+    pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }
     fn set_erdp(&mut self, erdp: *mut u64) {
@@ -1343,7 +1346,7 @@ struct EventWaitCond {
 }
 
 #[derive(Debug)]
-struct EventWaitInfo {
+pub struct EventWaitInfo {
     cond: EventWaitCond,
     trbs: Mutex<VecDeque<GenericTrbEntry>>,
 }
@@ -1379,7 +1382,7 @@ impl EventWaitInfo {
 // [xhci] 5.4.8: PORTSC
 // OperationalBase + (0x400 + 0x10 * (n - 1))
 // where n = Port Number (1, 2, ..., MaxPorts)
-struct PortSc {
+pub struct PortSc {
     entries: Vec<Rc<PortScEntry>>,
 }
 impl PortSc {
@@ -1400,12 +1403,53 @@ impl PortSc {
     fn port_range(&self) -> Range<usize> {
         1..self.entries.len() + 1
     }
-    fn get(&self, port: usize) -> Option<Rc<PortScEntry>> {
+    pub fn get(&self, port: usize) -> Option<Rc<PortScEntry>> {
         self.entries.get(port.wrapping_sub(1)).cloned()
     }
 }
+// 4.19.1.1 USB2 Root Hub Port
+// Figure 4-25: USB2 Root Hub Port State Machine
+// Powered-off -- Wr(PP=1) -> Disconnected
+// Disconnected -- CCS=1 -> Disabled
+// Disabled -- Wr(PR=1) -> Reset
+// Reset -- PR=0 -> Enabled
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum PortState {
+    // Values: (PP, CCS, PED, PR)
+    PoweredOff,   // (0, 0, 0, 0)
+    Disconnected, // (1, 0, 0, 0)
+    Disabled,     // (1, 1, 0, 0)
+    Enabled,      // (1, 1, 1, 0)
+    Reset,        // (1, 1, 0, 1)
+    TestMode,     // (1, _, _, 1)
+    Unknown {
+        pp: bool,
+        ccs: bool,
+        ped: bool,
+        pr: bool,
+    },
+}
+impl From<&PortScEntry> for PortState {
+    fn from(portsc: &PortScEntry) -> Self {
+        let pp = portsc.pp();
+        let ccs = portsc.ccs();
+        let ped = portsc.ped();
+        let pr = portsc.pr();
+        match (pp as u8, ccs as u8, ped as u8, pr as u8) {
+            (0, 0, 0, 0) => Self::PoweredOff,
+            (1, 0, 0, 0) => Self::Disconnected,
+            (1, 1, 0, 0) => Self::Disabled,
+            (1, 1, 1, 0) => Self::Enabled,
+            (1, 1, 0, 1) => Self::Reset,
+            (1, _, _, 1) => Self::TestMode,
+            (_, _, _, _) => Self::Unknown { pp, ccs, ped, pr },
+        }
+    }
+}
+
 #[repr(C)]
-struct PortScEntry {
+pub struct PortScEntry {
     ptr: Mutex<*mut u32>,
 }
 impl PortScEntry {
@@ -1414,7 +1458,7 @@ impl PortScEntry {
             ptr: Mutex::new(ptr),
         }
     }
-    fn value(&self) -> u32 {
+    pub fn value(&self) -> u32 {
         let portsc = self.ptr.lock();
         unsafe { read_volatile(*portsc) }
     }
@@ -1454,14 +1498,22 @@ impl PortScEntry {
         // PR - Port Reset - RW1S
         self.assert_bit(4)
     }
+    pub fn pls(&self) -> u32 {
+        // PLS - Port Link State - RWS
+        extract_bits(self.value(), 5, 4)
+    }
     pub async fn reset_port(&self) {
         self.assert_pp();
         while !self.pp() {
             yield_execution().await
         }
-        self.assert_pr();
-        while self.pr() {
-            yield_execution().await
+        if self.ccs() {
+            self.assert_pr();
+            // Skip waiting for PR to be 0 as it may not be 0 when a device is
+            // not connected.
+            while self.pr() {
+                yield_execution().await
+            }
         }
     }
     pub fn ped(&self) -> bool {
@@ -1479,6 +1531,9 @@ impl PortScEntry {
             _ => Err("Unknown Protocol Speeed ID"),
         }
     }
+    pub fn port_state(&self) -> PortState {
+        PortState::from(self)
+    }
     pub fn port_speed(&self) -> UsbMode {
         // Port Speed - ROS
         // Returns Protocol Speed ID (PSI). See 7.2.1 of xhci spec.
@@ -1492,6 +1547,18 @@ impl PortScEntry {
         }
     }
 }
+impl Debug for PortScEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "PortSc {{ value:{:#010X}, speed:{:?}, state:{:?}, PLS: {:?} }}",
+            self.value(),
+            self.port_speed(),
+            self.port_state(),
+            self.pls(),
+        )
+    }
+}
 
 // [xhci] 4.7 Doorbells
 // index 0: for the host controller
@@ -1502,7 +1569,11 @@ pub struct Doorbell {
     ptr: Mutex<*mut u32>,
 }
 impl Doorbell {
-    pub fn new(ptr: *mut u32) -> Self {
+    /// # Safety
+    /// `db_base` should be a valid doorbell base address and `for_slot` should
+    /// be less than or equal num_slots
+    pub unsafe fn new(db_base: *mut u8, for_slot: usize) -> Self {
+        let ptr = db_base.add(4 * for_slot) as *mut u32;
         Self {
             ptr: Mutex::new(ptr),
         }
@@ -1514,7 +1585,7 @@ impl Doorbell {
     // index 0: for the host controller
     // index 1-255: for device contexts (index by a Slot ID)
     pub fn notify(&self, target: u8, task: u16) {
-        let value = (target as u32) | (task as u32) << 16;
+        let value = (target as u32) | ((task as u32) << 16);
         // SAFETY: This is safe as long as the ptr is valid
         unsafe {
             write_volatile(*self.ptr.lock(), value);
@@ -1522,7 +1593,7 @@ impl Doorbell {
     }
 }
 #[derive(Clone)]
-struct EventFuture {
+pub struct EventFuture {
     wait_on: Rc<EventWaitInfo>,
     _pinned: PhantomPinned,
 }
@@ -1575,13 +1646,26 @@ pub struct InputControlContext {
 }
 const _: () = assert!(size_of::<InputControlContext>() == 0x20);
 impl InputControlContext {
-    pub fn add_context(&mut self, ici: usize) -> Result<()> {
-        if ici < 32 {
-            self.add_context_bitmap |= 1 << ici;
+    pub fn add_context(&mut self, dci: usize) -> Result<()> {
+        if dci < 32 {
+            self.add_context_bitmap |= 1 << dci;
+            self.drop_context_bitmap &= !(1 << dci);
             Ok(())
         } else {
             Err("Input context index out of range")
         }
+    }
+    pub fn drop_context(&mut self, dci: usize) -> Result<()> {
+        if dci < 32 {
+            self.drop_context_bitmap |= 1 << dci;
+            self.add_context_bitmap &= !(1 << dci);
+            Ok(())
+        } else {
+            Err("Input context index out of range")
+        }
+    }
+    pub fn drop_all_optional_endpoints(&mut self) {
+        self.drop_context_bitmap |= !0b11;
     }
 }
 
