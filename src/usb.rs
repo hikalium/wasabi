@@ -412,24 +412,6 @@ pub async fn request_config_descriptor_and_rest(
     let descriptors: Vec<UsbDescriptor> = iter.collect();
     Ok(descriptors)
 }
-pub async fn request_hid_report(
-    xhc: &Rc<Controller>,
-    slot: u8,
-    ctrl_ep_ring: &mut TransferRing,
-) -> Result<Vec<u8>> {
-    let buf = vec![0u8; 8];
-    let mut buf = Box::into_pin(buf.into_boxed_slice());
-    xhc.request_report_bytes(
-        slot,
-        ctrl_ep_ring,
-        1,
-        &mut buf,
-        0,
-        UsbHidReportType::Output as u16,
-    )
-    .await?;
-    Ok(buf.to_vec())
-}
 pub async fn request_hid_input_report(
     xhc: &Rc<Controller>,
     slot: u8,
