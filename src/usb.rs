@@ -4,6 +4,7 @@ use crate::result::Result;
 use crate::slice::Sliceable;
 use crate::xhci::Controller;
 use crate::xhci::TransferRing;
+use crate::xhci::UsbMode;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -13,6 +14,7 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
+use core::time::Duration;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
@@ -240,6 +242,32 @@ impl EndpointDescriptor {
             "OUT"
         }
     }
+    pub fn calc_interval_time(&self, port_speed: UsbMode) -> Result<Duration> {
+        // [xhci] 6-12: Endpoint Type vs. Interval Calculation
+        if self.is_interrupt_endpoint() {
+            if matches!(port_speed, UsbMode::HighSpeed | UsbMode::SuperSpeed)
+                && self.is_interrupt_endpoint()
+            {
+                if (1..=16).contains(&self.interval) {
+                    return Ok(Duration::from_micros(
+                        125 << (self.interval - 1),
+                    ));
+                } else {
+                    return Err("bInterval out of range");
+                }
+            } else if matches!(
+                port_speed,
+                UsbMode::FullSpeed | UsbMode::LowSpeed
+            ) {
+                if (1..=16).contains(&self.interval) {
+                    return Ok(Duration::from_millis(self.interval as u64));
+                } else {
+                    return Err("bInterval out of range");
+                }
+            }
+        }
+        Err("Unimplemented combination for Interval calc")
+    }
 }
 impl fmt::Debug for EndpointDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -392,6 +420,140 @@ pub async fn request_hid_report(
     )
     .await?;
     Ok(buf.to_vec())
+}
+pub async fn request_hid_input_report(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut TransferRing,
+    dci: usize,
+    interface_number: u8,
+) -> Result<Vec<u8>> {
+    let buf = vec![0u8; 8];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    let r = xhc
+        .request_report_bytes(
+            slot,
+            ctrl_ep_ring,
+            dci,
+            &mut buf,
+            interface_number,
+            UsbHidReportType::Input as u16,
+        )
+        .await?;
+    Ok(buf[0..r].to_vec())
+}
+pub async fn get_hid_keyboard_input_report(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut TransferRing,
+    dci: usize,
+    interface_number: u8,
+) -> Result<Vec<u8>> {
+    let buf = vec![0u8; 8];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    let r = xhc
+        .request_report_bytes(
+            slot,
+            ctrl_ep_ring,
+            dci,
+            &mut buf,
+            interface_number,
+            UsbHidReportType::Input as u16,
+        )
+        .await?;
+    Ok(buf[0..r].to_vec())
+}
+pub async fn get_hid_keyboard_output_report(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut TransferRing,
+    dci: usize,
+    interface_number: u8,
+) -> Result<u8> {
+    let buf = vec![0u8];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    xhc.request_report_bytes(
+        slot,
+        ctrl_ep_ring,
+        dci,
+        &mut buf,
+        interface_number,
+        2,
+    )
+    .await?;
+    Ok(buf[0])
+}
+pub async fn set_hid_keyboard_output_report(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut TransferRing,
+    dci: usize,
+    interface_number: u8,
+    value: u8,
+) -> Result<usize> {
+    let buf = vec![value];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    let r = xhc
+        .request_set_report_bytes(
+            slot,
+            ctrl_ep_ring,
+            dci,
+            &mut buf,
+            interface_number,
+            2,
+        )
+        .await?;
+    Ok(r)
+}
+pub async fn request_get_configuration(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut TransferRing,
+    dci: usize,
+) -> Result<u8> {
+    let buf = vec![0u8; 8];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    xhc.request_get_configuration(slot, ctrl_ep_ring, dci, &mut buf)
+        .await?;
+    Ok(buf[0])
+}
+pub async fn request_get_interface(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut TransferRing,
+    dci: usize,
+    interface_number: u8,
+) -> Result<u8> {
+    let buf = vec![0u8; 8];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    xhc.request_get_interface(
+        slot,
+        ctrl_ep_ring,
+        dci,
+        interface_number,
+        &mut buf,
+    )
+    .await?;
+    Ok(buf[0])
+}
+pub async fn request_get_protocol(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ctrl_ep_ring: &mut TransferRing,
+    dci: usize,
+    interface_number: u8,
+) -> Result<u8> {
+    let buf = vec![0u8; 8];
+    let mut buf = Box::into_pin(buf.into_boxed_slice());
+    xhc.request_get_protocol(
+        slot,
+        ctrl_ep_ring,
+        dci,
+        interface_number,
+        &mut buf,
+    )
+    .await?;
+    Ok(buf[0])
 }
 
 pub fn pick_interface_with_triple(
