@@ -29,13 +29,17 @@ pub enum UsbDescriptorType {
     Report = 0x22,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum UsbDescriptor {
     Config(ConfigDescriptor),
     Endpoint(EndpointDescriptor),
     Interface(InterfaceDescriptor),
     Hid(HidDescriptor),
-    Unknown { desc_len: u8, desc_type: u8 },
+    Unknown {
+        desc_len: u8,
+        desc_type: u8,
+        payload: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -126,6 +130,7 @@ impl<'a> Iterator for DescriptorIterator<'a> {
                 _ => UsbDescriptor::Unknown {
                     desc_len,
                     desc_type,
+                    payload: buf[2..(desc_len as usize)].to_vec(),
                 },
             };
             self.index += desc_len as usize;
@@ -253,11 +258,27 @@ const _: () = assert!(size_of::<EndpointDescriptor>() == 7);
 unsafe impl Sliceable for EndpointDescriptor {}
 
 // [hid_1_11]:
+pub const TRIPLE_FOR_HID_BOOT_KBD: (u8, u8, u8) = (
+    3, /* HID Class */
+    1, /* Boot Interface Subclass */
+    1, /* Keyboard */
+);
+
+// [hid_1_11]:
 // 7.2.5 Get_Protocol Request
 // 7.2.6 Set_Protocol Request
 #[repr(u8)]
 pub enum UsbHidProtocol {
     BootProtocol = 0,
+    ReportProtocol = 1,
+}
+
+// [hid_1_11] 7.2.1
+#[repr(u8)]
+pub enum UsbHidReportType {
+    Input = 1,
+    Output = 2,
+    Feature = 3,
 }
 
 pub async fn request_device_descriptor(
@@ -387,7 +408,7 @@ pub fn pick_interface_with_triple(
             }
             e => {
                 if interface.is_some() {
-                    desc_list.push(*e)
+                    desc_list.push(e.clone())
                 }
             }
         }
