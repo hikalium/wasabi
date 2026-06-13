@@ -15,6 +15,7 @@ use crate::pci::BarMem64;
 use crate::pci::BusDeviceFunction;
 use crate::pci::Pci;
 use crate::pci::VendorDeviceId;
+use crate::print::hexdump_struct;
 use crate::result::Result;
 use crate::tablet::UsbTabletDriver;
 use crate::usb;
@@ -353,26 +354,26 @@ impl PciXhciDriver {
         let mut input_ctrl_ctx = InputControlContext::default();
         input_ctrl_ctx.add_context(0)?;
         input_ctrl_ctx.add_context(1)?;
-        let mut input_context = Box::pin(InputContext::default());
-        input_context.as_mut().set_input_ctrl_ctx(input_ctrl_ctx)?;
+        let mut input_context = InputContext::default();
+        input_context.set_input_ctrl_ctx(input_ctrl_ctx);
         // 3. Initialize the Input Slot Context data structure (6.2.2)
-        input_context.as_mut().set_root_hub_port_number(port)?;
-        input_context.as_mut().set_last_valid_dci(1)?;
+        input_context.set_root_hub_port_number(port)?;
+        input_context.set_last_valid_dci(1)?;
         // 4. Initialize the Transfer Ring for the Default Control Endpoint
         // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
         let portsc = xhc.regs.portsc.get(port).ok_or("PORTSC was invalid")?;
-        input_context.as_mut().set_port_speed(portsc.port_speed())?;
+        input_context.set_port_speed(portsc.port_speed())?;
         let ctrl_ep_ring = TransferRing::default();
-        input_context.as_mut().set_ep_ctx(
+        input_context.set_ep_ctx(
             1,
             EndpointContext::new_control_endpoint(
                 portsc.max_packet_size()?,
                 ctrl_ep_ring.ring_phys_addr(),
             )?,
-        )?;
+        );
         // 8. Issue an Address Device Command for the Device Slot
-        let cmd =
-            GenericTrbEntry::cmd_address_device(input_context.as_ref(), slot);
+        let input_context = IoBox::new(input_context);
+        let cmd = GenericTrbEntry::cmd_address_device(&input_context, slot);
         xhc.send_command(cmd).await?.cmd_result_ok()?;
         Ok(ctrl_ep_ring)
     }
@@ -902,6 +903,13 @@ impl DeviceContextBaseAddressArray {
             *self.context[ctx_idx].get_unchecked_mut() = output_context;
         }
     }
+    fn output_context(&mut self, slot: u8) -> Result<OutputContext> {
+        let ctx_idx = slot as usize - 1;
+        self.context
+            .get(ctx_idx)
+            .ok_or("Output Context index out of range")
+            .map(|e| e.as_ref().clone())
+    }
 }
 
 pub struct Controller {
@@ -983,6 +991,9 @@ impl Controller {
         self.device_context_base_array
             .lock()
             .set_output_context(slot, output_context);
+    }
+    pub fn output_context_for_slot(&self, slot: u8) -> Result<OutputContext> {
+        self.device_context_base_array.lock().output_context(slot)
     }
     pub async fn request_descriptor(
         &self,
@@ -1416,11 +1427,69 @@ impl GenericTrbEntry {
     fn set_slot_id(&mut self, slot: u8) {
         self.control.write_bits(24, 8, slot as u32).unwrap()
     }
-    fn cmd_address_device(input_context: Pin<&InputContext>, slot: u8) -> Self {
+    pub fn endpoint_id(&self) -> u32 {
+        self.control.read_bits(16, 5)
+    }
+    fn set_endpoint_id(&mut self, dci: usize) {
+        self.control.write_bits(16, 5, dci as u32).unwrap()
+    }
+    fn cmd_address_device(
+        input_context: &IoBox<InputContext>,
+        slot: u8,
+    ) -> Self {
         let mut trb = Self::default();
         trb.set_trb_type(TrbType::AddressDeviceCommand);
         trb.data
-            .write(input_context.get_ref() as *const InputContext as u64);
+            .write(input_context.as_ref() as *const InputContext as u64);
+        trb.set_slot_id(slot);
+        trb
+    }
+    pub fn cmd_evaluate_context(
+        input_context: &IoBox<InputContext>,
+        slot: u8,
+    ) -> Self {
+        let mut trb = Self::default();
+        trb.set_trb_type(TrbType::EvaluateContextCommand);
+        trb.data
+            .write(input_context.as_ref() as *const InputContext as u64);
+        trb.set_slot_id(slot);
+        trb
+    }
+    pub fn cmd_configure_endpoint(
+        input_context: &IoBox<InputContext>,
+        slot: u8,
+    ) -> Self {
+        let mut trb = Self::default();
+        trb.set_trb_type(TrbType::ConfigureEndpointCommand);
+        trb.data
+            .write(input_context.as_ref() as *const InputContext as u64);
+        trb.set_slot_id(slot);
+        trb
+    }
+    pub fn cmd_reset_endpoint(slot: u8, dci: usize) -> Self {
+        // [xhci] 4.6.8 : Reset Endpoint
+        // - If the endpoint is not in the Halted state... The xHC shall reject
+        //   the command and generate... Context State Error.
+        // [xhci] 6.4.3.7 : Reset Endpoint Command TRB
+        let mut trb = Self::default();
+        trb.set_trb_type(TrbType::ResetEndpointCommand);
+        trb.set_slot_id(slot);
+        trb.set_endpoint_id(dci);
+        trb
+    }
+    pub fn cmd_stop_endpoint(slot: u8, dci: usize) -> Self {
+        let mut trb = Self::default();
+        trb.data.write(0);
+        trb.option.write(0);
+        trb.set_trb_type(TrbType::StopEndpointCommand);
+        trb.set_slot_id(slot);
+        trb.set_endpoint_id(dci);
+        hexdump_struct(&trb);
+        trb
+    }
+    pub fn cmd_reset_device(slot: u8) -> Self {
+        let mut trb = Self::default();
+        trb.set_trb_type(TrbType::ResetDeviceCommand);
         trb.set_slot_id(slot);
         trb
     }
@@ -1832,46 +1901,36 @@ pub struct InputContext {
 }
 const _: () = assert!(size_of::<InputContext>() <= 4096);
 impl InputContext {
-    fn set_ep_ctx(
-        self: &mut Pin<&mut Self>,
-        dci: usize,
-        ep_ctx: EndpointContext,
-    ) -> Result<()> {
-        unsafe {
-            self.as_mut().get_unchecked_mut().device_ctx.ep_ctx[dci - 1] =
-                ep_ctx
-        }
-        Ok(())
+    pub fn set_ep_ctx(&mut self, dci: usize, ep_ctx: EndpointContext) {
+        self.device_ctx.ep_ctx[dci - 1] = ep_ctx
     }
-    fn set_input_ctrl_ctx(
-        self: &mut Pin<&mut Self>,
-        input_ctrl_ctx: InputControlContext,
-    ) -> Result<()> {
-        unsafe {
-            self.as_mut().get_unchecked_mut().input_ctrl_ctx = input_ctrl_ctx
-        }
-        Ok(())
+    pub fn set_slot_context(&mut self, slot_ctx: SlotContext) {
+        self.device_ctx.slot_ctx = slot_ctx
     }
-    fn set_port_speed(self: &mut Pin<&mut Self>, psi: UsbMode) -> Result<()> {
-        unsafe { self.as_mut().get_unchecked_mut() }
-            .device_ctx
-            .slot_ctx
-            .set_port_speed(psi)
+    pub fn set_input_ctrl_ctx(&mut self, input_ctrl_ctx: InputControlContext) {
+        self.input_ctrl_ctx = input_ctrl_ctx
     }
-    fn set_root_hub_port_number(
-        self: &mut Pin<&mut Self>,
-        port: usize,
-    ) -> Result<()> {
-        unsafe { self.as_mut().get_unchecked_mut() }
-            .device_ctx
-            .slot_ctx
-            .set_root_hub_port_number(port)
+    pub fn set_port_speed(&mut self, psi: UsbMode) -> Result<()> {
+        self.device_ctx.slot_ctx.set_port_speed(psi)
     }
-    fn set_last_valid_dci(self: &mut Pin<&mut Self>, dci: usize) -> Result<()> {
-        unsafe { self.as_mut().get_unchecked_mut() }
-            .device_ctx
-            .slot_ctx
-            .set_last_valid_dci(dci)
+    pub fn set_root_hub_port_number(&mut self, port: usize) -> Result<()> {
+        self.device_ctx.slot_ctx.set_root_hub_port_number(port)
+    }
+    pub fn set_last_valid_dci(&mut self, dci: usize) -> Result<()> {
+        self.device_ctx.slot_ctx.set_last_valid_dci(dci)
+    }
+    pub fn device_ctx(&self) -> &DeviceContext {
+        &self.device_ctx
+    }
+}
+impl Debug for InputContext {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "InputContext {{ add: {:#034b}, drop: {:#034b} }}",
+            self.input_ctrl_ctx.add_context_bitmap,
+            self.input_ctrl_ctx.drop_context_bitmap
+        )
     }
 }
 
