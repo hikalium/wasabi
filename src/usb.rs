@@ -382,6 +382,7 @@ pub async fn request_config_descriptor_and_rest(
     xhc: &Rc<Controller>,
     slot: u8,
     ctrl_ep_ring: &mut TransferRing,
+    desc_index: u8,
 ) -> Result<Vec<UsbDescriptor>> {
     let buf = vec![0u8; size_of::<ConfigDescriptor>()];
     let mut buf = Box::into_pin(buf.into_boxed_slice());
@@ -389,7 +390,7 @@ pub async fn request_config_descriptor_and_rest(
         slot,
         ctrl_ep_ring,
         UsbDescriptorType::Config,
-        0,
+        desc_index,
         0,
         &mut buf,
     )
@@ -402,7 +403,7 @@ pub async fn request_config_descriptor_and_rest(
         slot,
         ctrl_ep_ring,
         UsbDescriptorType::Config,
-        0,
+        desc_index,
         0,
         &mut buf,
     )
@@ -890,6 +891,7 @@ pub trait UsbDeviceDriver {
     fn start(
         &self,
         _xhc: Rc<Controller>,
+        _port: usize,
         _slot: u8,
         _ctrl_ep_ring: TransferRing,
         _descriptors: Vec<UsbDescriptor>,
