@@ -1098,9 +1098,8 @@ impl EventRingSegmentTableEntry {
 #[repr(C, align(4096))]
 #[derive(Default)]
 struct TrbRing {
-    trb: [GenericTrbEntry; Self::NUM_TRB],
+    trb: [Volatile<GenericTrbEntry>; Self::NUM_TRB],
     current_index: usize,
-    _pinned: PhantomPinned,
 }
 // Limiting the size of TrbRing to be equal or less than 4096
 // to avoid crossing 64KiB boundaries. See Table 6-1 of xhci spec.
@@ -1112,16 +1111,14 @@ impl TrbRing {
     }
     fn write(&mut self, index: usize, trb: GenericTrbEntry) -> Result<()> {
         if index < self.trb.len() {
-            unsafe {
-                write_volatile(&mut self.trb[index], trb);
-            }
+            self.trb[index].write(trb);
             Ok(())
         } else {
             Err("TrbRing Out of Range")
         }
     }
     fn phys_addr(&self) -> u64 {
-        &self.trb[0] as *const GenericTrbEntry as u64
+        &self.trb[0] as *const Volatile<GenericTrbEntry> as u64
     }
     fn current_index(&self) -> usize {
         self.current_index
@@ -1137,16 +1134,19 @@ impl TrbRing {
         self.trb(self.current_index)
     }
     fn trb(&self, index: usize) -> GenericTrbEntry {
-        unsafe { read_volatile(&self.trb[index]) }
+        self.trb[index].read()
     }
     fn current_ptr(&self) -> usize {
-        &self.trb[self.current_index] as *const GenericTrbEntry as usize
+        &self.trb[self.current_index] as *const Volatile<GenericTrbEntry>
+            as usize
     }
     fn advance_index(&mut self, new_cycle: bool) -> Result<()> {
         if self.current().cycle_state() == new_cycle {
             return Err("cycle state does not change");
         }
-        self.trb[self.current_index].set_cycle_state(new_cycle);
+        let mut current = self.current();
+        current.set_cycle_state(new_cycle);
+        self.write_current(current);
         self.current_index = (self.current_index + 1) % self.trb.len();
         Ok(())
     }
@@ -1183,7 +1183,7 @@ enum TrbType {
 
 #[derive(Default, Clone, Debug)]
 #[repr(C, align(16))]
-struct GenericTrbEntry {
+pub struct GenericTrbEntry {
     data: Volatile<u64>,
     option: Volatile<u32>,
     control: Volatile<u32>,
@@ -1194,6 +1194,7 @@ impl GenericTrbEntry {
     const CTRL_BIT_INTERRUPT_ON_COMPLETION: u32 = 1 << 5;
     const CTRL_BIT_IMMEDIATE_DATA: u32 = 1 << 6;
     const CTRL_BIT_DATA_DIR_IN: u32 = 1 << 16;
+    const CTRL_BIT_DATA_DIR_OUT: u32 = 0 << 16;
     fn trb_link(ring: &TrbRing) -> Self {
         let mut trb = GenericTrbEntry::default();
         trb.set_trb_type(TrbType::Link);
@@ -1285,16 +1286,21 @@ impl From<StatusStageTrb> for GenericTrbEntry {
         unsafe { transmute(trb) }
     }
 }
+impl From<NormalTrb> for GenericTrbEntry {
+    fn from(trb: NormalTrb) -> GenericTrbEntry {
+        unsafe { transmute(trb) }
+    }
+}
 
 pub struct TransferRing {
     ring: IoBox<TrbRing>,
     cycle_state_ours: bool,
 }
 impl TransferRing {
-    fn ring_phys_addr(&self) -> u64 {
+    pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }
-    fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
+    pub fn push(&mut self, mut src: GenericTrbEntry) -> Result<u64> {
         // Calling get_unchecked_mut() here is safe
         // as far as this function does not move the ring out.
         let ring = unsafe { self.ring.get_unchecked_mut() };
@@ -1775,6 +1781,37 @@ impl DataStageTrb {
                 | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_SHORT_PACKET,
         }
     }
+    pub fn new_out(buf: &mut Pin<Box<[u8]>>) -> Self {
+        Self {
+            buf: buf.as_ptr() as u64,
+            option: buf.len() as u32,
+            control: (TrbType::DataStage as u32) << 10
+                | GenericTrbEntry::CTRL_BIT_DATA_DIR_OUT
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_SHORT_PACKET,
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C, align(16))]
+pub struct NormalTrb {
+    buf: u64,
+    option: u32,
+    control: u32,
+}
+const _: () = assert!(size_of::<DataStageTrb>() == 16);
+impl NormalTrb {
+    pub fn new_in(buf: &mut Pin<Box<[u8]>>) -> Self {
+        Self {
+            buf: buf.as_ptr() as u64,
+            option: buf.len() as u32,
+            control: (TrbType::Normal as u32) << 10
+                | GenericTrbEntry::CTRL_BIT_DATA_DIR_IN
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_SHORT_PACKET,
+        }
+    }
 }
 
 // Status stage direction will be opposite of the data.
@@ -1782,7 +1819,7 @@ impl DataStageTrb {
 // See Table 4-7 of xHCI spec.
 #[derive(Copy, Clone)]
 #[repr(C, align(16))]
-struct StatusStageTrb {
+pub struct StatusStageTrb {
     reserved: u64,
     option: u32,
     control: u32,
@@ -1793,7 +1830,8 @@ impl StatusStageTrb {
         Self {
             reserved: 0,
             option: 0,
-            control: (TrbType::StatusStage as u32) << 10,
+            control: (TrbType::StatusStage as u32) << 10
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION,
         }
     }
     pub fn new_in() -> Self {
@@ -1802,8 +1840,7 @@ impl StatusStageTrb {
             option: 0,
             control: (TrbType::StatusStage as u32) << 10
                 | GenericTrbEntry::CTRL_BIT_DATA_DIR_IN
-                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION
-                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_SHORT_PACKET,
+                | GenericTrbEntry::CTRL_BIT_INTERRUPT_ON_COMPLETION,
         }
     }
 }
