@@ -1212,7 +1212,27 @@ impl EventRing {
                 }
             }
             if !consumed {
-                info!("unhandled event: {e:?}");
+                let slot = e.slot_id();
+                info!(
+                    "unhandled event: ttype={} {}, cc={} ({}), slot={slot}",
+                    e.trb_type(),
+                    e.trb_type_description(),
+                    e.completion_code(),
+                    e.completion_code_description(),
+                );
+                if e.completion_code()
+                    == GenericTrbEntry::TRB_CC_ENDPOINT_NOT_ENABLED_ERROR
+                {
+                    if e.event_data() {
+                        info!("  event data: {:#018X}", e.data());
+                    } else {
+                        info!("  for TRB at: {:#018X}", e.data());
+                    }
+                    info!("  at endpoint {}", e.endpoint_id());
+                }
+                if e.trb_type() == TrbType::TransferEvent as u32 {
+                    info!("  for TRB at: {:#018X}", e.data());
+                }
             }
             // cleanup stale waiters
             let stale_waiter_indices = self
@@ -1387,6 +1407,14 @@ impl GenericTrbEntry {
     fn trb_type(&self) -> u32 {
         self.control.read_bits(10, 6)
     }
+    pub fn trb_type_description(&self) -> &str {
+        match self.trb_type() {
+            32 => "TransferEvent",
+            33 => "CommandCompletionEvent",
+            34 => "PortStatusChangeEvent",
+            _ => "?",
+        }
+    }
     fn cycle_state(&self) -> bool {
         self.control.read_bits(0, 1) != 0
     }
@@ -1395,20 +1423,69 @@ impl GenericTrbEntry {
         trb.set_trb_type(TrbType::EnableSlotCommand);
         trb
     }
+    pub const TRB_CC_SUCCESS: u32 = 1;
+    // "Babble" means the controller received more data from the device than
+    // expected.
+    pub const TRB_CC_BABBLE_DETECTED: u32 = 3;
+    pub const TRB_CC_USB_TRANSACTION_ERROR: u32 = 4;
+    pub const TRB_CC_TRB_ERROR: u32 = 5;
+    pub const TRB_CC_STALL_ERROR: u32 = 6;
+    pub const TRB_CC_BANDWIDTH_ERROR: u32 = 8;
+    pub const TRB_CC_ENDPOINT_NOT_ENABLED_ERROR: u32 = 12;
+    pub const TRB_CC_SHORT_PACKET: u32 = 13;
+    pub const TRB_CC_PARAM_ERROR: u32 = 17;
+    pub const TRB_CC_CONTEXT_STATE_ERROR: u32 = 19;
+    pub const TRB_CC_STOPPED: u32 = 26;
     pub fn completion_code(&self) -> u32 {
         self.option.read_bits(24, 8)
     }
-    fn cmd_result_ok(&self) -> Result<()> {
+    pub fn transfer_length(&self) -> u32 {
+        // For TransferEvent TRB
+        self.option.read_bits(0, 24)
+    }
+    /// true if the `data` field contains a data from Event Data TRB.
+    /// false if the `data` points to the TRB generated this event.
+    pub fn event_data(&self) -> bool {
+        self.control.read_bits(2, 1) != 0
+    }
+    pub fn completion_code_description(&self) -> &str {
+        match self.completion_code() {
+            Self::TRB_CC_SUCCESS => "Success",
+            Self::TRB_CC_BABBLE_DETECTED => "Babble Detected Error",
+            Self::TRB_CC_USB_TRANSACTION_ERROR => "USB Transaction Error",
+            Self::TRB_CC_TRB_ERROR => "TRB Error",
+            Self::TRB_CC_ENDPOINT_NOT_ENABLED_ERROR => "Endpoint Not Enabled",
+            Self::TRB_CC_STALL_ERROR => "Stall Error",
+            Self::TRB_CC_BANDWIDTH_ERROR => "Bandwidth Error",
+            Self::TRB_CC_PARAM_ERROR => "Parameter Error",
+            Self::TRB_CC_CONTEXT_STATE_ERROR => "Context State Error",
+            Self::TRB_CC_STOPPED => "Stopped",
+            _ => "?",
+        }
+    }
+    /// Returns if the transfer itself succeeded regardress the actual bytes
+    /// transferred. ( = allowing TRB_CC_SHORT_PACKET and
+    /// TRB_CC_BABBLE_DETECTED)
+    fn is_completion_code_transfer_ok(&self) -> bool {
+        matches!(
+            self.completion_code(),
+            Self::TRB_CC_SUCCESS
+                | Self::TRB_CC_SHORT_PACKET
+                | Self::TRB_CC_BABBLE_DETECTED
+        )
+    }
+    pub fn cmd_result_ok(&self) -> Result<()> {
         if self.trb_type() != TrbType::CommandCompletionEvent as u32 {
             Err("Not a CommandCompletionEvent")
-        } else if self.completion_code() != 1 {
+        } else if self.is_completion_code_transfer_ok() {
+            Ok(())
+        } else {
             info!(
-                "Completion code was not Success. actual = {}",
-                self.completion_code()
+                "Completion code was not Success. actual = {} ({})",
+                self.completion_code(),
+                self.completion_code_description()
             );
             Err("CompletionCode was not Success")
-        } else {
-            Ok(())
         }
     }
     fn transfer_result_ok(&self) -> Result<()> {
