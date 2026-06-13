@@ -1,11 +1,19 @@
 extern crate alloc;
 
+use crate::info;
+use crate::mmio::IoBox;
+use crate::print::hexdump_struct;
 use crate::result::Result;
 use crate::slice::Sliceable;
 use crate::xhci::Controller;
+use crate::xhci::EndpointContext;
+use crate::xhci::GenericTrbEntry;
+use crate::xhci::InputContext;
+use crate::xhci::InputControlContext;
 use crate::xhci::TransferRing;
 use crate::xhci::UsbMode;
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::string::ToString;
@@ -676,6 +684,200 @@ pub struct HidDescriptor {
 }
 const _: () = assert!(size_of::<HidDescriptor>() == 9);
 unsafe impl Sliceable for HidDescriptor {}
+
+pub async fn configure_endpoint(
+    xhc: &Rc<Controller>,
+    port: usize,
+    slot: u8,
+    ep_desc_list: &[EndpointDescriptor],
+) -> Result<BTreeMap<usize, TransferRing>> {
+    // dci == 0 : Slot Context
+    // dci == 1 : ep[0] BiDir (Control Endpoint)
+    // dci == 2 : ep[1] OUT
+    // dci == 3 : ep[1] IN
+    // dci == 4 : ep[2] OUT
+    // dci == 5 : ep[2] IN
+    // ...
+    // dci == 31 : ep[15] IN
+    let output_context = xhc.output_context_for_slot(slot)?;
+    let current_slot_ctx = output_context.device_ctx.slot_ctx();
+
+    let mut input_context = InputContext::default();
+    let mut input_ctrl_ctx = InputControlContext::default();
+    input_ctrl_ctx.drop_all_optional_endpoints();
+    input_ctrl_ctx.add_context(0)?;
+    input_context.set_slot_context(current_slot_ctx.clone());
+    input_context.set_last_valid_dci(31)?;
+    //input_ctrl_ctx.add_context(1)?;
+    let mut ring_list = BTreeMap::new();
+    for ep_desc in ep_desc_list {
+        let dci = ep_desc.dci();
+        input_ctrl_ctx.add_context(dci)?;
+        let ep_ring = TransferRing::default();
+        let ep_ctx = if ep_desc.is_interrupt_endpoint() && ep_desc.is_dir_in() {
+            // [xhci] 4.8.2.4: Isoch or Interrupt Endpoints
+            // EP Type = Interrupt In (7)
+            // Max Packet Size = wMaxPacketSize & 0x07ff
+            // Interval = ?
+            // Max Burst Size =  wMaxPacketSize & 0x1800 >> 11
+            // Mult = 0
+            // Max ESIT Payload = ?
+            // CErr = 3
+            // TR Dequeue Pointer =
+            // Dequeue Cycle State (DCS) = 1
+            //
+            // [xhci] p.70: bInterval field in USB Endpoint Descriptor
+            // is in Frames (1ms) for LS/FS, or Microframes (125us) for HS/SS.
+            let port_speed = xhc
+                .regs
+                .portsc
+                .get(port)
+                .ok_or("failed to get portsc")?
+                .port_speed();
+            let interval_time = ep_desc.calc_interval_time(port_speed)?;
+            info!("interval: {interval_time:?}");
+            let interval_us = interval_time.as_micros();
+            let interval_value =
+                (interval_us / 125).next_power_of_two().trailing_zeros() as u8;
+            EndpointContext::new_interrupt_in_endpoint(
+                ep_desc.max_packet_size,
+                ep_ring.ring_phys_addr(),
+                interval_value,
+            )?
+        } else if ep_desc.is_bulk_endpoint() && ep_desc.is_dir_in() {
+            EndpointContext::new_bulk_in_endpoint(
+                ep_desc.max_packet_size,
+                ep_ring.ring_phys_addr(),
+            )?
+        } else {
+            return Err("Unsupported ep type / dir");
+        };
+        info!("ep_ctx[dci={dci}]: {ep_ctx:?}");
+        hexdump_struct(&ep_ctx);
+        input_context.set_ep_ctx(dci, ep_ctx);
+        ring_list.insert(dci, ep_ring);
+    }
+    input_context.set_input_ctrl_ctx(input_ctrl_ctx);
+    info!("configure_endpoint: input_ctx: {input_context:?}");
+    let input_context = IoBox::new(input_context);
+    let cmd = GenericTrbEntry::cmd_configure_endpoint(&input_context, slot);
+    xhc.send_command(cmd).await?.cmd_result_ok()?;
+    info!("configure_endpoint: SUCCESS");
+    Ok(ring_list)
+}
+
+pub async fn deconfigure_endpoint(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ep_desc: &EndpointDescriptor,
+) -> Result<()> {
+    // dci == 1 : Control Endpoint (ep[0])
+    // dci == 2 : ep[1] OUT
+    // dci == 3 : ep[1] IN
+    // dci == 4 : ep[2] OUT
+    // dci == 5 : ep[2] IN
+    // ...
+    let dci = ep_desc.dci();
+    let mut input_context = InputContext::default();
+    {
+        let mut input_ctrl_ctx = InputControlContext::default();
+        input_ctrl_ctx.add_context(0)?;
+        input_ctrl_ctx.drop_context(dci)?;
+        input_context.set_input_ctrl_ctx(input_ctrl_ctx);
+        input_context.set_last_valid_dci(dci)?;
+    }
+    info!("deconfigure_endpoint: dci={dci} input_ctx={input_context:?}");
+    let input_context = IoBox::new(input_context);
+    let cmd = GenericTrbEntry::cmd_configure_endpoint(&input_context, slot);
+    xhc.send_command(cmd).await?.cmd_result_ok()?;
+    Ok(())
+}
+
+pub async fn stop_endpoint(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ep_desc: &EndpointDescriptor,
+) -> Result<()> {
+    // dci == 1 : Control Endpoint (ep[0])
+    // dci == 2 : ep[1] OUT
+    // dci == 3 : ep[1] IN
+    // dci == 4 : ep[2] OUT
+    // dci == 5 : ep[2] IN
+    // ...
+    let dci = ep_desc.dci();
+    info!("stop_endpoint: dci={dci}");
+    let cmd = GenericTrbEntry::cmd_stop_endpoint(slot, dci);
+    xhc.send_command(cmd).await?.cmd_result_ok()?;
+    Ok(())
+}
+
+pub async fn reset_endpoint(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    ep_desc: &EndpointDescriptor,
+) -> Result<()> {
+    // dci == 1 : Control Endpoint (ep[0])
+    // dci == 2 : ep[1] OUT
+    // dci == 3 : ep[1] IN
+    // dci == 4 : ep[2] OUT
+    // dci == 5 : ep[2] IN
+    // ...
+    let dci = ep_desc.dci();
+    info!("reset_endpoint: dci={dci}");
+    let cmd = GenericTrbEntry::cmd_reset_endpoint(slot, dci);
+    xhc.send_command(cmd).await?.cmd_result_ok()?;
+    Ok(())
+}
+
+pub async fn reset_device(xhc: &Rc<Controller>, slot: u8) -> Result<()> {
+    info!("reset_device: slot = {slot}");
+    let cmd = GenericTrbEntry::cmd_reset_device(slot);
+    xhc.send_command(cmd).await?.cmd_result_ok()?;
+    Ok(())
+}
+
+pub async fn print_current_ep_state(
+    xhc: &Rc<Controller>,
+    slot: u8,
+    dci: usize,
+) -> Result<()> {
+    let output_context = xhc.output_context_for_slot(slot)?;
+    let ep_ctx = output_context.device_ctx.ep_ctx(dci)?;
+    let ep_state = ep_ctx.ep_state();
+    let tr_deq_ptr = ep_ctx.tr_dequeue_ptr();
+    let ep_type = ep_ctx.ep_type();
+    let max_packet_size = ep_ctx.max_packet_size();
+    let max_esit_payload = ep_ctx.max_esit_payload();
+    let cerr = ep_ctx.error_count();
+    info!(
+        "EP State dci={dci}: {ep_state:?} deq={tr_deq_ptr:#018X} \
+            type={ep_type:?} MaxPacketSize={max_packet_size} \
+            MaxESIT Payload={max_esit_payload} CErr={cerr}"
+    );
+    Ok(())
+}
+
+pub async fn print_current_slot_state(
+    xhc: &Rc<Controller>,
+    slot: u8,
+) -> Result<()> {
+    let output_context = xhc.output_context_for_slot(slot)?;
+    let state = output_context.device_ctx.slot_ctx().slot_state();
+    let context_entries =
+        output_context.device_ctx.slot_ctx().context_entries();
+    info!("Slot {slot}: State={state:?}, ContextEntries={context_entries:?}");
+    Ok(())
+}
+
+pub async fn print_current_portsc(
+    xhc: &Rc<Controller>,
+    port: usize,
+) -> Result<()> {
+    if let Some(portsc) = xhc.regs.portsc.get(port) {
+        info!("Port {port}: {:?}", portsc);
+    }
+    Ok(())
+}
 
 pub trait UsbDeviceDriver {
     fn is_compatible(
