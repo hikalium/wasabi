@@ -382,8 +382,15 @@ pub async fn request_hid_report(
 ) -> Result<Vec<u8>> {
     let buf = vec![0u8; 8];
     let mut buf = Box::into_pin(buf.into_boxed_slice());
-    xhc.request_report_bytes(slot, ctrl_ep_ring, &mut buf)
-        .await?;
+    xhc.request_report_bytes(
+        slot,
+        ctrl_ep_ring,
+        1,
+        &mut buf,
+        0,
+        UsbHidReportType::Output as u16,
+    )
+    .await?;
     Ok(buf.to_vec())
 }
 
