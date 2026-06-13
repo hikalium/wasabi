@@ -30,6 +30,9 @@ impl<T: Clone> Clone for Volatile<T> {
     }
 }
 impl<T> Volatile<T> {
+    pub fn new(value: T) -> Self {
+        Volatile { value }
+    }
     pub fn read(&self) -> T {
         unsafe { read_volatile(&self.value) }
     }
