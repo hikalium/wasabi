@@ -587,13 +587,35 @@ impl ScratchpadBuffers {
     }
 }
 
+#[derive(Debug)]
+pub enum EndpointState {
+    Disabled,
+    Running,
+    Halted,
+    Stopped,
+    Error,
+    Invalid(u32),
+}
+impl From<u32> for EndpointState {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => Self::Disabled,
+            1 => Self::Running,
+            2 => Self::Halted,
+            3 => Self::Stopped,
+            4 => Self::Error,
+            e => Self::Invalid(e),
+        }
+    }
+}
+
 #[repr(C, align(32))]
-#[derive(Default, Debug)]
-struct EndpointContext {
-    data: [u32; 2],
+#[derive(Debug, Default, Clone)]
+pub struct EndpointContext {
+    data: [Volatile<u32>; 2],
     tr_dequeue_ptr: Volatile<u64>,
-    average_trb_length: u16,
-    max_esit_payload_low: u16,
+    average_trb_length: Volatile<u16>,
+    max_esit_payload_low: Volatile<u16>,
     _reserved: [u32; 3],
 }
 const _: () = assert!(size_of::<EndpointContext>() == 0x20);
@@ -609,29 +631,82 @@ impl EndpointContext {
         ep.set_ep_type(EndpointType::Control)?;
         ep.set_dequeue_cycle_state(true)?;
         ep.set_error_count(3)?;
-        ep.set_max_packet_size(max_packet_size);
+        ep.set_max_packet_size(max_packet_size)?;
         ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
-        ep.average_trb_length = 8;
+        ep.average_trb_length.write(8);
         // 6.2.3: Software shall set Average TRB Length to ‘8’
         // for control endpoints.
+        Ok(ep)
+    }
+    pub fn new_interrupt_in_endpoint(
+        max_packet_size: u16,
+        tr_dequeue_ptr: u64,
+        interval: u8,
+    ) -> Result<Self> {
+        // xhci: 4.3.6
+        let mut ep = Self::new();
+        ep.set_ep_type(EndpointType::InterruptIn)?;
+        ep.set_dequeue_cycle_state(true)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size)?;
+        ep.max_esit_payload_low.write(0);
+        // xhci: 4.14.2 says max allowed ESIT payload size is:
+        //   64 B  for FS Interrupt
+        //   1  KB for FS Isoch
+        //   3  KB for HS Interrupt
+        //   3  KB for HS Isoch
+        //   3  KB for SS Interrupt
+        //  48  KB for SS Isoch
+
+        // xhci: 6.2.3.6
+
+        ep.set_interval(interval);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.average_trb_length.write(1);
+        info!("New EndpointContext created: {ep:?}");
+        Ok(ep)
+    }
+    pub fn new_bulk_in_endpoint(
+        max_packet_size: u16,
+        tr_dequeue_ptr: u64,
+    ) -> Result<Self> {
+        let mut ep = Self::new();
+        ep.set_ep_type(EndpointType::BulkIn)?;
+        ep.set_dequeue_cycle_state(true)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size)?;
+        //ep.set_max_burst_size(max_packet_size);
+        ep.set_interval(10);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.average_trb_length.write(max_packet_size);
         Ok(ep)
     }
     fn set_ring_dequeue_pointer(&mut self, tr_dequeue_ptr: u64) -> Result<()> {
         self.tr_dequeue_ptr.write_bits(4, 60, tr_dequeue_ptr >> 4)
     }
-    fn set_max_packet_size(&mut self, max_packet_size: u16) {
-        let max_packet_size = max_packet_size as u32;
-        self.data[1] &= !(0xffff << 16);
-        self.data[1] |= max_packet_size << 16;
+    pub fn max_packet_size(&self) -> u32 {
+        extract_bits(self.data[1].read(), 16, 16)
+    }
+    fn set_max_packet_size(&mut self, max_packet_size: u16) -> Result<()> {
+        self.data[1].write_bits(16, 16, max_packet_size as u32)
+    }
+    pub fn max_esit_payload(&self) -> usize {
+        (self.max_esit_payload_low.read() as usize)
+            | (self.data[0].read_bits(24, 8) as usize)
     }
     fn set_error_count(&mut self, error_count: u32) -> Result<()> {
         if error_count & !0b11 == 0 {
-            self.data[1] &= !(0b11 << 1);
-            self.data[1] |= error_count << 1;
+            let mut d = self.data[1].read();
+            d &= !(0b11 << 1);
+            d |= error_count << 1;
+            self.data[1].write(d);
             Ok(())
         } else {
             Err("invalid error_count")
         }
+    }
+    pub fn error_count(&self) -> u32 {
+        self.data[1].read_bits(1, 2)
     }
     fn set_dequeue_cycle_state(&mut self, dcs: bool) -> Result<()> {
         self.tr_dequeue_ptr.write_bits(0, 1, dcs.into())
@@ -639,24 +714,76 @@ impl EndpointContext {
     fn set_ep_type(&mut self, ep_type: EndpointType) -> Result<()> {
         let raw_ep_type = ep_type as u32;
         if raw_ep_type < 8 {
-            self.data[1] &= !(0b111 << 3);
-            self.data[1] |= raw_ep_type << 3;
+            let mut d = self.data[1].read();
+            d &= !(0b111 << 3);
+            d |= raw_ep_type << 3;
+            self.data[1].write(d);
             Ok(())
         } else {
             Err("Invalid ep_type")
         }
     }
+    pub fn ep_type(&self) -> Result<EndpointType> {
+        self.data[1].read_bits(3, 3).try_into()
+    }
+    fn set_interval(&mut self, interval: u8) {
+        // [xhci] 6.2.3.6
+        // 0  =  125 us
+        // 1  =  250 us
+        // 2  =  500 us
+        // 3  = 1000 us = 1 ms
+        // 4            = 2 ms
+        // 5            = 4 ms
+        // 6            = 8 ms
+        // 7            = 16 ms
+        // 8            = 32 ms
+        // 9            = 64 ms
+        // 10           = 128 ms
+        // 11           = 256 ms
+        // 12           = 512 ms
+        // 13           = 1024 ms
+        // 14           = 2048 ms
+        // 15           = 4096 ms
+        let mut d = self.data[0].read();
+        d &= 0xff << 16;
+        d |= (interval as u32) << 16;
+        self.data[0].write(d);
+    }
+    pub fn ep_state(&self) -> EndpointState {
+        EndpointState::from(extract_bits(self.data[0].read(), 0, 3))
+    }
+    pub fn tr_dequeue_ptr(&self) -> u64 {
+        self.tr_dequeue_ptr.read()
+    }
 }
 
-#[repr(C, align(32))]
-#[derive(Default)]
-struct DeviceContext {
-    slot_ctx: [u32; 8],
-    ep_ctx: [EndpointContext; 2 * 15 + 1],
-    _pinned: PhantomPinned,
+#[derive(Debug)]
+pub enum SlotState {
+    DisabledOrEnabled,
+    Default,
+    Addressed,
+    Configured,
+    Error,
+    Invalid(u32),
 }
-const _: () = assert!(size_of::<DeviceContext>() == 0x400);
-impl DeviceContext {
+impl From<u32> for SlotState {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => Self::DisabledOrEnabled,
+            1 => Self::Default,
+            2 => Self::Addressed,
+            3 => Self::Configured,
+            e => Self::Invalid(e),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Default, Clone)]
+pub struct SlotContext {
+    slot_ctx: [u32; 8],
+}
+impl SlotContext {
     fn set_port_speed(&mut self, mode: UsbMode) -> Result<()> {
         if mode.psi() < 16u32 {
             self.slot_ctx[0] &= !(0xF << 20);
@@ -694,12 +821,38 @@ impl DeviceContext {
             Err("port out of range")
         }
     }
+    pub fn context_entries(&self) -> u32 {
+        self.slot_ctx[0] >> 27
+    }
+    pub fn slot_ctx(&self) -> [u32; 8] {
+        self.slot_ctx
+    }
+    pub fn slot_state(&self) -> SlotState {
+        SlotState::from(self.slot_ctx[3] >> 27)
+    }
+}
+
+#[repr(C, align(32))]
+#[derive(Default, Clone)]
+pub struct DeviceContext {
+    slot_ctx: SlotContext,                 // dci = 0
+    ep_ctx: [EndpointContext; 2 * 15 + 1], // dci = 1..=15
+    _pinned: PhantomPinned,
+}
+const _: () = assert!(size_of::<DeviceContext>() == 0x400);
+impl DeviceContext {
+    pub fn slot_ctx(&self) -> &SlotContext {
+        &self.slot_ctx
+    }
+    pub fn ep_ctx(&self, dci: usize) -> Result<&EndpointContext> {
+        self.ep_ctx.get(dci - 1).ok_or("dci out of range")
+    }
 }
 
 #[repr(C, align(4096))]
-#[derive(Default)]
-struct OutputContext {
-    device_ctx: DeviceContext,
+#[derive(Default, Clone)]
+pub struct OutputContext {
+    pub device_ctx: DeviceContext,
     _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
@@ -1702,6 +1855,7 @@ impl InputContext {
     fn set_port_speed(self: &mut Pin<&mut Self>, psi: UsbMode) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
+            .slot_ctx
             .set_port_speed(psi)
     }
     fn set_root_hub_port_number(
@@ -1710,11 +1864,13 @@ impl InputContext {
     ) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
+            .slot_ctx
             .set_root_hub_port_number(port)
     }
     fn set_last_valid_dci(self: &mut Pin<&mut Self>, dci: usize) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
+            .slot_ctx
             .set_last_valid_dci(dci)
     }
 }
