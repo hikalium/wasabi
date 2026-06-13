@@ -995,87 +995,53 @@ impl Controller {
     pub fn output_context_for_slot(&self, slot: u8) -> Result<OutputContext> {
         self.device_context_base_array.lock().output_context(slot)
     }
-    pub async fn request_descriptor(
+    /// returns actually transferred size
+    pub async fn request_set_report_bytes(
         &self,
         slot: u8,
-        ctrl_ep_ring: &mut TransferRing,
-        desc_type: usb::UsbDescriptorType,
-        desc_index: u8,
-        lang_id: u16,
+        ep_ring: &mut TransferRing,
+        dci: usize,
         buf: &mut Pin<Box<[u8]>>,
-    ) -> Result<()> {
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
-                SetupStageTrb::REQ_GET_DESCRIPTOR,
-                (desc_type as u16) << 8 | (desc_index as u16),
-                lang_id,
-                buf.len() as u16,
+        interface_number: u8,
+        report_type: u16,
+    ) -> Result<usize> {
+        // [HID] 7.2.1 Set_Report Request
+        let setup_trb = SetupStageTrb::new(
+            0b00100001,
+            0x09, /* SET_REPORT */
+            // report type:
+            // 1: Input
+            // 2: Output
+            // 3: Feature
+            report_type << 8, /* ReportType | ReportID=0 */
+            interface_number as u16,
+            buf.len() as u16,
+        );
+        let data_trb = DataStageTrb::new_out(buf);
+        let status_trb = StatusStageTrb::new_in();
+
+        ep_ring.push(setup_trb.into())?;
+        let data_trb_addr = ep_ring.push(data_trb.into())?;
+        let status_trb_addr = ep_ring.push(status_trb.into())?;
+        let waiter = async {
+            let rem = EventFuture::new_for_trb(
+                &self.primary_event_ring,
+                data_trb_addr,
             )
-            .into(),
-        )?;
-        let trb_ptr_waiting =
-            ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1)?;
-        EventFuture::new_for_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
-            .transfer_result_ok()
-    }
-    pub async fn request_descriptor_for_interface(
-        &self,
-        slot: u8,
-        ctrl_ep_ring: &mut TransferRing,
-        desc_type: usb::UsbDescriptorType,
-        desc_index: u8,
-        w_index: u16,
-        buf: &mut Pin<Box<[u8]>>,
-    ) -> Result<()> {
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
-                    | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
-                SetupStageTrb::REQ_GET_DESCRIPTOR,
-                (desc_type as u16) << 8 | (desc_index as u16),
-                w_index,
-                buf.len() as u16,
-            )
-            .into(),
-        )?;
-        let trb_ptr_waiting =
-            ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1)?;
-        EventFuture::new_for_trb(&self.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .transfer_result_ok()
-    }
-    pub async fn request_report_bytes(
-        &self,
-        slot: u8,
-        ctrl_ep_ring: &mut TransferRing,
-        buf: &mut Pin<Box<[u8]>>,
-    ) -> Result<()> {
-        // [HID] 7.2.1 Get_Report Request
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
-                    | SetupStageTrb::REQ_TYPE_TYPE_CLASS
-                    | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
-                SetupStageTrb::REQ_GET_REPORT,
-                0x0200, /* Report Type | Report ID */
-                0,
-                buf.len() as u16,
-            )
-            .into(),
-        )?;
-        let trb_ptr_waiting =
-            ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1)?;
-        EventFuture::new_for_trb(&self.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .transfer_result_ok()
+            .transfer_result_len()?;
+            EventFuture::new_for_trb(&self.primary_event_ring, status_trb_addr)
+                .await?
+                .transfer_result_len()?;
+            if buf.len() < rem {
+                Err("rem transfer size is larger than buf len")
+            } else {
+                Ok(buf.len() - rem)
+            }
+        };
+
+        self.notify_ep(slot, dci)?;
+        waiter.await
     }
     pub async fn request_set_config(
         &self,
@@ -1150,6 +1116,237 @@ impl Controller {
         EventFuture::new_for_trb(&self.primary_event_ring, trb_ptr_waiting)
             .await?
             .transfer_result_ok()
+    }
+
+    //
+    // Control In Transfers
+    //
+
+    /// returns actually transferred size
+    async fn request_control_in_transfer(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        //
+        setup_trb: SetupStageTrb,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        let data_trb = DataStageTrb::new_in(buf);
+        let status_trb = StatusStageTrb::new_out();
+        ep_ring.push(setup_trb.into())?;
+        let data_trb_addr = ep_ring.push(data_trb.into())?;
+        let status_trb_addr = ep_ring.push(status_trb.into())?;
+        let data_future =
+            EventFuture::new_for_trb(&self.primary_event_ring, data_trb_addr);
+        let status_future =
+            EventFuture::new_for_trb(&self.primary_event_ring, status_trb_addr);
+        let waiter = async {
+            let rem = data_future.await?.transfer_result_len()?;
+            status_future.await?.transfer_result_len()?;
+            if buf.len() < rem {
+                Err("rem transfer size is larger than buf len")
+            } else {
+                Ok(buf.len() - rem)
+            }
+        };
+        self.notify_ep(slot, dci)?;
+        waiter.await
+    }
+    pub async fn request_get_configuration(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        // [HID] 7.2.5
+        let setup_trb = SetupStageTrb::new(
+            0b10000000, 8, /* GET_CONFIGURATION */
+            0, 0, 1,
+        );
+        self.request_control_in_transfer(slot, ep_ring, dci, setup_trb, buf)
+            .await
+    }
+    pub async fn request_get_interface(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        //
+        interface_number: u8,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        // [usb2_0] 9.4
+        let setup_trb = SetupStageTrb::new(
+            0b10000001,
+            10, /* GET_INTERFACE */
+            0,
+            interface_number as u16,
+            1,
+        );
+        self.request_control_in_transfer(slot, ep_ring, dci, setup_trb, buf)
+            .await
+    }
+    pub async fn request_get_protocol(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        //
+        interface_number: u8,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        // [HID] 7.2.5
+        let setup_trb = SetupStageTrb::new(
+            0b10100001,
+            0x03, /* GET_PROTOCOL */
+            0,
+            interface_number as u16,
+            1,
+        );
+        self.request_control_in_transfer(slot, ep_ring, dci, setup_trb, buf)
+            .await
+    }
+    pub async fn request_get_status_of_device(
+        &self,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+    ) -> Result<(u8, u8)> {
+        // [usb_2_0] 9.4.5
+        // For device:
+        // bit 0: is_self_powered
+        // bit 1: enable_remote_wakeup
+        let buf = vec![0u8; 2];
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        let setup_trb =
+            SetupStageTrb::new(0b10000000, 0x00 /* GET_STATUS */, 0, 0, 2);
+        self.request_control_in_transfer(
+            slot,
+            ctrl_ep_ring,
+            1,
+            setup_trb,
+            &mut buf,
+        )
+        .await?;
+        Ok((buf[0], buf[1]))
+    }
+    pub async fn request_get_status_of_endpoint(
+        &self,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+        endpoint_addr: u8,
+    ) -> Result<(u8, u8)> {
+        // [usb_2_0] 9.4.5
+        // For endpoint:
+        // bit 0: is_halted
+        //
+        // endpoint_addr.bit[7] = direction(0: Out/Control, 1: IN)
+        // endpoint_addr.bit[0..4] = endpoint number
+        let buf = vec![0u8; 2];
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        let setup_trb = SetupStageTrb::new(
+            0b10000010,
+            0x00, /* GET_STATUS */
+            0,
+            endpoint_addr as u16,
+            2,
+        );
+        self.request_control_in_transfer(
+            slot,
+            ctrl_ep_ring,
+            1,
+            setup_trb,
+            &mut buf,
+        )
+        .await?;
+        Ok((buf[0], buf[1]))
+    }
+    pub async fn request_descriptor(
+        &self,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+        desc_type: usb::UsbDescriptorType,
+        desc_index: u8,
+        lang_id: u16,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST,
+            SetupStageTrb::REQ_GET_DESCRIPTOR,
+            (desc_type as u16) << 8 | (desc_index as u16),
+            lang_id,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
+            .await
+    }
+    pub async fn request_descriptor_for_interface(
+        &self,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+        desc_type: usb::UsbDescriptorType,
+        desc_index: u8,
+        w_index: u16,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+            SetupStageTrb::REQ_GET_DESCRIPTOR,
+            (desc_type as u16) << 8 | (desc_index as u16),
+            w_index,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
+            .await
+    }
+    pub async fn request_transfer_from_class_interface(
+        &self,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+        request: u8,
+        value: u16,
+        index: u16,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | SetupStageTrb::REQ_TYPE_TYPE_CLASS
+                | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+            request,
+            value,
+            index,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
+            .await
+    }
+    pub async fn request_report_bytes(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        buf: &mut Pin<Box<[u8]>>,
+        interface_number: u8,
+        report_type: u16,
+    ) -> Result<usize> {
+        // [HID] 7.2.1 Get_Report Request
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | SetupStageTrb::REQ_TYPE_TYPE_CLASS
+                | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+            SetupStageTrb::REQ_GET_REPORT,
+            // report type:
+            // 1: Input
+            // 2: Output
+            // 3: Feature
+            report_type << 8, /* ReportType | ReportID=0 */
+            interface_number as u16,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ep_ring, dci, setup_trb, buf)
+            .await
     }
 }
 
@@ -1499,6 +1696,23 @@ impl GenericTrbEntry {
             Err("CompletionCode was not Success")
         } else {
             Ok(())
+        }
+    }
+    /// returns remaining transfer length (diff against requested transfer
+    /// length)
+    fn transfer_result_len(&self) -> Result<usize> {
+        if self.trb_type() != TrbType::TransferEvent as u32 {
+            Err("Not a TransferEvent")
+        } else if self.is_completion_code_transfer_ok() {
+            Ok(self.transfer_length() as usize)
+        } else {
+            info!(
+                "Failed TRB @ {:#018X}. CompletionCode = {} ({})",
+                self.data(),
+                self.completion_code(),
+                self.completion_code_description()
+            );
+            Err("CompletionCode was not Success")
         }
     }
     fn set_slot_id(&mut self, slot: u8) {
