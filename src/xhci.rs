@@ -1171,6 +1171,9 @@ enum TrbType {
     AddressDeviceCommand = 11,
     ConfigureEndpointCommand = 12,
     EvaluateContextCommand = 13,
+    ResetEndpointCommand = 14,
+    StopEndpointCommand = 15,
+    ResetDeviceCommand = 17,
     NoOpCommand = 23,
     TransferEvent = 32,
     CommandCompletionEvent = 33,
@@ -1638,6 +1641,21 @@ pub enum EndpointType {
     BulkIn = 6,
     InterruptIn = 7,
 }
+impl TryFrom<u32> for EndpointType {
+    type Error = &'static str;
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            1 => Ok(Self::IsochOut),
+            2 => Ok(Self::BulkOut),
+            3 => Ok(Self::InterruptOut),
+            4 => Ok(Self::Control),
+            5 => Ok(Self::IsochIn),
+            6 => Ok(Self::BulkIn),
+            7 => Ok(Self::InterruptIn),
+            _ => Err("Failed to convert EndpointType"),
+        }
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum UsbMode {
@@ -1698,6 +1716,8 @@ impl SetupStageTrb {
     //pub const REQ_TYPE_TO_OTHER: u8 = 3;
 
     pub const REQ_GET_REPORT: u8 = 1;
+    pub const REQ_SET_REPORT: u8 = 9;
+
     pub const REQ_GET_DESCRIPTOR: u8 = 6;
     pub const REQ_SET_CONFIGURATION: u8 = 9;
     pub const REQ_SET_INTERFACE: u8 = 11;
