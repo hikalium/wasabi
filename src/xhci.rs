@@ -50,12 +50,12 @@ use core::task::Context;
 use core::task::Poll;
 use core::time::Duration;
 
-struct XhcRegisters {
+pub struct XhcRegisters {
     cap_regs: Mmio<CapabilityRegisters>,
     op_regs: Mmio<OperationalRegisters>,
     rt_regs: Mmio<RuntimeRegisters>,
     doorbell_regs: Vec<Rc<Doorbell>>,
-    portsc: PortSc,
+    pub portsc: PortSc,
 }
 
 pub struct PciXhciDriver {}
@@ -913,7 +913,7 @@ impl DeviceContextBaseAddressArray {
 }
 
 pub struct Controller {
-    regs: XhcRegisters,
+    pub regs: XhcRegisters,
     device_context_base_array: Mutex<DeviceContextBaseAddressArray>,
     primary_event_ring: Mutex<EventRing>,
     command_ring: Mutex<TransferRing>,
