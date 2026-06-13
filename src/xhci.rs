@@ -1099,10 +1099,10 @@ impl Controller {
                 data_trb_addr,
             )
             .await?
-            .transfer_result_len()?;
+            .transfer_result_ok()?;
             EventFuture::new_for_trb(&self.primary_event_ring, status_trb_addr)
                 .await?
-                .transfer_result_len()?;
+                .transfer_result_ok()?;
             if buf.len() < rem {
                 Err("rem transfer size is larger than buf len")
             } else {
@@ -1118,7 +1118,8 @@ impl Controller {
         slot: u8,
         ctrl_ep_ring: &mut TransferRing,
         config_value: u8,
-    ) -> Result<()> {
+    ) -> Result<usize> {
+        info!("SET_CONFIGURATION: slot={slot}, config_value={config_value}");
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 0,
@@ -1142,7 +1143,11 @@ impl Controller {
         ctrl_ep_ring: &mut TransferRing,
         interface_number: u8,
         alt_setting: u8,
-    ) -> Result<()> {
+    ) -> Result<usize> {
+        info!(
+            "SET_INTERFACE: slot={slot}, int,alt={},{}",
+            interface_number, alt_setting
+        );
         ctrl_ep_ring.push(
             SetupStageTrb::new(
                 SetupStageTrb::REQ_TYPE_TO_INTERFACE,
@@ -1166,13 +1171,14 @@ impl Controller {
         ctrl_ep_ring: &mut TransferRing,
         interface_number: u8,
         protocol: u8,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         // protocol:
         // 0: Boot Protocol
         // 1: Report Protocol
         ctrl_ep_ring.push(
             SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+                SetupStageTrb::REQ_TYPE_TO_INTERFACE
+                    | SetupStageTrb::REQ_TYPE_TYPE_CLASS,
                 SetupStageTrb::REQ_SET_PROTOCOL,
                 protocol as u16,
                 interface_number as u16,
@@ -1212,8 +1218,8 @@ impl Controller {
         let status_future =
             EventFuture::new_for_trb(&self.primary_event_ring, status_trb_addr);
         let waiter = async {
-            let rem = data_future.await?.transfer_result_len()?;
-            status_future.await?.transfer_result_len()?;
+            let rem = data_future.await?.transfer_result_ok()?;
+            status_future.await?.transfer_result_ok()?;
             if buf.len() < rem {
                 Err("rem transfer size is larger than buf len")
             } else {
@@ -1656,9 +1662,6 @@ impl GenericTrbEntry {
         trb.set_toggle_cycle(true);
         trb
     }
-    fn set_trb_type(&mut self, trb_type: TrbType) {
-        self.control.write_bits(10, 6, trb_type as u32).unwrap()
-    }
     pub fn set_cycle_state(&mut self, cycle: bool) {
         self.control.write_bits(0, 1, cycle.into()).unwrap()
     }
@@ -1667,12 +1670,6 @@ impl GenericTrbEntry {
     }
     fn data(&self) -> u64 {
         self.data.read()
-    }
-    fn slot_id(&self) -> u8 {
-        self.control.read_bits(24, 8).try_into().unwrap()
-    }
-    fn trb_type(&self) -> u32 {
-        self.control.read_bits(10, 6)
     }
     pub fn trb_type_description(&self) -> &str {
         match self.trb_type() {
@@ -1755,22 +1752,9 @@ impl GenericTrbEntry {
             Err("CompletionCode was not Success")
         }
     }
-    fn transfer_result_ok(&self) -> Result<()> {
-        if self.trb_type() != TrbType::TransferEvent as u32 {
-            Err("Not a TransferEvent")
-        } else if self.completion_code() != 1 && self.completion_code() != 13 {
-            info!(
-                "Transfer failed. Actual CompletionCode = {}",
-                self.completion_code()
-            );
-            Err("CompletionCode was not Success")
-        } else {
-            Ok(())
-        }
-    }
     /// returns remaining transfer length (diff against requested transfer
     /// length)
-    fn transfer_result_len(&self) -> Result<usize> {
+    pub fn transfer_result_ok(&self) -> Result<usize> {
         if self.trb_type() != TrbType::TransferEvent as u32 {
             Err("Not a TransferEvent")
         } else if self.is_completion_code_transfer_ok() {
@@ -1785,15 +1769,28 @@ impl GenericTrbEntry {
             Err("CompletionCode was not Success")
         }
     }
+
+    fn slot_id(&self) -> u8 {
+        self.control.read_bits(24, 8).try_into().unwrap()
+    }
     fn set_slot_id(&mut self, slot: u8) {
         self.control.write_bits(24, 8, slot as u32).unwrap()
     }
+
     pub fn endpoint_id(&self) -> u32 {
         self.control.read_bits(16, 5)
     }
     fn set_endpoint_id(&mut self, dci: usize) {
         self.control.write_bits(16, 5, dci as u32).unwrap()
     }
+
+    fn trb_type(&self) -> u32 {
+        self.control.read_bits(10, 6)
+    }
+    fn set_trb_type(&mut self, trb_type: TrbType) {
+        self.control.write_bits(10, 6, trb_type as u32).unwrap()
+    }
+
     fn cmd_address_device(
         input_context: &IoBox<InputContext>,
         slot: u8,
