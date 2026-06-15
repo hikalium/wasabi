@@ -8,7 +8,18 @@ mkdir -p mnt/EFI/BOOT/
 cp ${PATH_TO_EFI} mnt/EFI/BOOT/BOOTX64.EFI
 set +e
 mkdir -p log
-qemu-system-x86_64 \
+
+# Prefer the patched QEMU (with usb-ncm) bundled in the wasabi_devtools
+# sibling directory if it is present; otherwise fall back to the
+# qemu-system-x86_64 found on PATH.
+QEMU=qemu-system-x86_64
+BUNDLED_QEMU="../wasabi_devtools/qemu/bin/qemu-system-x86_64"
+if [ -x "${BUNDLED_QEMU}" ]; then
+  QEMU="${BUNDLED_QEMU}"
+  echo "Using bundled QEMU: ${BUNDLED_QEMU}"
+fi
+
+"${QEMU}" \
   -m 4G \
   -bios third_party/ovmf/RELEASEX64_OVMF.fd \
   -machine q35 \
