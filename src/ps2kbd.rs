@@ -36,7 +36,7 @@ const PS2_KEYCODE_US: [KeyEvent; 0x80] = [
     KeyEvent::Char('@'),
     KeyEvent::Char('['),
     KeyEvent::Enter,
-    KeyEvent::None,
+    KeyEvent::CtrlLeft,
     KeyEvent::Char('a'),
     KeyEvent::Char('s'),
     /* 0x20 */
@@ -149,14 +149,17 @@ pub async fn ps2kbd_task() -> Result<()> {
         let status: u8 = read_io_port_u8(0x64);
         if status & 1 != 0 {
             let value = read_io_port_u8(0x60);
-            if value & 0x80 == 0 {
-                // Handle key down only for now
-                let keycode = match PS2_KEYCODE_US.get(value as usize) {
-                    Some(KeyEvent::None) => KeyEvent::Unknown(value),
-                    Some(e) => *e,
-                    None => KeyEvent::Unknown(value),
-                };
+            let is_keydown = value & 0x80 == 0;
+            let value = value & 0x7f;
+            let keycode = match PS2_KEYCODE_US.get(value as usize) {
+                Some(KeyEvent::None) => KeyEvent::Unknown(value),
+                Some(e) => *e,
+                None => KeyEvent::Unknown(value),
+            };
+            if is_keydown {
                 console.handle_key_down(keycode);
+            } else {
+                console.handle_key_up(keycode);
             }
         }
         sleep(Duration::from_millis(10)).await;
