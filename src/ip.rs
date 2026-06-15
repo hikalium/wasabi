@@ -45,6 +45,9 @@ impl IpV4Protocol {
     pub const fn tcp() -> Self {
         Self(6)
     }
+    pub const fn udp() -> Self {
+        Self(17)
+    }
 }
 
 #[repr(packed)]
