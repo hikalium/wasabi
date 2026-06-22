@@ -2,6 +2,11 @@ extern crate alloc;
 
 use crate::arp::ArpPacket;
 use crate::cui::Console;
+use crate::dhcp::DhcpPacket;
+use crate::dhcp::DHCP_OPT_MESSAGE_TYPE_END;
+use crate::dhcp::DHCP_OPT_MESSAGE_TYPE_PADDING;
+use crate::dhcp::DHCP_OPT_NETMASK;
+use crate::dhcp::DHCP_OPT_ROUTER;
 use crate::eth::EthernetAddr;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
@@ -42,13 +47,17 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-// Our IPv4 address. It used to be a compile-time `const`; it is now
-// assigned at runtime so a DHCP lease can replace it, mirroring how
-// `OUR_MAC` is learned during NCM init. Until something calls
-// `set_our_ip`, it keeps the historical static address so behaviour is
-// unchanged.
-pub static OUR_IP: Mutex<IpV4Addr> =
-    Mutex::new(IpV4Addr::new([10, 10, 10, 83]));
+// Our IPv4 address, assigned at runtime by the DHCP client (see
+// `poll_dhcp` / `handle_dhcp_rx`), mirroring how `OUR_MAC` is learned
+// during NCM init. It starts unspecified (0.0.0.0); until a lease
+// arrives we have no address and must not answer unicast traffic.
+pub static OUR_IP: Mutex<IpV4Addr> = Mutex::new(IpV4Addr::new([0, 0, 0, 0]));
+
+// Subnet mask and default router, also learned from the DHCP reply's
+// option field. Not consulted by the (link-local only) stack yet, but
+// recorded so the `ip` command and future routing can use them.
+pub static NETMASK: Mutex<Option<IpV4Addr>> = Mutex::new(None);
+pub static ROUTER: Mutex<Option<IpV4Addr>> = Mutex::new(None);
 
 pub fn our_ip() -> IpV4Addr {
     *OUR_IP.lock()
@@ -56,6 +65,11 @@ pub fn our_ip() -> IpV4Addr {
 
 pub fn set_our_ip(ip: IpV4Addr) {
     *OUR_IP.lock() = ip;
+}
+
+/// True once the DHCP client has assigned us a non-zero address.
+pub fn has_ip() -> bool {
+    our_ip() != IpV4Addr::new([0, 0, 0, 0])
 }
 
 // Our own MAC, learned from the device's iMacAddress descriptor during
@@ -373,6 +387,19 @@ impl UsbNcmDriver {
                         // Learn (src_ip -> src_mac) from any inbound
                         // IPv4 frame so outbound can resolve quickly.
                         learn_arp(ip.src(), ip.eth.src());
+                        // DHCP replies arrive before we have an address
+                        // and are sent to the broadcast / offered IP, so
+                        // they must be handled before the unicast
+                        // `dst == our_ip` filter below. No other UDP is
+                        // consumed by this stack, so swallow it here.
+                        if ip.protocol() == IpV4Protocol::udp() {
+                            if let Some(announce) =
+                                Self::handle_dhcp_rx(frame, our_mac)
+                            {
+                                replies.push(announce);
+                            }
+                            continue;
+                        }
                         if ip.dst() != our_ip() {
                             continue;
                         }
@@ -478,29 +505,17 @@ impl UsbNcmDriver {
         Ok(())
     }
 
-    /// Bulk-OUT side. Owns the bulk-OUT transfer ring; sends the
-    /// initial gratuitous ARP, then drains NET_TX_QUEUE one frame at
-    /// a time.
+    /// Bulk-OUT side. Owns the bulk-OUT transfer ring and drains
+    /// NET_TX_QUEUE one frame at a time. We no longer announce
+    /// ourselves up front: at startup we have no IP yet. The DHCP
+    /// DISCOVER broadcast (see `poll_dhcp`) lets the host learn our MAC,
+    /// and `handle_dhcp_rx` sends a gratuitous ARP once the lease lands.
     async fn poll_bulk_tx(
         xhc: Rc<Controller>,
         slot: u8,
         mut bulk_out_ring: TransferRing,
         bulk_out_desc: EndpointDescriptor,
-        our_mac: EthernetAddr,
     ) -> Result<()> {
-        // Announce ourselves so the host learns our MAC <-> IP binding.
-        let arp = ArpPacket::gratuitous(our_mac, our_ip());
-        Self::send_datagram(
-            &xhc,
-            slot,
-            &mut bulk_out_ring,
-            &bulk_out_desc,
-            arp.as_slice(),
-            0,
-        )
-        .await?;
-        info!("NCM: sent gratuitous ARP for {}", our_ip());
-
         info!("NCM: poll_bulk_tx loop starting");
         let mut tx_seq: u16 = 1;
         let mut bytes_tx: u64 = 0;
@@ -546,6 +561,89 @@ impl UsbNcmDriver {
                 }
                 None => yield_execution().await,
             }
+        }
+    }
+    /// Broadcast DHCP DISCOVERs until we are granted an address. Once
+    /// `handle_dhcp_rx` records a lease we stop asking. Kept deliberately
+    /// small: like upstream wasabi we accept the first BOOTREPLY's
+    /// `yiaddr` instead of running the full
+    /// DISCOVER/OFFER/REQUEST/ACK handshake, which slirp accepts.
+    async fn poll_dhcp(our_mac: EthernetAddr) -> Result<()> {
+        loop {
+            if has_ip() {
+                return Ok(());
+            }
+            match DhcpPacket::request(our_mac) {
+                Ok(req) => {
+                    enqueue_tx_frame(req.as_slice().to_vec());
+                    info!("DHCP: sent DISCOVER (no lease yet)");
+                }
+                Err(e) => warn!("DHCP: failed to build DISCOVER: {e:?}"),
+            }
+            sleep(Duration::from_secs(2)).await;
+        }
+    }
+    /// Handle an inbound UDP frame that may be a DHCP reply. On a valid
+    /// BOOTREPLY we adopt the offered `yiaddr` as our address and record
+    /// the netmask/router options. Returns a gratuitous ARP to announce
+    /// the freshly-leased address, or `None` when there is nothing new.
+    fn handle_dhcp_rx(frame: &[u8], our_mac: EthernetAddr) -> Option<Vec<u8>> {
+        let need = core::mem::size_of::<DhcpPacket>();
+        if frame.len() < need {
+            return None;
+        }
+        let dhcp = DhcpPacket::copy_from_slice(&frame[..need]).ok()?;
+        if !dhcp.is_boot_reply() {
+            return None;
+        }
+        let yiaddr = dhcp.yiaddr();
+        if yiaddr == IpV4Addr::new([0, 0, 0, 0]) {
+            return None;
+        }
+        let is_new = our_ip() != yiaddr;
+        set_our_ip(yiaddr);
+        if is_new {
+            info!("DHCP: assigned IP {yiaddr}");
+        }
+        // Walk the option field (after the fixed 282-byte header) for
+        // the subnet mask and default router. Options are
+        // type/length/value, with single-byte PAD (0) and END (255).
+        let opts = &frame[need..];
+        let mut i = 0;
+        while i < opts.len() {
+            let op = opts[i];
+            if op == DHCP_OPT_MESSAGE_TYPE_PADDING {
+                i += 1;
+                continue;
+            }
+            if op == DHCP_OPT_MESSAGE_TYPE_END || i + 1 >= opts.len() {
+                break;
+            }
+            let len = opts[i + 1] as usize;
+            let data_start = i + 2;
+            if data_start + len > opts.len() {
+                break;
+            }
+            let data = &opts[data_start..data_start + len];
+            match op {
+                DHCP_OPT_NETMASK if len >= 4 => {
+                    let m = IpV4Addr::new([data[0], data[1], data[2], data[3]]);
+                    info!("DHCP: netmask {m}");
+                    *NETMASK.lock() = Some(m);
+                }
+                DHCP_OPT_ROUTER if len >= 4 => {
+                    let r = IpV4Addr::new([data[0], data[1], data[2], data[3]]);
+                    info!("DHCP: router {r}");
+                    *ROUTER.lock() = Some(r);
+                }
+                _ => {}
+            }
+            i = data_start + len;
+        }
+        if is_new {
+            Some(ArpPacket::gratuitous(our_mac, yiaddr).as_slice().to_vec())
+        } else {
+            None
         }
     }
     async fn poll_tcp_tx(our_mac: EthernetAddr) -> Result<()> {
@@ -886,8 +984,8 @@ impl UsbNcmDriver {
             slot,
             bulk_out_ep_ring,
             bulk_out_ep_desc,
-            our_mac,
         ));
+        spawn_global(Self::poll_dhcp(our_mac));
         spawn_global(Self::poll_tcp_tx(our_mac));
         spawn_global(Self::drive_remote_console());
         Ok(())
