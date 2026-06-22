@@ -42,7 +42,21 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-pub const OUR_IP: IpV4Addr = IpV4Addr::new([10, 10, 10, 83]);
+// Our IPv4 address. It used to be a compile-time `const`; it is now
+// assigned at runtime so a DHCP lease can replace it, mirroring how
+// `OUR_MAC` is learned during NCM init. Until something calls
+// `set_our_ip`, it keeps the historical static address so behaviour is
+// unchanged.
+pub static OUR_IP: Mutex<IpV4Addr> =
+    Mutex::new(IpV4Addr::new([10, 10, 10, 83]));
+
+pub fn our_ip() -> IpV4Addr {
+    *OUR_IP.lock()
+}
+
+pub fn set_our_ip(ip: IpV4Addr) {
+    *OUR_IP.lock() = ip;
+}
 
 // Our own MAC, learned from the device's iMacAddress descriptor during
 // NCM init. Set once `run()` has finished negotiating, before the first
@@ -338,10 +352,10 @@ impl UsbNcmDriver {
                         // (ip, mac) pairing is authoritative for the
                         // cache.
                         learn_arp(req.sender_ip(), req.sender_mac());
-                        if req.is_request_for(OUR_IP) {
+                        if req.is_request_for(our_ip()) {
                             info!(
                                 "ARP: request for {} from {} ({:?})",
-                                OUR_IP,
+                                our_ip(),
                                 req.sender_ip(),
                                 req.sender_mac(),
                             );
@@ -359,7 +373,7 @@ impl UsbNcmDriver {
                         // Learn (src_ip -> src_mac) from any inbound
                         // IPv4 frame so outbound can resolve quickly.
                         learn_arp(ip.src(), ip.eth.src());
-                        if ip.dst() != OUR_IP {
+                        if ip.dst() != our_ip() {
                             continue;
                         }
                         // Trim to ip.total_length() to drop any
@@ -381,7 +395,9 @@ impl UsbNcmDriver {
                                 .unwrap_or(false)
                             {
                                 match icmp::echo_reply_from_request(
-                                    frame, our_mac, OUR_IP,
+                                    frame,
+                                    our_mac,
+                                    our_ip(),
                                 ) {
                                     Ok(reply) => {
                                         info!(
@@ -413,9 +429,12 @@ impl UsbNcmDriver {
                             }
                         } else if ip.protocol() == IpV4Protocol::tcp() {
                             let now = crate::hpet::global_timestamp();
-                            if let Some(reply) = TCP_SOCKET
-                                .handle_rx(frame, our_mac, OUR_IP, now)
-                            {
+                            if let Some(reply) = TCP_SOCKET.handle_rx(
+                                frame,
+                                our_mac,
+                                our_ip(),
+                                now,
+                            ) {
                                 replies.push(reply);
                             }
                         }
@@ -470,7 +489,7 @@ impl UsbNcmDriver {
         our_mac: EthernetAddr,
     ) -> Result<()> {
         // Announce ourselves so the host learns our MAC <-> IP binding.
-        let arp = ArpPacket::gratuitous(our_mac, OUR_IP);
+        let arp = ArpPacket::gratuitous(our_mac, our_ip());
         Self::send_datagram(
             &xhc,
             slot,
@@ -480,7 +499,7 @@ impl UsbNcmDriver {
             0,
         )
         .await?;
-        info!("NCM: sent gratuitous ARP for {OUR_IP}");
+        info!("NCM: sent gratuitous ARP for {}", our_ip());
 
         info!("NCM: poll_bulk_tx loop starting");
         let mut tx_seq: u16 = 1;
@@ -532,7 +551,7 @@ impl UsbNcmDriver {
     async fn poll_tcp_tx(our_mac: EthernetAddr) -> Result<()> {
         loop {
             let now = crate::hpet::global_timestamp();
-            if let Some(frame) = TCP_SOCKET.poll_tx(our_mac, OUR_IP, now) {
+            if let Some(frame) = TCP_SOCKET.poll_tx(our_mac, our_ip(), now) {
                 enqueue_tx_frame(frame);
             }
             sleep(Duration::from_millis(20)).await;
@@ -847,7 +866,7 @@ impl UsbNcmDriver {
 
         let our_mac = parse_mac_hex_str(&mac_addr)?;
         *OUR_MAC.lock() = Some(our_mac);
-        info!("NCM: our MAC = {our_mac:?}, IP = {OUR_IP}");
+        info!("NCM: our MAC = {our_mac:?}, IP = {}", our_ip());
 
         spawn_global(Self::poll_int_in(
             xhc.clone(),
