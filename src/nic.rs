@@ -25,6 +25,7 @@ use crate::print::hexdump_bytes;
 use crate::result::Result;
 use crate::slice::Sliceable;
 use crate::tcp::TCP_SOCKET;
+use crate::udp::UdpPacket;
 use crate::usb;
 use crate::usb::descriptors_under_config;
 use crate::usb::descriptors_under_interface;
@@ -414,16 +415,31 @@ impl UsbNcmDriver {
                         // Learn (src_ip -> src_mac) from any inbound
                         // IPv4 frame so outbound can resolve quickly.
                         learn_arp(ip.src(), ip.eth.src());
-                        // DHCP replies arrive before we have an address
-                        // and are sent to the broadcast / offered IP, so
-                        // they must be handled before the unicast
-                        // `dst == our_ip` filter below. No other UDP is
-                        // consumed by this stack, so swallow it here.
-                        if ip.protocol() == IpV4Protocol::udp() {
-                            if let Some(announce) =
-                                Self::handle_dhcp_rx(frame, our_mac)
-                            {
-                                replies.push(announce);
+                        // UDP is handled before the unicast `dst ==
+                        // our_ip` filter below: DHCP replies arrive
+                        // before we even have an address. Demux by port —
+                        // DHCP (67->68) configures us; DNS replies (from
+                        // :53) go to the resolver; anything else is
+                        // dropped.
+                        if ip.protocol() == IpV4Protocol::udp()
+                            && frame.len() >= core::mem::size_of::<UdpPacket>()
+                        {
+                            if let Ok(udp) = UdpPacket::copy_from_slice(
+                                &frame[..core::mem::size_of::<UdpPacket>()],
+                            ) {
+                                match (udp.src_port(), udp.dst_port()) {
+                                    (67, 68) => {
+                                        if let Some(announce) =
+                                            Self::handle_dhcp_rx(frame, our_mac)
+                                        {
+                                            replies.push(announce);
+                                        }
+                                    }
+                                    (crate::dns::PORT_DNS, _) => {
+                                        crate::dns::deliver_response(frame)
+                                    }
+                                    _ => {}
+                                }
                             }
                             continue;
                         }
