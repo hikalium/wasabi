@@ -374,18 +374,22 @@ const PING_ARP_WAIT: Duration = Duration::from_millis(200);
 async fn ping_once(target: IpV4Addr, seq: u16) -> Result<()> {
     let our_mac = nic::our_mac().ok_or("NCM not ready (no MAC)")?;
 
-    // Resolve dst MAC; if missing, prod the network with an ARP
-    // request and wait briefly for a reply to land in the cache.
-    let dst_mac = match nic::arp_lookup(target) {
+    // Route to the destination directly when it is on our subnet,
+    // otherwise hand the frame to the DHCP-learned default router. Only
+    // the link-layer next hop changes; the ICMP packet still targets
+    // `target`. Resolve that next hop's MAC, prodding the network with
+    // an ARP request if it is not cached yet.
+    let next_hop = nic::next_hop(target);
+    let dst_mac = match nic::arp_lookup(next_hop) {
         Some(m) => m,
         None => {
             nic::enqueue_tx_frame(
-                ArpPacket::request(our_mac, nic::our_ip(), target)
+                ArpPacket::request(our_mac, nic::our_ip(), next_hop)
                     .as_slice()
                     .to_vec(),
             );
             sleep(PING_ARP_WAIT).await;
-            nic::arp_lookup(target).ok_or("ARP unresolved")?
+            nic::arp_lookup(next_hop).ok_or("ARP unresolved")?
         }
     };
 
