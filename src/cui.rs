@@ -380,7 +380,7 @@ async fn ping_once(target: IpV4Addr, seq: u16) -> Result<()> {
         Some(m) => m,
         None => {
             nic::enqueue_tx_frame(
-                ArpPacket::request(our_mac, nic::OUR_IP, target)
+                ArpPacket::request(our_mac, nic::our_ip(), target)
                     .as_slice()
                     .to_vec(),
             );
@@ -393,7 +393,7 @@ async fn ping_once(target: IpV4Addr, seq: u16) -> Result<()> {
     let payload = [0xa5u8; PING_PAYLOAD_LEN];
     let frame = icmp::echo_request_frame(
         our_mac,
-        nic::OUR_IP,
+        nic::our_ip(),
         dst_mac,
         target,
         id,
