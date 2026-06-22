@@ -72,6 +72,33 @@ pub fn has_ip() -> bool {
     our_ip() != IpV4Addr::new([0, 0, 0, 0])
 }
 
+pub fn netmask() -> Option<IpV4Addr> {
+    *NETMASK.lock()
+}
+
+pub fn router() -> Option<IpV4Addr> {
+    *ROUTER.lock()
+}
+
+/// Pick the link-layer next hop for a destination IP: the destination
+/// itself when it shares our subnet, otherwise the DHCP-learned default
+/// router. With no netmask/router yet (pre-DHCP) we fall back to the
+/// destination, i.e. the old link-local behaviour. Note this only
+/// chooses where to send at layer 2 — the IP header still carries the
+/// final destination.
+pub fn next_hop(dst: IpV4Addr) -> IpV4Addr {
+    if let (Some(mask), Some(router)) = (netmask(), router()) {
+        let ip = our_ip().bytes();
+        let m = mask.bytes();
+        let d = dst.bytes();
+        let on_subnet = (0..4).all(|i| (ip[i] & m[i]) == (d[i] & m[i]));
+        if !on_subnet {
+            return router;
+        }
+    }
+    dst
+}
+
 // Our own MAC, learned from the device's iMacAddress descriptor during
 // NCM init. Set once `run()` has finished negotiating, before the first
 // frame is sent. Consumers (e.g. the `ping` command) read this to build
