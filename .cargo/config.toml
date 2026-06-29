@@ -8,3 +8,4 @@ build-std-features = ["compiler-builtins-mem"]
 
 [target.'cfg(target_os = "uefi")']
 runner = "bash scripts/launch_qemu.sh"
+rustflags = ["-Dwarnings"]
