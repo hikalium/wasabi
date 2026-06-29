@@ -32,6 +32,7 @@ pub mod keyboard;
 pub mod mmio;
 pub mod mutex;
 pub mod ncm;
+pub mod net;
 pub mod nic;
 pub mod pci;
 pub mod print;
