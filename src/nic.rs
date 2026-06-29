@@ -29,13 +29,55 @@ use crate::xhci::EventFuture;
 use crate::xhci::NormalTrb;
 use crate::xhci::TransferRing;
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-const OUR_IP: IpV4Addr = IpV4Addr::new([10, 10, 10, 83]);
+pub const OUR_IP: IpV4Addr = IpV4Addr::new([10, 10, 10, 83]);
+
+// Our own MAC, learned from the device's iMacAddress descriptor during
+// NCM init. Set once `run()` has finished negotiating, before the first
+// frame is sent. Consumers (e.g. the `ping` command) read this to build
+// outbound frames without having to thread the MAC through.
+pub static OUR_MAC: Mutex<Option<EthernetAddr>> = Mutex::new(None);
+
+// IP→MAC cache populated passively from observed traffic on bulk-IN
+// (ARP packets — both requests and replies — and IPv4 frames). Lets
+// outbound traffic skip an ARP round-trip when the peer has already
+// announced itself, which on a cdc-ncm host is the common case.
+pub static ARP_CACHE: Mutex<BTreeMap<IpV4Addr, EthernetAddr>> =
+    Mutex::new(BTreeMap::new());
+
+// In-flight `ping` request awaiting an echo reply. The rx path notes
+// the round-trip into `reply_rtt` when a matching echo reply arrives.
+// We only track one outstanding ping at a time — the cui dispatch is
+// serialized and the command itself awaits before issuing the next.
+pub struct PingPending {
+    pub id: u16,
+    pub seq: u16,
+    pub sent_at: Duration,
+    pub reply_rtt: Option<Duration>,
+    pub reply_src: Option<IpV4Addr>,
+}
+pub static PING_PENDING: Mutex<Option<PingPending>> = Mutex::new(None);
+
+pub fn our_mac() -> Option<EthernetAddr> {
+    *OUR_MAC.lock()
+}
+
+pub fn arp_lookup(ip: IpV4Addr) -> Option<EthernetAddr> {
+    ARP_CACHE.lock().get(&ip).copied()
+}
+
+pub fn learn_arp(ip: IpV4Addr, mac: EthernetAddr) {
+    if mac == EthernetAddr::zero() || mac == EthernetAddr::broadcast() {
+        return;
+    }
+    ARP_CACHE.lock().insert(ip, mac);
+}
 
 // Frames produced asynchronously by other tasks that `poll_bulk`
 // drains and ships out the bulk-OUT endpoint at the bottom of each
@@ -230,6 +272,10 @@ impl UsbNcmDriver {
                 let eth_type = [frame[12], frame[13]];
                 if eth_type == [0x08, 0x06] && frame.len() >= 42 {
                     if let Ok(req) = ArpPacket::copy_from_slice(&frame[..42]) {
+                        // Whether request or reply, the sender's
+                        // (ip, mac) pairing is authoritative for the
+                        // cache.
+                        learn_arp(req.sender_ip(), req.sender_mac());
                         if req.is_request_for(OUR_IP) {
                             info!(
                                 "ARP: request for {} from {} ({:?})",
@@ -248,28 +294,60 @@ impl UsbNcmDriver {
                     if let Ok(ip) = IpV4Packet::copy_from_slice(
                         &frame[..core::mem::size_of::<IpV4Packet>()],
                     ) {
-                        if ip.dst() == OUR_IP
-                            && ip.protocol() == IpV4Protocol::icmp()
+                        // Learn (src_ip -> src_mac) from any inbound
+                        // IPv4 frame so outbound can resolve quickly.
+                        learn_arp(ip.src(), ip.eth.src());
+                        if ip.dst() != OUR_IP {
+                            continue;
+                        }
+                        // Trim to ip.total_length() to drop any
+                        // Ethernet-layer padding (frames < 60 bytes).
+                        let frame_total = core::mem::size_of::<
+                            crate::eth::EthernetHeader,
+                        >() + ip.total_length();
+                        let frame_total = frame_total.min(frame.len());
+                        let frame = &frame[..frame_total];
+                        if ip.protocol() == IpV4Protocol::icmp()
+                            && frame.len() >= core::mem::size_of::<IcmpPacket>()
                         {
-                            // Trim to ip.total_length() to drop any
-                            // Ethernet-layer padding (frames < 60 bytes).
-                            let frame_total = core::mem::size_of::<
-                                crate::eth::EthernetHeader,
-                            >() + ip.total_length();
-                            let frame_total = frame_total.min(frame.len());
-                            match icmp::echo_reply_from_request(
-                                &frame[..frame_total],
-                                our_mac,
-                                OUR_IP,
-                            ) {
-                                Ok(reply) => {
-                                    info!(
-                                        "ICMP: echo request from {} -> reply",
-                                        ip.src(),
-                                    );
-                                    replies.push(reply);
+                            let icmp = IcmpPacket::copy_from_slice(
+                                &frame[..core::mem::size_of::<IcmpPacket>()],
+                            )
+                            .ok();
+                            if icmp
+                                .map(|p| p.is_echo_request())
+                                .unwrap_or(false)
+                            {
+                                match icmp::echo_reply_from_request(
+                                    frame, our_mac, OUR_IP,
+                                ) {
+                                    Ok(reply) => {
+                                        info!(
+                                            "ICMP: echo req from {} -> reply",
+                                            ip.src(),
+                                        );
+                                        replies.push(reply);
+                                    }
+                                    Err(e) => warn!("ICMP reply build: {e}"),
                                 }
-                                Err(e) => warn!("ICMP reply build: {e}"),
+                            } else if let Some(p) = icmp {
+                                if p.is_echo_reply() {
+                                    let mut slot = PING_PENDING.lock();
+                                    if let Some(pending) = slot.as_mut() {
+                                        if pending.id == p.identifier()
+                                            && pending.seq == p.sequence()
+                                            && pending.reply_rtt.is_none()
+                                        {
+                                            let now =
+                                                crate::hpet::global_timestamp();
+                                            pending.reply_rtt =
+                                                Some(now.saturating_sub(
+                                                    pending.sent_at,
+                                                ));
+                                            pending.reply_src = Some(ip.src());
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -482,6 +560,7 @@ impl UsbNcmDriver {
         info!("ntbparams: {ntbparams:?}");
 
         let our_mac = parse_mac_hex_str(&mac_addr)?;
+        *OUR_MAC.lock() = Some(our_mac);
         info!("NCM: our MAC = {our_mac:?}, IP = {OUR_IP}");
 
         spawn_global(Self::poll_int_in(
