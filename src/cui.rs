@@ -1,6 +1,7 @@
 extern crate alloc;
 
 use crate::acpi::RebootParams;
+use crate::arp::ArpPacket;
 use crate::error;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
@@ -13,16 +14,21 @@ use crate::graphics::Rect;
 use crate::gui::global_vram_resolutions;
 use crate::gui::GLOBAL_VRAM;
 use crate::hpet::global_timestamp;
+use crate::icmp;
 use crate::info;
 use crate::init::EFI_MEMORY_MAP;
 use crate::init::REBOOT_PARAMS;
 use crate::input::MouseEvent;
 use crate::input::PointerPosition;
 use crate::input::GLOBAL_INPUT_MANAGER;
+use crate::ip::IpV4Addr;
 use crate::keyboard::KeyEvent;
+use crate::nic;
+use crate::nic::PingPending;
 use crate::print;
 use crate::println;
 use crate::result::Result;
+use crate::slice::Sliceable;
 use crate::tablet::set_debug_mouse;
 use crate::warn;
 use alloc::string::String;
@@ -277,6 +283,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             }
             "debug" => run_cmd_debug(&args),
             "show" => run_cmd_show(&args),
+            "ping" => run_cmd_ping(&args),
             "reboot" | "r" => run_cmd_reboot(&args),
             "demo" => run_cmd_demo(&args),
             "uname" => run_cmd_uname(&args),
@@ -290,6 +297,125 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+fn parse_ipv4(s: &str) -> Result<IpV4Addr> {
+    let mut octets = [0u8; 4];
+    let mut i = 0;
+    for part in s.split('.') {
+        if i >= 4 {
+            return Err("IP: too many octets");
+        }
+        octets[i] = part.parse().map_err(|_| "IP: bad octet")?;
+        i += 1;
+    }
+    if i != 4 {
+        return Err("IP: expected 4 octets");
+    }
+    Ok(IpV4Addr::new(octets))
+}
+
+const PING_PAYLOAD_LEN: usize = 32;
+const PING_REPLY_TIMEOUT: Duration = Duration::from_millis(1000);
+const PING_ARP_WAIT: Duration = Duration::from_millis(200);
+
+async fn ping_once(target: IpV4Addr, seq: u16) -> Result<()> {
+    let our_mac = nic::our_mac().ok_or("NCM not ready (no MAC)")?;
+
+    // Resolve dst MAC; if missing, prod the network with an ARP
+    // request and wait briefly for a reply to land in the cache.
+    let dst_mac = match nic::arp_lookup(target) {
+        Some(m) => m,
+        None => {
+            nic::enqueue_tx_frame(
+                ArpPacket::request(our_mac, nic::OUR_IP, target)
+                    .as_slice()
+                    .to_vec(),
+            );
+            sleep(PING_ARP_WAIT).await;
+            nic::arp_lookup(target).ok_or("ARP unresolved")?
+        }
+    };
+
+    let id: u16 = 0x1d10;
+    let payload = [0xa5u8; PING_PAYLOAD_LEN];
+    let frame = icmp::echo_request_frame(
+        our_mac,
+        nic::OUR_IP,
+        dst_mac,
+        target,
+        id,
+        seq,
+        &payload,
+    );
+    let sent_at = global_timestamp();
+    *nic::PING_PENDING.lock() = Some(PingPending {
+        id,
+        seq,
+        sent_at,
+        reply_rtt: None,
+        reply_src: None,
+    });
+    nic::enqueue_tx_frame(frame);
+
+    let deadline = sent_at + PING_REPLY_TIMEOUT;
+    loop {
+        // Read out under a short-lived guard so the second lock below
+        // doesn't deadlock against an `if let` temporary.
+        let reply = nic::PING_PENDING
+            .lock()
+            .as_ref()
+            .and_then(|p| Some((p.reply_rtt?, p.reply_src?)));
+        if let Some((rtt, src)) = reply {
+            let us = rtt.as_micros();
+            println!(
+                "{} bytes from {}: icmp_seq={} time={}.{:03} ms",
+                PING_PAYLOAD_LEN + 8,
+                src,
+                seq,
+                us / 1000,
+                us % 1000,
+            );
+            *nic::PING_PENDING.lock() = None;
+            return Ok(());
+        }
+        if global_timestamp() >= deadline {
+            *nic::PING_PENDING.lock() = None;
+            println!("Request timeout for icmp_seq={seq}");
+            return Ok(());
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn ping_task(target: IpV4Addr, count: u16) -> Result<()> {
+    println!("PING {target}: {PING_PAYLOAD_LEN} data bytes");
+    for seq in 1..=count {
+        if let Err(e) = ping_once(target, seq).await {
+            error!("ping: {e}");
+            return Ok(());
+        }
+        if seq != count {
+            sleep(Duration::from_millis(1000)).await;
+        }
+    }
+    Ok(())
+}
+
+pub fn run_cmd_ping(args: &[&str]) -> Result<()> {
+    let target = match args.get(1) {
+        Some(s) if !s.is_empty() => parse_ipv4(s)?,
+        _ => {
+            info!("Usage: ping <ipv4> [count]");
+            return Ok(());
+        }
+    };
+    let count: u16 = match args.get(2) {
+        Some(s) if !s.is_empty() => s.parse().map_err(|_| "ping: bad count")?,
+        _ => 4,
+    };
+    spawn_global(ping_task(target, count));
+    Ok(())
 }
 
 async fn demo_mouse_event_inject_task() -> Result<()> {
