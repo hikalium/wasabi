@@ -34,3 +34,19 @@ Same shape applies to `match SOME_MUTEX.lock().as_ref() { ... }` and to
 `for x in COLLECTION_MUTEX.lock().iter() { ... }`. If the body needs to
 take the same lock — even transitively, e.g. by calling a helper that
 locks it — copy out first.
+
+## Design documents (`plan/`)
+
+Design and planning docs live under `plan/`, filed by status:
+
+- `plan/done/` — completed (the feature it describes is implemented).
+- `plan/active/` — in progress.
+- `plan/draft/` — drafts / proposals not yet agreed.
+
+Move a doc between these directories as its status changes.
+
+**Any commit that adds, edits, moves, or deletes something under `plan/`
+MUST be marked `SKIP_EXPLAIN:`** (prefix the commit title). These docs are
+not book content and must never be embedded into the manuscript by ajimi.
+Because such commits are already `SKIP_EXPLAIN`, reclassifying or renaming
+a plan doc needs no retroactive history rewrite.
