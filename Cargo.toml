@@ -12,3 +12,10 @@ version_macro = { path = "version_macro" }
 [[bin]]
 name = "wasabi"
 test = false
+
+# In-OS integration test: boots the OS, pings the DHCP-learned default
+# gateway, and quits QEMU with the verdict. `harness = false` lets us
+# provide our own efi_main instead of the libtest harness.
+[[test]]
+name = "ping_to_gateway"
+harness = false
