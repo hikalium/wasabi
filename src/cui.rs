@@ -10,7 +10,6 @@ use crate::font::get_glyph_width;
 use crate::graphics::draw_str_fg;
 use crate::graphics::fill_rect;
 use crate::hpet::global_timestamp;
-use crate::icmp;
 use crate::ime::InputEditResult;
 use crate::ime::InputMethodEditor;
 use crate::info;
@@ -18,8 +17,8 @@ use crate::init::EFI_MEMORY_MAP;
 use crate::init::REBOOT_PARAMS;
 use crate::ip::IpV4Addr;
 use crate::keyboard::KeyEvent;
+use crate::net;
 use crate::nic;
-use crate::nic::PingPending;
 use crate::print;
 use crate::println;
 use crate::result::Result;
@@ -369,85 +368,26 @@ fn parse_ipv4(s: &str) -> Result<IpV4Addr> {
     Ok(IpV4Addr::new(octets))
 }
 
-const PING_PAYLOAD_LEN: usize = 32;
-const PING_REPLY_TIMEOUT: Duration = Duration::from_millis(1000);
-const PING_ARP_WAIT: Duration = Duration::from_millis(200);
-
 async fn ping_once(target: IpV4Addr, seq: u16) -> Result<()> {
-    let our_mac = nic::our_mac().ok_or("NCM not ready (no MAC)")?;
-
-    // Route to the destination directly when it is on our subnet,
-    // otherwise hand the frame to the DHCP-learned default router. Only
-    // the link-layer next hop changes; the ICMP packet still targets
-    // `target`. Resolve that next hop's MAC, prodding the network with
-    // an ARP request if it is not cached yet.
-    let next_hop = nic::next_hop(target);
-    let dst_mac = match nic::arp_lookup(next_hop) {
-        Some(m) => m,
-        None => {
-            nic::enqueue_tx_frame(
-                ArpPacket::request(our_mac, nic::our_ip(), next_hop)
-                    .as_slice()
-                    .to_vec(),
-            );
-            sleep(PING_ARP_WAIT).await;
-            nic::arp_lookup(next_hop).ok_or("ARP unresolved")?
-        }
-    };
-
-    let id: u16 = 0x1d10;
-    let payload = [0xa5u8; PING_PAYLOAD_LEN];
-    let frame = icmp::echo_request_frame(
-        our_mac,
-        nic::our_ip(),
-        dst_mac,
-        target,
-        id,
-        seq,
-        &payload,
-    );
-    let sent_at = global_timestamp();
-    *nic::PING_PENDING.lock() = Some(PingPending {
-        id,
-        seq,
-        sent_at,
-        reply_rtt: None,
-        reply_src: None,
-    });
-    nic::enqueue_tx_frame(frame);
-
-    let deadline = sent_at + PING_REPLY_TIMEOUT;
-    loop {
-        // Read out under a short-lived guard so the second lock below
-        // doesn't deadlock against an `if let` temporary.
-        let reply = nic::PING_PENDING
-            .lock()
-            .as_ref()
-            .and_then(|p| Some((p.reply_rtt?, p.reply_src?)));
-        if let Some((rtt, src)) = reply {
+    match net::ping_once_result(target, seq).await? {
+        Some((rtt, src)) => {
             let us = rtt.as_micros();
             println!(
                 "{} bytes from {}: icmp_seq={} time={}.{:03} ms",
-                PING_PAYLOAD_LEN + 8,
+                net::PING_PAYLOAD_LEN + 8,
                 src,
                 seq,
                 us / 1000,
                 us % 1000,
             );
-            *nic::PING_PENDING.lock() = None;
-            return Ok(());
         }
-        if global_timestamp() >= deadline {
-            *nic::PING_PENDING.lock() = None;
-            println!("Request timeout for icmp_seq={seq}");
-            return Ok(());
-        }
-        sleep(Duration::from_millis(10)).await;
+        None => println!("Request timeout for icmp_seq={seq}"),
     }
+    Ok(())
 }
 
 async fn ping_task(target: IpV4Addr, count: u16) -> Result<()> {
-    println!("PING {target}: {PING_PAYLOAD_LEN} data bytes");
+    println!("PING {target}: {} data bytes", net::PING_PAYLOAD_LEN);
     for seq in 1..=count {
         if let Err(e) = ping_once(target, seq).await {
             error!("ping: {e}");
