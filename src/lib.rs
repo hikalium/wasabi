@@ -14,6 +14,7 @@ pub mod allocator;
 pub mod arp;
 pub mod bitmap;
 pub mod bits;
+pub mod boot;
 pub mod checksum;
 pub mod cui;
 pub mod dhcp;
