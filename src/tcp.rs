@@ -27,6 +27,11 @@ const TCP_RTO: Duration = Duration::from_millis(500);
 // host stays out of autosuspend (default ~2s on Linux).
 const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_millis(1000);
 
+// Conservative MSS for an Ethernet/IPv4 link without IP options:
+// 1500 (MTU) - 20 (IP) - 20 (TCP) = 1460. We don't do IP fragmentation,
+// so segments larger than this would be dropped at the NIC anyway.
+const TCP_MSS: usize = 1460;
+
 // TCP header per RFC 9293 §3.1, layered over IpV4Packet (which itself
 // embeds the Ethernet header). Total prefix is 14 + 20 + 20 = 54 bytes
 // before the TCP payload.
@@ -397,21 +402,25 @@ impl TcpSocket {
         let has_fresh = inner.send_buffer.len() > inner.unacked_len;
 
         let (data, seq) = if need_retransmit {
-            let bytes: Vec<u8> = inner
-                .send_buffer
-                .iter()
-                .take(inner.unacked_len)
-                .copied()
-                .collect();
+            // Cap retransmit at MSS so an unbounded unacked window
+            // doesn't produce an oversized Ethernet frame the NIC
+            // would drop. The rest stays unacked and will be picked
+            // up on a later RTO tick.
+            let take_n = inner.unacked_len.min(TCP_MSS);
+            let bytes: Vec<u8> =
+                inner.send_buffer.iter().take(take_n).copied().collect();
             let first_unacked_seq =
                 inner.my_next_seq.wrapping_sub(inner.unacked_len as u32);
             inner.last_tx_at = Some(now);
             (bytes, first_unacked_seq)
         } else if has_fresh {
+            // Same MSS cap on the fresh-data path. Larger pushes
+            // drain across multiple poll_tx ticks.
             let bytes: Vec<u8> = inner
                 .send_buffer
                 .iter()
                 .skip(inner.unacked_len)
+                .take(TCP_MSS)
                 .copied()
                 .collect();
             let seq = inner.my_next_seq;
@@ -823,6 +832,79 @@ mod tests {
         let p2 = parse_reply(&seg2);
         assert_eq!(p2.seq_num(), first_seq.wrapping_add(5));
         assert_eq!(&seg2[size_of::<TcpPacket>()..], b"abc");
+    }
+
+    #[test_case]
+    fn poll_tx_caps_segment_at_mss_for_fresh_data() {
+        let (sock, _) = established_socket();
+        // Push more than one MSS of data.
+        let big = alloc::vec![b'A'; TCP_MSS * 3];
+        sock.push_tx_bytes(&big);
+        let seg = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(0))
+            .unwrap();
+        // The full Ethernet+IP+TCP+payload frame should not exceed
+        // the size_of::<TcpPacket>() + TCP_MSS bound.
+        assert!(seg.len() <= size_of::<TcpPacket>() + TCP_MSS);
+        assert_eq!(seg.len() - size_of::<TcpPacket>(), TCP_MSS);
+    }
+
+    #[test_case]
+    fn poll_tx_caps_segment_at_mss_on_retransmit() {
+        let (sock, _) = established_socket();
+        // First send: ships TCP_MSS bytes, advances unacked_len.
+        let big = alloc::vec![b'B'; TCP_MSS * 2];
+        sock.push_tx_bytes(&big);
+        let _ = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(0))
+            .unwrap();
+        // Force a retransmit by jumping past RTO with no ACK.
+        let seg = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(600))
+            .unwrap();
+        assert_eq!(seg.len() - size_of::<TcpPacket>(), TCP_MSS);
+    }
+
+    #[test_case]
+    fn send_buffer_drains_across_many_poll_tx_acks() {
+        // A round-trip-y simulation: push 5 * MSS bytes, then for each
+        // poll_tx send + ACK pair confirm send_buffer shrinks
+        // monotonically and seq numbers march forward correctly.
+        let (sock, _) = established_socket();
+        let payload = alloc::vec![b'C'; TCP_MSS * 5];
+        sock.push_tx_bytes(&payload);
+
+        let mut now = Duration::from_millis(0);
+        let mut total_sent: u32 = 0;
+        for _ in 0..5 {
+            let seg = sock.poll_tx(OUR_MAC, OUR_IP, now).unwrap();
+            let p = parse_reply(&seg);
+            let payload_len = (seg.len() - size_of::<TcpPacket>()) as u32;
+            assert_eq!(payload_len, TCP_MSS as u32);
+            // ACK the bytes we just sent.
+            let ack = build_client_segment(
+                PEER_MAC,
+                PEER_IP,
+                12345,
+                OUR_MAC,
+                OUR_IP,
+                23,
+                5001,
+                Some(p.seq_num().wrapping_add(payload_len)),
+                false,
+                false,
+                &[],
+            );
+            sock.handle_rx(&ack, OUR_MAC, OUR_IP, now);
+            total_sent += payload_len;
+            now = now + Duration::from_millis(10);
+        }
+        // After all five chunks ACKed, retransmit pressure should be
+        // gone and there should be nothing left to send.
+        assert_eq!(total_sent, (TCP_MSS * 5) as u32);
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, now + Duration::from_millis(10))
+            .is_none());
     }
 
     #[test_case]
