@@ -26,7 +26,14 @@ impl InternetChecksumGenerator {
         for w in data.chunks(2) {
             let hi = w[0] as u32;
             let lo = w.get(1).cloned().unwrap_or_default() as u32;
-            self.sum += (hi << 8) | lo;
+            // `wrapping_add` + immediate carry-fold keeps `sum`
+            // bounded so a multi-chunk feed (e.g. a >130 KiB TCP
+            // retransmit) can't overflow `u32`. Without this the
+            // generator panics on debug builds via the default
+            // overflow check after ~65K chunks.
+            let word = (hi << 8) | lo;
+            let s = self.sum.wrapping_add(word);
+            self.sum = (s & 0xffff) + (s >> 16);
         }
         self
     }
@@ -40,6 +47,7 @@ impl InternetChecksumGenerator {
 
 #[cfg(test)]
 mod tests {
+    extern crate alloc;
     use super::*;
 
     // Worked examples from RFC 1071 §3.
@@ -70,5 +78,19 @@ mod tests {
         a.feed(&[0x00, 0x40, 0x11, 0x40, 0x00, 0x00, 0xa8, 0xc0]);
         a.feed(&[0x01, 0x00, 0xa8, 0xc0, 0xc7, 0x00]);
         assert_eq!(a.checksum(), InternetChecksum([0x61, 0xb8]));
+    }
+
+    /// A retransmit of a very large send_buffer (e.g. a wedged TCP
+    /// connection where unacked data piled up) hands a multi-hundred
+    /// kilobyte segment to `tcp_segment_checksum`. Make sure the
+    /// generator doesn't overflow its u32 accumulator on the way.
+    #[test_case]
+    fn feed_large_buffer_does_not_overflow() {
+        // 256 KiB of 0xFF — every 2-byte chunk contributes 0xFFFF,
+        // which is the worst-case input for the accumulator.
+        let big = alloc::vec![0xFFu8; 256 * 1024];
+        // The point of the test is "doesn't panic"; calling
+        // `checksum()` also exercises the final fold loop.
+        let _ = InternetChecksumGenerator::new().feed(&big).checksum();
     }
 }
