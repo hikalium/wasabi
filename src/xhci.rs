@@ -1811,6 +1811,11 @@ impl GenericTrbEntry {
     pub const TRB_CC_PARAM_ERROR: u32 = 17;
     pub const TRB_CC_CONTEXT_STATE_ERROR: u32 = 19;
     pub const TRB_CC_STOPPED: u32 = 26;
+    /// "The TD failed to complete because of an exceptional condition
+    /// while a Stop Endpoint Command was in progress." Generated as a
+    /// transfer event on the TRB that was in flight when Stop Endpoint
+    /// fired — expected and benign during the bulk-OUT recovery dance.
+    pub const TRB_CC_STOPPED_LENGTH_INVALID: u32 = 27;
     pub fn completion_code(&self) -> u32 {
         self.option.read_bits(24, 8)
     }
@@ -1835,6 +1840,7 @@ impl GenericTrbEntry {
             Self::TRB_CC_PARAM_ERROR => "Parameter Error",
             Self::TRB_CC_CONTEXT_STATE_ERROR => "Context State Error",
             Self::TRB_CC_STOPPED => "Stopped",
+            Self::TRB_CC_STOPPED_LENGTH_INVALID => "Stopped - Length Invalid",
             _ => "?",
         }
     }
@@ -2019,8 +2025,16 @@ impl TransferRing {
     pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }
-    pub fn cycle_state(&self) -> bool {
-        self.cycle_state_ours
+    /// The Dequeue Cycle State (DCS) the controller should use to
+    /// recognize the *next* TRB this ring will produce as valid.
+    /// Beware: this is **not** equal to the producer's own cycle
+    /// state — `push()` writes the source TRB with the producer
+    /// cycle then immediately flips that slot's cycle bit via
+    /// `advance_index(!self.cycle_state_ours)`, so a freshly pushed
+    /// (controller-valid) slot always carries `!cycle_state_ours`.
+    /// Set TR Dequeue Pointer must use that inverted value.
+    pub fn dequeue_cycle_state(&self) -> bool {
+        !self.cycle_state_ours
     }
     /// Wipe the ring back to its post-`Default::default()` shape:
     /// every slot zeroed, current_index back to 0, cycle bit reset,
