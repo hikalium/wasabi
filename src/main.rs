@@ -65,6 +65,8 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
         info!("Started to monitor serial port");
         // The serial line is another way to talk to the command shell:
         // feed every received character into a Console of its own.
+        // Terminals send CR for the Enter key, which the Console
+        // normalizes into a newline that triggers the command.
         let mut console = Console::default();
         loop {
             if let Some(v) = sp.try_read() {
