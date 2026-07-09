@@ -4,6 +4,7 @@
 
 use core::panic::PanicInfo;
 use core::time::Duration;
+use wasabi::cui::Console;
 use wasabi::error;
 use wasabi::executor::sleep;
 use wasabi::executor::spawn_global;
@@ -15,6 +16,7 @@ use wasabi::init::init_display;
 use wasabi::init::init_hpet;
 use wasabi::init::init_paging;
 use wasabi::init::init_pci;
+use wasabi::keyboard::KeyEvent;
 use wasabi::print::hexdump_struct;
 use wasabi::print::set_global_vram;
 use wasabi::println;
@@ -61,10 +63,16 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
             return Err("serial: loopback test failed");
         }
         info!("Started to monitor serial port");
+        // The serial line is another way to talk to the command shell:
+        // feed every received character into a Console of its own.
+        let mut console = Console::default();
         loop {
             if let Some(v) = sp.try_read() {
-                let c = char::from_u32(v as u32);
-                info!("serial input: {v:#04X} = {c:?}");
+                if let Some(c) = char::from_u32(v as u32) {
+                    console.handle_key_down(KeyEvent::Char(c));
+                } else {
+                    warn!("serial input: not a char: {v:#04X}");
+                }
             }
             sleep(Duration::from_millis(20)).await;
         }
