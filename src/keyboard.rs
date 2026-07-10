@@ -8,13 +8,19 @@ use crate::usb;
 use crate::usb::request_get_configuration;
 use crate::usb::request_get_interface;
 use crate::usb::request_get_protocol;
+use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::usb::UsbDeviceDescriptor;
 use crate::usb::UsbHidProtocol;
 use crate::xhci::Controller;
+use crate::xhci::EventFuture;
+use crate::xhci::NormalTrb;
 use crate::xhci::TransferRing;
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
+use alloc::vec;
 use alloc::vec::Vec;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,14 +68,17 @@ impl KeyEvent {
 pub struct UsbKeyboardDriverState {
     xhc: Rc<Controller>,
     slot: u8,
+    #[allow(unused)]
     ctrl_ep_ring: TransferRing,
+    ep_rings: BTreeMap<usize, TransferRing>,
+    int_ep_desc: Option<EndpointDescriptor>,
     #[allow(unused)]
     interface_number: u8,
 }
 impl UsbKeyboardDriverState {
     async fn setup(
         xhc: Rc<Controller>,
-        _port: usize,
+        port: usize,
         slot: u8,
         mut ctrl_ep_ring: TransferRing,
         descriptors: Vec<UsbDescriptor>,
@@ -91,12 +100,27 @@ impl UsbKeyboardDriverState {
             }
         }
 
-        let (config_desc, interface_desc, _descriptors_in_interface) =
+        let (config_desc, interface_desc, descriptors_in_interface) =
             usb::pick_interface_with_triple(
                 &descriptors,
                 usb::TRIPLE_FOR_HID_BOOT_KBD,
             )
             .ok_or("No USB KBD Boot interface found")?;
+
+        let int_ep_desc = descriptors_in_interface
+            .iter()
+            .find_map(|d| {
+                if let UsbDescriptor::Endpoint(d) = d {
+                    if d.is_dir_in() && d.is_interrupt_endpoint() {
+                        return Some(d);
+                    }
+                }
+                None
+            })
+            .ok_or("int_ep_desc not found")?;
+
+        let ep_rings =
+            usb::configure_endpoint(&xhc, port, slot, &[*int_ep_desc]).await?;
 
         let config_now =
             request_get_configuration(&xhc, slot, &mut ctrl_ep_ring, 1).await?;
@@ -168,20 +192,33 @@ impl UsbKeyboardDriverState {
             xhc,
             slot,
             ctrl_ep_ring,
+            int_ep_desc: Some(*int_ep_desc),
+            ep_rings,
             interface_number: interface_desc.interface_number,
         })
     }
     async fn poll_input(&mut self) -> Result<()> {
+        let int_ep_desc = self.int_ep_desc.ok_or("No Int EP found")?;
+        let int_ep_ring = self
+            .ep_rings
+            .get_mut(&int_ep_desc.dci())
+            .ok_or("no ep ring found")?;
+
+        let buf = vec![0u8; 8];
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
         let mut console = Console::default();
         let mut prev_pressed = BTreeSet::new();
         loop {
+            let trb_addr =
+                int_ep_ring.push(NormalTrb::new_in(&mut buf).into())?;
+            let waiter = Box::pin(EventFuture::new_for_trb(
+                &self.xhc.primary_event_ring,
+                trb_addr,
+            ));
+            self.xhc.notify_ep(self.slot, int_ep_desc.dci())?;
+            waiter.await?;
+            let report = buf.to_vec();
             let pressed = {
-                let report = usb::request_hid_report(
-                    &self.xhc,
-                    self.slot,
-                    &mut self.ctrl_ep_ring,
-                )
-                .await?;
                 BTreeSet::from_iter(
                     report.into_iter().skip(2).filter(|id| *id != 0),
                 )
