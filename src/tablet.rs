@@ -324,7 +324,14 @@ pub async fn start_usb_tablet(
     let (vw, vh) =
         get_global_vram_resolutions().ok_or("global VRAM is not set")?;
     loop {
-        let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
+        let report = request_hid_input_report(
+            xhc,
+            slot,
+            ctrl_ep_ring,
+            1,
+            interface_desc.interface_number,
+        )
+        .await?;
         if report == prev_report {
             continue;
         }
