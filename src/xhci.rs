@@ -218,6 +218,26 @@ impl PciXhciDriver {
             usb::request_device_descriptor(xhc, slot, &mut ctrl_ep_ring),
         )
         .await?;
+
+        // Update Max Packet Size for Default Control EP
+        // (FullSpeed devices only)
+        let portsc = xhc.regs.portsc.get(port).ok_or("invalid portsc")?;
+        let speed = portsc.port_speed();
+        info!("slot={slot} port={port}: speed={speed:?}");
+        if speed == UsbMode::FullSpeed {
+            info!(
+                "port {port}: updating max packet size to {}",
+                device_descriptor.max_packet_size
+            );
+            Self::update_ctrl_ep_max_packet_size(
+                xhc,
+                slot,
+                device_descriptor.max_packet_size as u16,
+                &ctrl_ep_ring,
+            )
+            .await?;
+        }
+
         let vid = device_descriptor.vendor_id;
         let pid = device_descriptor.product_id;
         info!(
@@ -394,6 +414,33 @@ impl PciXhciDriver {
         let cmd = GenericTrbEntry::cmd_address_device(&input_context, slot);
         xhc.send_command(cmd).await?.cmd_result_ok()?;
         Ok(ctrl_ep_ring)
+    }
+    async fn update_ctrl_ep_max_packet_size(
+        xhc: &Rc<Controller>,
+        slot: u8,
+        new_max_packet_size: u16,
+        ctrl_ep_ring: &TransferRing,
+    ) -> Result<()> {
+        let mut input_context = InputContext::default();
+        {
+            let mut input_ctrl_ctx = InputControlContext::default();
+            input_ctrl_ctx.add_context(1)?;
+            input_context.set_input_ctrl_ctx(input_ctrl_ctx);
+        }
+        // 4. Initialize the Transfer Ring for the Default Control Endpoint
+        // 5. Initialize the Input default control Endpoint 0 Context (6.2.3)
+        input_context.set_ep_ctx(
+            1,
+            EndpointContext::new_control_endpoint(
+                new_max_packet_size,
+                ctrl_ep_ring.ring_phys_addr(),
+            )?,
+        );
+        // 8. Issue an Address Device Command for the Device Slot
+        let input_context = IoBox::new(input_context);
+        let cmd = GenericTrbEntry::cmd_evaluate_context(&input_context, slot);
+        xhc.send_command(cmd).await?.cmd_result_ok()?;
+        Ok(())
     }
 }
 
