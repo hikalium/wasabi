@@ -327,6 +327,7 @@ impl PciXhciDriver {
             }
             if let Err(e) = Self::start_device_driver(
                 xhc.clone(),
+                port,
                 slot,
                 ctrl_ep_ring,
                 device_descriptor,
@@ -339,6 +340,7 @@ impl PciXhciDriver {
     }
     fn start_device_driver(
         xhc: Rc<Controller>,
+        port: usize,
         slot: u8,
         ctrl_ep_ring: TransferRing,
         device_descriptor: UsbDeviceDescriptor,
@@ -350,6 +352,7 @@ impl PciXhciDriver {
             if d.is_compatible(&descriptors, &device_descriptor) {
                 d.start(
                     xhc,
+                    port,
                     slot,
                     ctrl_ep_ring,
                     descriptors,
