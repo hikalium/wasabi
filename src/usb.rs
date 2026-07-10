@@ -891,6 +891,7 @@ pub trait UsbDeviceDriver {
     fn start(
         &self,
         _xhc: Rc<Controller>,
+        _port: usize,
         _slot: u8,
         _ctrl_ep_ring: TransferRing,
         _descriptors: Vec<UsbDescriptor>,
