@@ -42,6 +42,7 @@ use core::pin::Pin;
 use core::ptr::null;
 use core::ptr::read_volatile;
 use core::ptr::write_volatile;
+use core::sync::atomic::Ordering;
 use core::task::Context;
 use core::task::Poll;
 use core::time::Duration;
@@ -950,6 +951,7 @@ impl Controller {
         EventFuture::new_for_trb(&self.primary_event_ring, cmd_ptr).await
     }
     fn notify_xhc(&self) {
+        core::sync::atomic::fence(Ordering::SeqCst);
         self.regs.doorbell_regs[0].notify(0, 0);
     }
     pub fn notify_ep(&self, slot: u8, dci: usize) -> Result<()> {
@@ -959,6 +961,7 @@ impl Controller {
             .get(slot as usize)
             .ok_or("invalid slot")?;
         let dci = u8::try_from(dci).or(Err("invalid dci"))?;
+        core::sync::atomic::fence(Ordering::SeqCst);
         db.notify(dci, 0);
         Ok(())
     }
