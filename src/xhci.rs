@@ -295,16 +295,20 @@ impl PciXhciDriver {
                 };
                 info!("xhci: v/p/s = {vendor:?}/{product:?}/{serial:?}");
             }
-            let descriptors = with_timeout(
-                Duration::from_secs(1),
-                usb::request_config_descriptor_and_rest(
-                    xhc,
-                    slot,
-                    &mut ctrl_ep_ring,
-                ),
-            )
-            .await?;
-            info!("xhci: {descriptors:?}");
+            let mut descriptors = Vec::new();
+            for i in 0..device_descriptor.num_of_config {
+                let mut d = with_timeout(
+                    Duration::from_secs(1),
+                    usb::request_config_descriptor_and_rest(
+                        xhc,
+                        slot,
+                        &mut ctrl_ep_ring,
+                        i,
+                    ),
+                )
+                .await?;
+                descriptors.append(&mut d);
+            }
             if let Err(e) = Self::start_device_driver(
                 xhc.clone(),
                 slot,
