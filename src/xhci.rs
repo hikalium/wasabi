@@ -59,6 +59,13 @@ pub struct XhcRegisters {
     pub portsc: PortSc,
 }
 
+#[derive(PartialEq, Eq, Clone)]
+enum HostPortDriverState {
+    NotConnected,
+    ConnectedAndRunning,
+    ConnectedButFailed,
+}
+
 pub struct PciXhciDriver {}
 impl PciXhciDriver {
     pub fn supports(vp: VendorDeviceId) -> bool {
@@ -149,31 +156,52 @@ impl PciXhciDriver {
                 }
             })
         }
+        let mut host_port_driver_state: Vec<HostPortDriverState> = Vec::new();
         loop {
-            let mut new_port_connected = None;
-            for port in xhc.regs.portsc.port_range() {
-                if let Some(e) = xhc.regs.portsc.get(port) {
-                    if e.csc() {
-                        e.clear_csc();
-                        if e.ccs() {
-                            info!("  {port:3}: Connected: {:#010X}", e.value());
-                            new_port_connected = Some(port);
-                            break;
-                        } else {
-                            info!(
-                                "  {port:3}: Disconnected: {:#010X}",
-                                e.value()
-                            );
-                        }
+            if let Err(e) =
+                PciXhciDriver::poll_ports(&xhc, &mut host_port_driver_state)
+                    .await
+            {
+                info!("poll_ports failed: {e:?}")
+            };
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
+    async fn poll_ports(
+        xhc: &Rc<Controller>,
+        host_port_driver_state: &mut Vec<HostPortDriverState>,
+    ) -> Result<()> {
+        let mut new_port_connected = None;
+        let port_range = xhc.regs.portsc.port_range();
+        if port_range.end != host_port_driver_state.len() {
+            host_port_driver_state
+                .resize(port_range.end, HostPortDriverState::NotConnected);
+        }
+        for port in port_range {
+            if let Some(e) = xhc.regs.portsc.get(port) {
+                if e.csc() {
+                    // Connection status has changed
+                    e.clear_csc();
+                    if host_port_driver_state[port]
+                        == HostPortDriverState::NotConnected
+                        && e.ccs()
+                    {
+                        info!("  {port:3}: Connected: {:#010X}", e.value());
+                        new_port_connected = Some(port);
+                        break;
                     }
+                    // TODO: Do driver destruction
                 }
             }
-            if let Some(port) = new_port_connected {
-                Self::handle_port_connect(&xhc, port).await?;
-            } else {
-                sleep(Duration::from_millis(100)).await;
-            }
         }
+        if let Some(port) = new_port_connected {
+            host_port_driver_state[port] =
+                HostPortDriverState::ConnectedButFailed;
+            Self::handle_port_connect(xhc, port).await?;
+            host_port_driver_state[port] =
+                HostPortDriverState::ConnectedAndRunning;
+        }
+        Ok(())
     }
     async fn handle_port_connect(
         xhc: &Rc<Controller>,
