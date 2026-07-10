@@ -983,7 +983,7 @@ impl DeviceContextBaseAddressArray {
 pub struct Controller {
     pub regs: XhcRegisters,
     device_context_base_array: Mutex<DeviceContextBaseAddressArray>,
-    primary_event_ring: Mutex<EventRing>,
+    pub primary_event_ring: Mutex<EventRing>,
     command_ring: Mutex<TransferRing>,
 }
 impl Controller {
@@ -1420,7 +1420,7 @@ impl Controller {
     }
 }
 
-struct EventRing {
+pub struct EventRing {
     ring: IoBox<TrbRing>,
     erst: IoBox<EventRingSegmentTableEntry>,
     cycle_state_ours: bool,
@@ -2193,7 +2193,7 @@ impl EventFuture {
             _pinned: PhantomPinned,
         }
     }
-    fn new_for_trb(event_ring: &Mutex<EventRing>, trb_addr: u64) -> Self {
+    pub fn new_for_trb(event_ring: &Mutex<EventRing>, trb_addr: u64) -> Self {
         let trb_addr = Some(trb_addr);
         Self::new(
             event_ring,
