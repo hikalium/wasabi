@@ -218,14 +218,21 @@ impl PciXhciDriver {
         info!("Got a DeviceDescriptor: {device_descriptor:?}");
         let vid = device_descriptor.vendor_id;
         let pid = device_descriptor.product_id;
-        info!("xhci: device detected: vid:pid = {vid:#06X}:{pid:#06X}",);
+        info!(
+            "xhci: device detected: vid:pid = {vid:#06X}:{pid:#06X}, \
+            class/sub/prot = {:#04X}:{:#04X}:{:#04X}",
+            device_descriptor.device_class,
+            device_descriptor.device_subclass,
+            device_descriptor.device_protocol
+        );
         if let Ok(e) =
             usb::request_string_descriptor_zero(xhc, slot, &mut ctrl_ep_ring)
                 .await
         {
-            let lang_id = u16::from_le_bytes([e[0], e[1]]);
-            let vendor = if device_descriptor.manufacturer_idx != 0 {
-                Some(
+            // If there is one lang_id, bLength will be 4
+            if e[0] >= 4 {
+                let lang_id = u16::from_le_bytes([e[2], e[3]]);
+                let vendor = if device_descriptor.manufacturer_idx != 0 {
                     usb::request_string_descriptor(
                         xhc,
                         slot,
@@ -233,13 +240,15 @@ impl PciXhciDriver {
                         lang_id,
                         device_descriptor.manufacturer_idx,
                     )
-                    .await?,
-                )
-            } else {
-                None
-            };
-            let product = if device_descriptor.product_idx != 0 {
-                Some(
+                    .await
+                    .inspect_err(|e| {
+                        warn!("Failed to get vendor string descriptor: {e}")
+                    })
+                    .ok()
+                } else {
+                    None
+                };
+                let product = if device_descriptor.product_idx != 0 {
                     usb::request_string_descriptor(
                         xhc,
                         slot,
@@ -247,13 +256,15 @@ impl PciXhciDriver {
                         lang_id,
                         device_descriptor.product_idx,
                     )
-                    .await?,
-                )
-            } else {
-                None
-            };
-            let serial = if device_descriptor.serial_idx != 0 {
-                Some(
+                    .await
+                    .inspect_err(|e| {
+                        warn!("Failed to get product string descriptor: {e}")
+                    })
+                    .ok()
+                } else {
+                    None
+                };
+                let serial = if device_descriptor.serial_idx != 0 {
                     usb::request_string_descriptor(
                         xhc,
                         slot,
@@ -261,53 +272,11 @@ impl PciXhciDriver {
                         lang_id,
                         device_descriptor.serial_idx,
                     )
-                    .await?,
-                )
-            } else {
-                None
-            };
-            info!("xhci: v/p/s = {vendor:?}/{product:?}/{serial:?}");
-            {
-                let lang_id = u16::from_le_bytes([e[0], e[1]]);
-                let vendor = if device_descriptor.manufacturer_idx != 0 {
-                    Some(
-                        usb::request_string_descriptor(
-                            xhc,
-                            slot,
-                            &mut ctrl_ep_ring,
-                            lang_id,
-                            device_descriptor.manufacturer_idx,
-                        )
-                        .await?,
-                    )
-                } else {
-                    None
-                };
-                let product = if device_descriptor.product_idx != 0 {
-                    Some(
-                        usb::request_string_descriptor(
-                            xhc,
-                            slot,
-                            &mut ctrl_ep_ring,
-                            lang_id,
-                            device_descriptor.product_idx,
-                        )
-                        .await?,
-                    )
-                } else {
-                    None
-                };
-                let serial = if device_descriptor.serial_idx != 0 {
-                    Some(
-                        usb::request_string_descriptor(
-                            xhc,
-                            slot,
-                            &mut ctrl_ep_ring,
-                            lang_id,
-                            device_descriptor.serial_idx,
-                        )
-                        .await?,
-                    )
+                    .await
+                    .inspect_err(|e| {
+                        warn!("Failed to get serial string descriptor: {e}")
+                    })
+                    .ok()
                 } else {
                     None
                 };
