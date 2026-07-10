@@ -207,15 +207,17 @@ impl PciXhciDriver {
         xhc: &Rc<Controller>,
         port: usize,
     ) -> Result<()> {
-        info!("xhci: port {port} is connected");
         let slot = Self::init_port(xhc, port).await?;
-        info!("slot {slot} is assigned for port {port}");
-        let mut ctrl_ep_ring = Self::address_device(xhc, port, slot).await?;
-        info!("AddressDeviceCommand succeeded");
-        let device_descriptor =
-            usb::request_device_descriptor(xhc, slot, &mut ctrl_ep_ring)
-                .await?;
-        info!("Got a DeviceDescriptor: {device_descriptor:?}");
+        let mut ctrl_ep_ring = with_timeout(
+            Duration::from_secs(1),
+            Self::address_device(xhc, port, slot),
+        )
+        .await?;
+        let device_descriptor = with_timeout(
+            Duration::from_secs(1),
+            usb::request_device_descriptor(xhc, slot, &mut ctrl_ep_ring),
+        )
+        .await?;
         let vid = device_descriptor.vendor_id;
         let pid = device_descriptor.product_id;
         info!(
@@ -225,20 +227,25 @@ impl PciXhciDriver {
             device_descriptor.device_subclass,
             device_descriptor.device_protocol
         );
-        if let Ok(e) =
-            usb::request_string_descriptor_zero(xhc, slot, &mut ctrl_ep_ring)
-                .await
+        if let Ok(e) = with_timeout(
+            Duration::from_secs(1),
+            usb::request_string_descriptor_zero(xhc, slot, &mut ctrl_ep_ring),
+        )
+        .await
         {
             // If there is one lang_id, bLength will be 4
             if e[0] >= 4 {
                 let lang_id = u16::from_le_bytes([e[2], e[3]]);
                 let vendor = if device_descriptor.manufacturer_idx != 0 {
-                    usb::request_string_descriptor(
-                        xhc,
-                        slot,
-                        &mut ctrl_ep_ring,
-                        lang_id,
-                        device_descriptor.manufacturer_idx,
+                    with_timeout(
+                        Duration::from_secs(1),
+                        usb::request_string_descriptor(
+                            xhc,
+                            slot,
+                            &mut ctrl_ep_ring,
+                            lang_id,
+                            device_descriptor.manufacturer_idx,
+                        ),
                     )
                     .await
                     .inspect_err(|e| {
@@ -249,12 +256,15 @@ impl PciXhciDriver {
                     None
                 };
                 let product = if device_descriptor.product_idx != 0 {
-                    usb::request_string_descriptor(
-                        xhc,
-                        slot,
-                        &mut ctrl_ep_ring,
-                        lang_id,
-                        device_descriptor.product_idx,
+                    with_timeout(
+                        Duration::from_secs(1),
+                        usb::request_string_descriptor(
+                            xhc,
+                            slot,
+                            &mut ctrl_ep_ring,
+                            lang_id,
+                            device_descriptor.product_idx,
+                        ),
                     )
                     .await
                     .inspect_err(|e| {
@@ -265,12 +275,15 @@ impl PciXhciDriver {
                     None
                 };
                 let serial = if device_descriptor.serial_idx != 0 {
-                    usb::request_string_descriptor(
-                        xhc,
-                        slot,
-                        &mut ctrl_ep_ring,
-                        lang_id,
-                        device_descriptor.serial_idx,
+                    with_timeout(
+                        Duration::from_secs(1),
+                        usb::request_string_descriptor(
+                            xhc,
+                            slot,
+                            &mut ctrl_ep_ring,
+                            lang_id,
+                            device_descriptor.serial_idx,
+                        ),
                     )
                     .await
                     .inspect_err(|e| {
@@ -282,10 +295,13 @@ impl PciXhciDriver {
                 };
                 info!("xhci: v/p/s = {vendor:?}/{product:?}/{serial:?}");
             }
-            let descriptors = usb::request_config_descriptor_and_rest(
-                xhc,
-                slot,
-                &mut ctrl_ep_ring,
+            let descriptors = with_timeout(
+                Duration::from_secs(1),
+                usb::request_config_descriptor_and_rest(
+                    xhc,
+                    slot,
+                    &mut ctrl_ep_ring,
+                ),
             )
             .await?;
             info!("xhci: {descriptors:?}");
