@@ -64,6 +64,7 @@ impl UsbDeviceDriver for UsbKeyboardDriver {
     fn start(
         &self,
         xhc: Rc<Controller>,
+        _port: usize,
         slot: u8,
         mut ctrl_ep_ring: TransferRing,
         descriptors: Vec<UsbDescriptor>,
