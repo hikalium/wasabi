@@ -10,6 +10,7 @@ use crate::info;
 use crate::ip::IpV4Addr;
 use crate::ip::IpV4Packet;
 use crate::ip::IpV4Protocol;
+use crate::mutex::Mutex;
 use crate::ncm;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
@@ -28,12 +29,22 @@ use crate::xhci::EventFuture;
 use crate::xhci::NormalTrb;
 use crate::xhci::TransferRing;
 use alloc::boxed::Box;
+use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
 const OUR_IP: IpV4Addr = IpV4Addr::new([10, 10, 10, 83]);
+
+// Frames produced asynchronously by other tasks that `poll_bulk`
+// drains and ships out the bulk-OUT endpoint at the bottom of each
+// rx iteration.
+static NET_TX_QUEUE: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
+
+pub fn enqueue_tx_frame(frame: Vec<u8>) {
+    NET_TX_QUEUE.lock().push_back(frame);
+}
 
 // Parse a 12-character upper-case hex MAC string from the device's
 // iMacAddress descriptor (CDC ECM 1.2 §5.4) into the 6 raw bytes.
@@ -264,6 +275,9 @@ impl UsbNcmDriver {
                     }
                 }
             }
+            // Frames produced asynchronously by other tasks ride out
+            // on the same iteration.
+            replies.extend(NET_TX_QUEUE.lock().drain(..));
             for reply in replies {
                 Self::send_datagram(
                     &xhc,
