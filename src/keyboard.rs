@@ -208,6 +208,7 @@ impl UsbKeyboardDriverState {
         let mut buf = Box::into_pin(buf.into_boxed_slice());
         let mut console = Console::default();
         let mut prev_pressed = BTreeSet::new();
+        let mut prev_modifier = 0u8;
         loop {
             let trb_addr =
                 int_ep_ring.push(NormalTrb::new_in(&mut buf).into())?;
@@ -218,11 +219,21 @@ impl UsbKeyboardDriverState {
             self.xhc.notify_ep(self.slot, int_ep_desc.dci())?;
             waiter.await?;
             let report = buf.to_vec();
+            let modifier = report[0];
             let pressed = {
                 BTreeSet::from_iter(
                     report.into_iter().skip(2).filter(|id| *id != 0),
                 )
             };
+            let modifier_changed_bits = modifier ^ prev_modifier;
+            if modifier_changed_bits & 1 != 0 {
+                if modifier & 1 != 0 {
+                    console.handle_key_down(KeyEvent::CtrlLeft);
+                } else {
+                    console.handle_key_up(KeyEvent::CtrlLeft);
+                }
+            }
+            prev_modifier = modifier;
             let diff = pressed.symmetric_difference(&prev_pressed);
             for id in diff {
                 let e = KeyEvent::from_usb_key_id(*id);
