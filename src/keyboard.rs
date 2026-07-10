@@ -209,7 +209,7 @@ impl UsbKeyboardDriverState {
         let mut buf = Box::into_pin(buf.into_boxed_slice());
         let mut console = Console::default();
         let mut prev_pressed = BTreeSet::new();
-        let mut prev_shift = false;
+        let mut prev_modifier = 0u8;
         loop {
             let trb_addr =
                 int_ep_ring.push(NormalTrb::new_in(&mut buf).into())?;
@@ -220,24 +220,29 @@ impl UsbKeyboardDriverState {
             self.xhc.notify_ep(self.slot, int_ep_desc.dci())?;
             waiter.await?;
             let report = buf.to_vec();
-            let (shift, pressed) = {
-                // Modifier bits of a boot-protocol report: 1 left Shift,
-                // 5 right Shift. Either Shift is reported as ShiftLeft.
-                const SHIFT: u8 = 1 << 1 | 1 << 5;
-                let modifier = report.first().copied().unwrap_or(0);
-                (
-                    modifier & SHIFT != 0,
-                    BTreeSet::from_iter(
-                        report.into_iter().skip(2).filter(|id| *id != 0),
-                    ),
+            let modifier = report[0];
+            let pressed = {
+                BTreeSet::from_iter(
+                    report.into_iter().skip(2).filter(|id| *id != 0),
                 )
             };
-            if shift && !prev_shift {
-                console.handle_key_down(KeyEvent::ShiftLeft);
-            } else if prev_shift && !shift {
-                console.handle_key_up(KeyEvent::ShiftLeft);
+            // Modifier bits of a boot-protocol report: 0 left Ctrl,
+            // 1 left Shift, 4 right Ctrl, 5 right Shift. Either Shift
+            // is reported as ShiftLeft.
+            const CTRL: u8 = 1 << 0;
+            const SHIFT: u8 = 1 << 1 | 1 << 5;
+            for (bits, e) in
+                [(CTRL, KeyEvent::CtrlLeft), (SHIFT, KeyEvent::ShiftLeft)]
+            {
+                let was = prev_modifier & bits != 0;
+                let is = modifier & bits != 0;
+                if is && !was {
+                    console.handle_key_down(e);
+                } else if was && !is {
+                    console.handle_key_up(e);
+                }
             }
-            prev_shift = shift;
+            prev_modifier = modifier;
             let diff = pressed.symmetric_difference(&prev_pressed);
             for id in diff {
                 let e = KeyEvent::from_usb_key_id(*id);
