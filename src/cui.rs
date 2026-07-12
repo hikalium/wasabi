@@ -41,6 +41,30 @@ impl Console {
             e => Some(e),
         }
     }
+    pub fn boin_index(e: char) -> Option<usize> {
+        match e {
+            'a' => Some(0),
+            'i' => Some(1),
+            'u' => Some(2),
+            'e' => Some(3),
+            'o' => Some(4),
+            _ => None,
+        }
+    }
+    pub fn shiin_index(e: char) -> Option<usize> {
+        match e {
+            'k' => Some(0),
+            's' => Some(1),
+            't' => Some(2),
+            'n' => Some(3),
+            'h' => Some(4),
+            'm' => Some(5),
+            'y' => Some(6),
+            'r' => Some(7),
+            'w' => Some(8),
+            _ => None,
+        }
+    }
     pub fn handle_key_down(&mut self, e: KeyEvent) {
         let e = match self.normalize_newline(e) {
             Some(e) => e,
@@ -52,6 +76,31 @@ impl Console {
                 print!("\x08");
             }
             KeyEvent::Char(c) => {
+                let prev1 = Self::boin_index(c);
+                let prev2 = if !self.input_buf.is_empty() {
+                    self.input_buf.chars().last().and_then(Self::shiin_index)
+                } else {
+                    None
+                };
+                let c = match (prev2, prev1) {
+                    (Some(si), Some(bi)) => {
+                        self.input_buf.pop();
+                        print!("\x08");
+                        [
+                            ['か', 'き', 'く', 'け', 'こ'],
+                            ['さ', 'し', 'す', 'せ', 'そ'],
+                            ['た', 'ち', 'つ', 'て', 'と'],
+                            ['な', 'に', 'ぬ', 'ね', 'の'],
+                            ['は', 'ひ', 'ふ', 'へ', 'ほ'],
+                            ['ま', 'み', 'む', 'め', 'も'],
+                            ['や', '　', 'ゆ', '　', 'よ'],
+                            ['ら', 'り', 'る', 'れ', 'ろ'],
+                            ['わ', '　', 'を', '　', 'ん'],
+                        ][si][bi]
+                    }
+                    (_, Some(bi)) => ['あ', 'い', 'う', 'え', 'お'][bi],
+                    _ => c,
+                };
                 self.input_buf.push(c);
                 print!("{c}");
             }
@@ -177,6 +226,10 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             "show" => run_cmd_show(&args),
             "reboot" | "r" => run_cmd_reboot(&args),
             "uname" => run_cmd_uname(&args),
+            "hello" => {
+                println!("こんにちは");
+                Ok(())
+            }
             "" => Ok(()),
             _ => Err("Unknown command"),
         }
