@@ -3,14 +3,19 @@ extern crate alloc;
 use crate::executor::spawn_global;
 use crate::executor::with_timeout;
 use crate::info;
+use crate::print::hexdump_bytes;
 use crate::result::Result;
 use crate::usb;
 use crate::usb::descriptors_under_config;
+use crate::usb::descriptors_under_interface;
 use crate::usb::pick_interface_with_triple;
+use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::usb::UsbDeviceDescriptor;
 use crate::usb::UsbDeviceDriver;
 use crate::xhci::Controller;
+use crate::xhci::EventFuture;
+use crate::xhci::NormalTrb;
 use crate::xhci::TransferRing;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
@@ -74,9 +79,65 @@ impl UsbNcmDriver {
         .await?;
         Ok(buf.to_vec())
     }
+    async fn poll_int_in(
+        xhc: Rc<Controller>,
+        slot: u8,
+        mut ring: TransferRing,
+        desc: EndpointDescriptor,
+    ) -> Result<()> {
+        loop {
+            let buf = vec![0u8; 16];
+            let mut buf = Box::into_pin(buf.into_boxed_slice());
+            let trb_ptr_waiting =
+                ring.push(NormalTrb::new_in(&mut buf).into())?;
+            let waiter = EventFuture::new_for_trb(
+                &xhc.primary_event_ring,
+                trb_ptr_waiting,
+            );
+            xhc.notify_ep(slot, desc.dci())?;
+
+            if let Err(e) = waiter.await.map(|e| e.transfer_result_ok()) {
+                info!("failed: {e:?}");
+            } else {
+                match buf[1] {
+                    0x00 => {
+                        info!(
+                            "Notification: NETWORK_CONNECTION: {}",
+                            if buf[2] == 1 {
+                                "Connected"
+                            } else {
+                                "Disconnected"
+                            }
+                        );
+                    }
+                    0x2A => {
+                        let downlink_bitrate = {
+                            let mut v = [0u8; 4];
+                            v.copy_from_slice(&buf[8..12]);
+                            u32::from_le_bytes(v)
+                        };
+                        let uplink_bitrate = {
+                            let mut v = [0u8; 4];
+                            v.copy_from_slice(&buf[12..16]);
+                            u32::from_le_bytes(v)
+                        };
+                        info!(
+                            "Notification: CONNECTION_SPEED_CHANGE: \
+                            up = {uplink_bitrate} bps, \
+                            down = {downlink_bitrate} bps",
+                        );
+                    }
+                    _ => {
+                        info!("Notification: ?");
+                        hexdump_bytes(&buf);
+                    }
+                }
+            }
+        }
+    }
     async fn run(
         xhc: &Rc<Controller>,
-        _port: usize,
+        port: usize,
         slot: u8,
         ctrl_ep_ring: &mut TransferRing,
         descriptors: &[UsbDescriptor],
@@ -163,6 +224,33 @@ impl UsbNcmDriver {
         };
         info!("iMacAddress: {mac_addr:?}");
 
+        //
+        // Set up communications interface
+        //
+
+        let int_in_ep_desc = {
+            let desc_under_com_interface =
+                descriptors_under_interface(&desc_under_config, 0, 0);
+            desc_under_com_interface
+                .iter()
+                .find_map(|d| {
+                    if let usb::UsbDescriptor::Endpoint(d) = d {
+                        if d.is_dir_in() && d.is_interrupt_endpoint() {
+                            return Some(d);
+                        }
+                    }
+                    None
+                })
+                .cloned()
+                .ok_or("interrupt_in_ep_desc not found")
+        }?;
+
+        let mut ring_list =
+            usb::configure_endpoint(xhc, port, slot, &[int_in_ep_desc]).await?;
+        let int_in_ep_ring = ring_list
+            .remove(&int_in_ep_desc.dci())
+            .ok_or("ep_ring for interrupt in was not populated")?;
+
         xhc.request_set_config(slot, ctrl_ep_ring, 2).await?;
         xhc.request_set_interface(slot, ctrl_ep_ring, 0, 0).await?;
         // start operation!
@@ -171,6 +259,13 @@ impl UsbNcmDriver {
         let ntbparams =
             Self::request_get_ntb_parameters(xhc, slot, ctrl_ep_ring).await?;
         info!("ntbparams: {ntbparams:?}");
+
+        spawn_global(Self::poll_int_in(
+            xhc.clone(),
+            slot,
+            int_in_ep_ring,
+            int_in_ep_desc,
+        ));
         Ok(())
     }
 }
