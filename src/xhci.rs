@@ -801,7 +801,7 @@ impl Controller {
         unsafe { self.regs.op_regs.get_unchecked_mut() }
             .set_dcbaa_ptr(&mut self.device_context_base_array.lock())
     }
-    async fn send_command(
+    pub async fn send_command(
         &self,
         cmd: GenericTrbEntry,
     ) -> Result<GenericTrbEntry> {
@@ -1008,7 +1008,7 @@ impl EventRing {
             wait_list: Default::default(),
         })
     }
-    fn ring_phys_addr(&self) -> u64 {
+    pub fn ring_phys_addr(&self) -> u64 {
         self.ring.as_ref() as *const TrbRing as u64
     }
     fn set_erdp(&mut self, erdp: *mut u64) {
@@ -1346,7 +1346,7 @@ struct EventWaitCond {
 }
 
 #[derive(Debug)]
-struct EventWaitInfo {
+pub struct EventWaitInfo {
     cond: EventWaitCond,
     trbs: Mutex<VecDeque<GenericTrbEntry>>,
 }
@@ -1382,7 +1382,7 @@ impl EventWaitInfo {
 // [xhci] 5.4.8: PORTSC
 // OperationalBase + (0x400 + 0x10 * (n - 1))
 // where n = Port Number (1, 2, ..., MaxPorts)
-struct PortSc {
+pub struct PortSc {
     entries: Vec<Rc<PortScEntry>>,
 }
 impl PortSc {
@@ -1403,7 +1403,7 @@ impl PortSc {
     fn port_range(&self) -> Range<usize> {
         1..self.entries.len() + 1
     }
-    fn get(&self, port: usize) -> Option<Rc<PortScEntry>> {
+    pub fn get(&self, port: usize) -> Option<Rc<PortScEntry>> {
         self.entries.get(port.wrapping_sub(1)).cloned()
     }
 }
@@ -1449,7 +1449,7 @@ impl From<&PortScEntry> for PortState {
 }
 
 #[repr(C)]
-struct PortScEntry {
+pub struct PortScEntry {
     ptr: Mutex<*mut u32>,
 }
 impl PortScEntry {
@@ -1593,7 +1593,7 @@ impl Doorbell {
     }
 }
 #[derive(Clone)]
-struct EventFuture {
+pub struct EventFuture {
     wait_on: Rc<EventWaitInfo>,
     _pinned: PhantomPinned,
 }
