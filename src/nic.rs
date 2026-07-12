@@ -1,8 +1,10 @@
 extern crate alloc;
 
 use crate::executor::spawn_global;
+use crate::executor::with_timeout;
 use crate::info;
 use crate::result::Result;
+use crate::usb;
 use crate::usb::descriptors_under_config;
 use crate::usb::pick_interface_with_triple;
 use crate::usb::UsbDescriptor;
@@ -12,14 +14,15 @@ use crate::xhci::Controller;
 use crate::xhci::TransferRing;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
+use core::time::Duration;
 
 pub struct UsbNcmDriver;
 impl UsbNcmDriver {
     async fn run(
-        _xhc: &Rc<Controller>,
+        xhc: &Rc<Controller>,
         _port: usize,
-        _slot: u8,
-        _ctrl_ep_ring: &mut TransferRing,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
         descriptors: &[UsbDescriptor],
     ) -> Result<()> {
         /*
@@ -42,6 +45,7 @@ impl UsbNcmDriver {
         info!("C: {config_desc:?}");
         let desc_under_config =
             descriptors_under_config(descriptors, config_desc.config_value());
+        let mut mac_addr_index = 0;
         for d in &desc_under_config {
             if let UsbDescriptor::Interface(e) = d {
                 info!("I:   {e:?}")
@@ -54,10 +58,54 @@ impl UsbNcmDriver {
             } = d
             {
                 info!("SSEC:    {payload:?}")
+            } else if let UsbDescriptor::Unknown {
+                desc_type: 0x24, /* CS_INTERFACE [ncm_1_1] Table 6-2 */
+                payload,
+                ..
+            } = d
+            {
+                let subtype = payload.first().cloned().unwrap_or_default();
+                match subtype {
+                    0x0F => {
+                        /* Ethernet Networking Functional Descriptor [cdc_1_2
+                         * Table 13] */
+                        // Expected to be non-zero.
+                        mac_addr_index =
+                            payload.get(1).cloned().unwrap_or_default();
+                    }
+                    _ => {
+                        info!("?   :    {d:?}")
+                    }
+                }
             } else if let UsbDescriptor::Unknown { .. } = d {
                 info!("?   :    {d:?}")
             }
         }
+
+        let mac_addr = {
+            let res = with_timeout(
+                Duration::from_secs(1),
+                usb::request_string_descriptor_zero(xhc, slot, ctrl_ep_ring),
+            )
+            .await?;
+            // If there is one lang_id, bLength will be 4
+            if res[0] < 4 {
+                return Err("string desc zero too short");
+            }
+            let lang_id = u16::from_le_bytes([res[2], res[3]]);
+            with_timeout(
+                Duration::from_secs(1),
+                usb::request_string_descriptor(
+                    xhc,
+                    slot,
+                    ctrl_ep_ring,
+                    lang_id,
+                    mac_addr_index,
+                ),
+            )
+            .await?
+        };
+        info!("iMacAddress: {mac_addr:?}");
         Ok(())
     }
 }
