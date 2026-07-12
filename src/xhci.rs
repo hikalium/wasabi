@@ -90,14 +90,15 @@ impl PciXhciDriver {
                 as *mut RuntimeRegisters)
         };
         let portsc = PortSc::new(bar0, cap_regs.as_ref());
-        let num_slots = cap_regs.as_ref().num_of_ports();
+        let num_slots = cap_regs.as_ref().num_of_device_slots();
         let mut doorbell_regs = Vec::new();
-        for i in 0..=num_slots {
-            let ptr = unsafe {
-                bar0.addr().add(cap_regs.as_ref().dboff()).add(4 * i)
-                    as *mut u32
-            };
-            doorbell_regs.push(Rc::new(Doorbell::new(ptr)))
+        let db_base = unsafe { bar0.addr().add(cap_regs.as_ref().dboff()) };
+        for slot in 0..=num_slots {
+            // SAFETY: db_base is pointing a non-null memory address for the
+            // doorbells as given by the xHCI's capability register and slot
+            // number is also valid (0 for xHC's command ring and 1..=num_slots
+            // for each slots)
+            unsafe { doorbell_regs.push(Rc::new(Doorbell::new(db_base, slot))) }
         }
         // number of doorbells will be 1 + num_slots since doorbell[] is for the
         // host controller.
@@ -1502,7 +1503,11 @@ pub struct Doorbell {
     ptr: Mutex<*mut u32>,
 }
 impl Doorbell {
-    pub fn new(ptr: *mut u32) -> Self {
+    /// # Safety
+    /// `db_base` should be a valid doorbell base address and `for_slot` should
+    /// be less than or equal num_slots
+    pub unsafe fn new(db_base: *mut u8, for_slot: usize) -> Self {
+        let ptr = db_base.add(4 * for_slot) as *mut u32;
         Self {
             ptr: Mutex::new(ptr),
         }
@@ -1514,7 +1519,7 @@ impl Doorbell {
     // index 0: for the host controller
     // index 1-255: for device contexts (index by a Slot ID)
     pub fn notify(&self, target: u8, task: u16) {
-        let value = (target as u32) | (task as u32) << 16;
+        let value = (target as u32) | ((task as u32) << 16);
         // SAFETY: This is safe as long as the ptr is valid
         unsafe {
             write_volatile(*self.ptr.lock(), value);
