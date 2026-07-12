@@ -2,6 +2,7 @@ extern crate alloc;
 
 use crate::acpi::RebootParams;
 use crate::arp::ArpPacket;
+use crate::dns;
 use crate::error;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
@@ -337,6 +338,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             "ime" => run_cmd_ime(&args),
             "show" => run_cmd_show(&args),
             "ping" => run_cmd_ping(&args),
+            "dns" | "nslookup" => run_cmd_dns(&args),
             "reboot" | "r" => run_cmd_reboot(&args),
             "uname" => run_cmd_uname(&args),
             "hello" => {
@@ -473,6 +475,90 @@ pub fn run_cmd_ping(args: &[&str]) -> Result<()> {
     spawn_global(ping_task(target, count));
     Ok(())
 }
+
+// Default DNS resolver. 8.8.8.8 is deliberately off our slirp subnet, so
+// the query has to be routed through the DHCP-learned gateway — which
+// also makes `dns` a handy end-to-end test of that routing.
+const DNS_DEFAULT_SERVER: IpV4Addr = IpV4Addr::new([8, 8, 8, 8]);
+const DNS_REPLY_TIMEOUT: Duration = Duration::from_millis(2000);
+const DNS_ARP_WAIT: Duration = Duration::from_millis(200);
+
+async fn dns_query(hostname: String, server: IpV4Addr) -> Result<()> {
+    let our_mac = nic::our_mac().ok_or("NCM not ready (no MAC)")?;
+    if !nic::has_ip() {
+        println!("dns: no IP yet (waiting for DHCP)");
+        return Ok(());
+    }
+
+    // Resolve the next hop's MAC (the gateway for an off-subnet server),
+    // prodding the network with an ARP request if it is not cached.
+    let next_hop = nic::next_hop(server);
+    let next_hop_mac = match nic::arp_lookup(next_hop) {
+        Some(m) => m,
+        None => {
+            nic::enqueue_tx_frame(
+                ArpPacket::request(our_mac, nic::our_ip(), next_hop)
+                    .as_slice()
+                    .to_vec(),
+            );
+            sleep(DNS_ARP_WAIT).await;
+            nic::arp_lookup(next_hop).ok_or("ARP unresolved")?
+        }
+    };
+
+    let txid: u16 = 0x4321;
+    let query = dns::build_query(
+        our_mac,
+        nic::our_ip(),
+        next_hop_mac,
+        server,
+        &hostname,
+        txid,
+    )?;
+    dns::clear_response();
+    nic::enqueue_tx_frame(query);
+    println!("Querying {server} for {hostname} ...");
+
+    let deadline = global_timestamp() + DNS_REPLY_TIMEOUT;
+    loop {
+        if let Some(frame) = dns::take_response() {
+            if let Some((rxid, addrs)) = dns::parse_response(&frame) {
+                if rxid == txid {
+                    if addrs.is_empty() {
+                        println!("dns: no A records for {hostname}");
+                    } else {
+                        for a in addrs {
+                            println!("{hostname} has address {a}");
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        if global_timestamp() >= deadline {
+            println!("dns: timeout resolving {hostname}");
+            return Ok(());
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+}
+
+pub fn run_cmd_dns(args: &[&str]) -> Result<()> {
+    let hostname = match args.get(1) {
+        Some(s) if !s.is_empty() => String::from(*s),
+        _ => {
+            info!("Usage: dns <hostname> [server-ipv4]");
+            return Ok(());
+        }
+    };
+    let server = match args.get(2) {
+        Some(s) if !s.is_empty() => parse_ipv4(s)?,
+        _ => DNS_DEFAULT_SERVER,
+    };
+    spawn_global(dns_query(hostname, server));
+    Ok(())
+}
+
 #[test_case]
 fn cr_lf_and_crlf_trigger_enter_exactly_once() {
     let mut con = Console::default();
