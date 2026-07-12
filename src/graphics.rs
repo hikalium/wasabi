@@ -1,3 +1,4 @@
+use crate::font::get_glyph_width;
 use crate::font::lookup_font_16x16;
 use crate::font::lookup_font_8x16;
 use crate::result::Result;
@@ -214,6 +215,20 @@ impl<T: Bitmap> BitmapTextWriter<T> {
     pub fn buf(&self) -> &T {
         &self.buf
     }
+    fn adjust_cursor_pos_pre(&mut self, next_glyph_width: i64) -> bool {
+        let mut adjusted = false;
+        let (w, h) = (self.buf.width(), self.buf.height());
+        if self.cursor_x + next_glyph_width > w {
+            self.cursor_x = 0;
+            self.cursor_y += 16;
+            adjusted = true;
+        }
+        if self.cursor_y >= h {
+            self.cursor_y = 0;
+            adjusted = true;
+        }
+        adjusted
+    }
     fn adjust_cursor_pos(&mut self) -> bool {
         let mut adjusted = false;
         if self.cursor_x < 0 {
@@ -257,14 +272,20 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
                 .or(Err(fmt::Error))?;
                 continue;
             }
-            draw_font_fg(
+            let gw = get_glyph_width(c);
+            if self.adjust_cursor_pos_pre(gw) {
+                fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16)
+                    .or(Err(fmt::Error))?;
+            }
+
+            let dx = draw_font_fg(
                 &mut self.buf,
                 self.cursor_x,
                 self.cursor_y,
                 0xffffff,
                 c,
             );
-            self.cursor_x += 8;
+            self.cursor_x += dx;
             if self.adjust_cursor_pos() {
                 fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16)
                     .or(Err(fmt::Error))?;
