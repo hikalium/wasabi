@@ -13,6 +13,7 @@ use crate::usb::EndpointDescriptor;
 use crate::usb::UsbDescriptor;
 use crate::usb::UsbDeviceDescriptor;
 use crate::usb::UsbDeviceDriver;
+use crate::warn;
 use crate::xhci::Controller;
 use crate::xhci::EventFuture;
 use crate::xhci::NormalTrb;
@@ -135,6 +136,45 @@ impl UsbNcmDriver {
             }
         }
     }
+    async fn poll_bulk_in(
+        xhc: Rc<Controller>,
+        slot: u8,
+        mut ring: TransferRing,
+        desc: EndpointDescriptor,
+    ) -> Result<()> {
+        loop {
+            let buf = vec![0u8; 1024];
+            let mut buf = Box::into_pin(buf.into_boxed_slice());
+            let trb_ptr_waiting =
+                ring.push(NormalTrb::new_in(&mut buf).into())?;
+
+            xhc.notify_ep(slot, desc.dci())?;
+            EventFuture::new_for_trb(&xhc.primary_event_ring, trb_ptr_waiting)
+                .await?
+                .transfer_result_ok()?;
+            if &buf[0..4] != b"NCMH" {
+                continue;
+            }
+
+            let mut ntb_seq = [0u8; 2];
+            ntb_seq.copy_from_slice(&buf[6..8]);
+            let ntb_seq = u16::from_le_bytes(ntb_seq) as usize;
+
+            let mut ntb_len = [0u8; 2];
+            ntb_len.copy_from_slice(&buf[8..10]);
+            let ntb_len = u16::from_le_bytes(ntb_len) as usize;
+
+            if ntb_len > buf.len() {
+                warn!(
+                    "NTB(seq={ntb_seq}): ntb_len {ntb_len} is larger than {}",
+                    buf.len()
+                );
+                continue;
+            }
+            info!("NTB(seq={ntb_seq}): recv");
+            hexdump_bytes(&buf[0..ntb_len]);
+        }
+    }
     async fn run(
         xhc: &Rc<Controller>,
         port: usize,
@@ -245,11 +285,37 @@ impl UsbNcmDriver {
                 .ok_or("interrupt_in_ep_desc not found")
         }?;
 
-        let mut ring_list =
-            usb::configure_endpoint(xhc, port, slot, &[int_in_ep_desc]).await?;
+        let bulk_in_ep_desc = {
+            let desc_under_com_interface =
+                descriptors_under_interface(&desc_under_config, 1, 1);
+
+            desc_under_com_interface
+                .iter()
+                .find_map(|d| {
+                    if let usb::UsbDescriptor::Endpoint(d) = d {
+                        if d.is_dir_in() && d.is_bulk_endpoint() {
+                            return Some(d);
+                        }
+                    }
+                    None
+                })
+                .cloned()
+                .ok_or("bulk_in_ep_desc not found")
+        }?;
+
+        let mut ring_list = usb::configure_endpoint(
+            xhc,
+            port,
+            slot,
+            &[int_in_ep_desc, bulk_in_ep_desc],
+        )
+        .await?;
         let int_in_ep_ring = ring_list
             .remove(&int_in_ep_desc.dci())
             .ok_or("ep_ring for interrupt in was not populated")?;
+        let bulk_in_ep_ring = ring_list
+            .remove(&bulk_in_ep_desc.dci())
+            .ok_or("ep_ring for bulk in was not populated")?;
 
         xhc.request_set_config(slot, ctrl_ep_ring, 2).await?;
         xhc.request_set_interface(slot, ctrl_ep_ring, 0, 0).await?;
@@ -265,6 +331,12 @@ impl UsbNcmDriver {
             slot,
             int_in_ep_ring,
             int_in_ep_desc,
+        ));
+        spawn_global(Self::poll_bulk_in(
+            xhc.clone(),
+            slot,
+            bulk_in_ep_ring,
+            bulk_in_ep_desc,
         ));
         Ok(())
     }
