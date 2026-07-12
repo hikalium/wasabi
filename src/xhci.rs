@@ -4,6 +4,7 @@ use crate::allocator::ALLOCATOR;
 use crate::bits::extract_bits;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
+use crate::executor::with_timeout;
 use crate::executor::yield_execution;
 use crate::info;
 use crate::keyboard::UsbKeyboardDriver;
@@ -325,18 +326,18 @@ impl PciXhciDriver {
     }
     async fn init_port(xhc: &Rc<Controller>, port: usize) -> Result<u8> {
         let portsc = xhc.regs.portsc.get(port).ok_or("invalid portsc")?;
-        info!("xhci: resetting port {port}");
         portsc.reset_port().await;
-        info!("xhci: port {port} has been reset");
         portsc
             .is_enabled()
             .then_some(())
             .ok_or("port is not enabled")?;
-        info!("xhci: port {port} is enabled");
-        let slot = xhc
-            .send_command(GenericTrbEntry::cmd_enable_slot())
-            .await?
-            .slot_id();
+        info!("port {port} is succesfully enabled");
+        let slot = with_timeout(
+            Duration::from_secs(1),
+            xhc.send_command(GenericTrbEntry::cmd_enable_slot()),
+        )
+        .await?
+        .slot_id();
         let output_context = OutputContext::default();
         xhc.set_output_context_for_slot(slot, output_context);
         Ok(slot)
@@ -1460,9 +1461,13 @@ impl PortScEntry {
         while !self.pp() {
             yield_execution().await
         }
-        self.assert_pr();
-        while self.pr() {
-            yield_execution().await
+        if self.ccs() {
+            self.assert_pr();
+            // Skip waiting for PR to be 0 as it may not be 0 when a device is
+            // not connected.
+            while self.pr() {
+                yield_execution().await
+            }
         }
     }
     pub fn ped(&self) -> bool {
