@@ -9,6 +9,8 @@ use crate::executor::spawn_global;
 use crate::font::get_glyph_width;
 use crate::graphics::draw_str_fg;
 use crate::graphics::fill_rect;
+use crate::gui::global_vram_resolutions;
+use crate::gui::GLOBAL_VRAM;
 use crate::hpet::global_timestamp;
 use crate::ime::InputEditResult;
 use crate::ime::InputMethodEditor;
@@ -42,19 +44,17 @@ pub fn is_ime_enabled() -> bool {
 }
 pub fn set_ime_enabled(choice: bool) {
     IS_IME_ENABLED.store(choice, Ordering::Relaxed);
-    let (vw, vh) =
-        crate::print::get_global_vram_resolutions().unwrap_or((0, 0));
-    crate::print::with_global_vram_buf(|buf| {
-        // Ignore failure (e.g. zero-resolution VRAM under the test harness).
-        let _ = fill_rect(buf, 0x000000, vw - 16, vh - 16, 16, 16);
-        draw_str_fg(
-            buf,
-            vw - 16,
-            vh - 16,
-            0xffffff,
-            if choice { "あ" } else { "Aa" },
-        );
-    });
+    let (vw, vh) = global_vram_resolutions();
+    let buf = &mut *GLOBAL_VRAM.lock();
+    // Ignore failure (e.g. zero-resolution VRAM under the test harness).
+    let _ = fill_rect(buf, 0x000000, vw - 16, vh - 16, 16, 16);
+    draw_str_fg(
+        buf,
+        vw - 16,
+        vh - 16,
+        0xffffff,
+        if choice { "あ" } else { "Aa" },
+    );
 }
 
 pub struct Console {
