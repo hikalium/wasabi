@@ -1646,13 +1646,26 @@ pub struct InputControlContext {
 }
 const _: () = assert!(size_of::<InputControlContext>() == 0x20);
 impl InputControlContext {
-    pub fn add_context(&mut self, ici: usize) -> Result<()> {
-        if ici < 32 {
-            self.add_context_bitmap |= 1 << ici;
+    pub fn add_context(&mut self, dci: usize) -> Result<()> {
+        if dci < 32 {
+            self.add_context_bitmap |= 1 << dci;
+            self.drop_context_bitmap &= !(1 << dci);
             Ok(())
         } else {
             Err("Input context index out of range")
         }
+    }
+    pub fn drop_context(&mut self, dci: usize) -> Result<()> {
+        if dci < 32 {
+            self.drop_context_bitmap |= 1 << dci;
+            self.add_context_bitmap &= !(1 << dci);
+            Ok(())
+        } else {
+            Err("Input context index out of range")
+        }
+    }
+    pub fn drop_all_optional_endpoints(&mut self) {
+        self.drop_context_bitmap |= !0b11;
     }
 }
 
