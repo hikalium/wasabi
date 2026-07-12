@@ -51,6 +51,19 @@ pub static OUR_MAC: Mutex<Option<EthernetAddr>> = Mutex::new(None);
 pub static ARP_CACHE: Mutex<BTreeMap<IpV4Addr, EthernetAddr>> =
     Mutex::new(BTreeMap::new());
 
+// In-flight `ping` request awaiting an echo reply. The rx path notes
+// the round-trip into `reply_rtt` when a matching echo reply arrives.
+// We only track one outstanding ping at a time — the cui dispatch is
+// serialized and the command itself awaits before issuing the next.
+pub struct PingPending {
+    pub id: u16,
+    pub seq: u16,
+    pub sent_at: Duration,
+    pub reply_rtt: Option<Duration>,
+    pub reply_src: Option<IpV4Addr>,
+}
+pub static PING_PENDING: Mutex<Option<PingPending>> = Mutex::new(None);
+
 pub fn our_mac() -> Option<EthernetAddr> {
     *OUR_MAC.lock()
 }
@@ -284,28 +297,57 @@ impl UsbNcmDriver {
                         // Learn (src_ip -> src_mac) from any inbound
                         // IPv4 frame so outbound can resolve quickly.
                         learn_arp(ip.src(), ip.eth.src());
-                        if ip.dst() == OUR_IP
-                            && ip.protocol() == IpV4Protocol::icmp()
+                        if ip.dst() != OUR_IP {
+                            continue;
+                        }
+                        // Trim to ip.total_length() to drop any
+                        // Ethernet-layer padding (frames < 60 bytes).
+                        let frame_total = core::mem::size_of::<
+                            crate::eth::EthernetHeader,
+                        >() + ip.total_length();
+                        let frame_total = frame_total.min(frame.len());
+                        let frame = &frame[..frame_total];
+                        if ip.protocol() == IpV4Protocol::icmp()
+                            && frame.len() >= core::mem::size_of::<IcmpPacket>()
                         {
-                            // Trim to ip.total_length() to drop any
-                            // Ethernet-layer padding (frames < 60 bytes).
-                            let frame_total = core::mem::size_of::<
-                                crate::eth::EthernetHeader,
-                            >() + ip.total_length();
-                            let frame_total = frame_total.min(frame.len());
-                            match icmp::echo_reply_from_request(
-                                &frame[..frame_total],
-                                our_mac,
-                                OUR_IP,
-                            ) {
-                                Ok(reply) => {
-                                    info!(
-                                        "ICMP: echo request from {} -> reply",
-                                        ip.src(),
-                                    );
-                                    replies.push(reply);
+                            let icmp = IcmpPacket::copy_from_slice(
+                                &frame[..core::mem::size_of::<IcmpPacket>()],
+                            )
+                            .ok();
+                            if icmp
+                                .map(|p| p.is_echo_request())
+                                .unwrap_or(false)
+                            {
+                                match icmp::echo_reply_from_request(
+                                    frame, our_mac, OUR_IP,
+                                ) {
+                                    Ok(reply) => {
+                                        info!(
+                                            "ICMP: echo req from {} -> reply",
+                                            ip.src(),
+                                        );
+                                        replies.push(reply);
+                                    }
+                                    Err(e) => warn!("ICMP reply build: {e}"),
                                 }
-                                Err(e) => warn!("ICMP reply build: {e}"),
+                            } else if let Some(p) = icmp {
+                                if p.is_echo_reply() {
+                                    let mut slot = PING_PENDING.lock();
+                                    if let Some(pending) = slot.as_mut() {
+                                        if pending.id == p.identifier()
+                                            && pending.seq == p.sequence()
+                                            && pending.reply_rtt.is_none()
+                                        {
+                                            let now =
+                                                crate::hpet::global_timestamp();
+                                            pending.reply_rtt =
+                                                Some(now.saturating_sub(
+                                                    pending.sent_at,
+                                                ));
+                                            pending.reply_src = Some(ip.src());
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
