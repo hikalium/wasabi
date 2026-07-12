@@ -48,6 +48,60 @@ impl IcmpPacket {
     pub fn is_echo_request(&self) -> bool {
         self.icmp_type() == IcmpType::echo_request()
     }
+    pub fn is_echo_reply(&self) -> bool {
+        self.icmp_type() == IcmpType::echo_reply()
+    }
+    pub fn identifier(&self) -> u16 {
+        u16::from_be_bytes(self.identifier)
+    }
+    pub fn sequence(&self) -> u16 {
+        u16::from_be_bytes(self.sequence)
+    }
+}
+
+/// Build an ICMP Echo Request frame (Ethernet + IPv4 + ICMP + payload).
+/// `payload` becomes the echo data the receiver will mirror back.
+pub fn echo_request_frame(
+    our_eth: EthernetAddr,
+    our_ip: IpV4Addr,
+    dst_eth: EthernetAddr,
+    dst_ip: IpV4Addr,
+    identifier: u16,
+    sequence: u16,
+    payload: &[u8],
+) -> Vec<u8> {
+    const ICMP_HDR_LEN: usize =
+        size_of::<IcmpPacket>() - size_of::<IpV4Packet>();
+    let total = size_of::<IpV4Packet>() + ICMP_HDR_LEN + payload.len();
+    let mut frame = alloc::vec![0u8; total];
+
+    let eth = EthernetHeader::new(dst_eth, our_eth, EthernetType::ip_v4());
+    let mut ip = IpV4Packet::new(
+        eth,
+        dst_ip,
+        our_ip,
+        IpV4Protocol::icmp(),
+        ICMP_HDR_LEN + payload.len(),
+    );
+    ip.recompute_checksum();
+    frame[..size_of::<IpV4Packet>()].copy_from_slice(ip.as_slice());
+
+    let icmp_off = size_of::<IpV4Packet>();
+    // ICMP header bytes: type, code, csum hi, csum lo, ident hi, ident
+    // lo, seq hi, seq lo. csum is filled in below over the full ICMP
+    // segment (header + payload).
+    frame[icmp_off] = IcmpType::echo_request().0;
+    frame[icmp_off + 1] = 0;
+    frame[icmp_off + 4..icmp_off + 6]
+        .copy_from_slice(&identifier.to_be_bytes());
+    frame[icmp_off + 6..icmp_off + 8].copy_from_slice(&sequence.to_be_bytes());
+    frame[icmp_off + 8..].copy_from_slice(payload);
+
+    let csum = InternetChecksum::calc(&frame[icmp_off..]);
+    let csum_bytes = csum.bytes();
+    frame[icmp_off + 2] = csum_bytes[0];
+    frame[icmp_off + 3] = csum_bytes[1];
+    frame
 }
 
 /// Build an ICMP Echo Reply for an incoming Echo Request frame.
@@ -169,6 +223,42 @@ mod tests {
         assert_eq!(&reply[42..], &req[42..]);
         // Reply length matches request length.
         assert_eq!(reply.len(), req.len());
+    }
+
+    #[test_case]
+    fn echo_request_frame_layout_and_checksums() {
+        let our_mac = EthernetAddr::new([0x33, 0x33, 0x33, 0x33, 0x33, 0x33]);
+        let dst_mac = EthernetAddr::new([0xAA; 6]);
+        let our_ip = IpV4Addr::new([10, 10, 10, 83]);
+        let dst_ip = IpV4Addr::new([10, 10, 10, 1]);
+        let payload: alloc::vec::Vec<u8> = (0..32u8).collect();
+        let frame = echo_request_frame(
+            our_mac, our_ip, dst_mac, dst_ip, 0xBEEF, 7, &payload,
+        );
+
+        // Ethernet: dst = peer, src = us, type = IPv4.
+        assert_eq!(&frame[0..6], &[0xAA; 6]);
+        assert_eq!(&frame[6..12], &[0x33; 6]);
+        assert_eq!(&frame[12..14], &[0x08, 0x00]);
+        // IPv4: src = us, dst = peer, protocol = ICMP.
+        assert_eq!(&frame[26..30], &[10, 10, 10, 83]);
+        assert_eq!(&frame[30..34], &[10, 10, 10, 1]);
+        assert_eq!(frame[23], 1);
+        // ICMP: type = 8 (request), code 0, identifier/sequence preserved.
+        assert_eq!(frame[34], 8);
+        assert_eq!(frame[35], 0);
+        assert_eq!(&frame[38..40], &0xBEEFu16.to_be_bytes());
+        assert_eq!(&frame[40..42], &7u16.to_be_bytes());
+        assert_eq!(&frame[42..], &payload[..]);
+
+        // IP header self-check.
+        let mut g = InternetChecksumGenerator::new();
+        g.feed(&frame[14..34]);
+        assert_eq!(g.checksum(), InternetChecksum::default());
+        // ICMP self-check.
+        let mut g = InternetChecksumGenerator::new();
+        g.feed(&frame[34..]);
+        assert_eq!(g.checksum(), InternetChecksum::default());
     }
 
     #[test_case]
