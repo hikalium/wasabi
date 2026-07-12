@@ -995,6 +995,54 @@ impl Controller {
     pub fn output_context_for_slot(&self, slot: u8) -> Result<OutputContext> {
         self.device_context_base_array.lock().output_context(slot)
     }
+    /// returns actually transferred size
+    pub async fn request_set_report_bytes(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        buf: &mut Pin<Box<[u8]>>,
+        interface_number: u8,
+        report_type: u16,
+    ) -> Result<usize> {
+        // [HID] 7.2.1 Set_Report Request
+        let setup_trb = SetupStageTrb::new(
+            0b00100001,
+            0x09, /* SET_REPORT */
+            // report type:
+            // 1: Input
+            // 2: Output
+            // 3: Feature
+            report_type << 8, /* ReportType | ReportID=0 */
+            interface_number as u16,
+            buf.len() as u16,
+        );
+        let data_trb = DataStageTrb::new_out(buf);
+        let status_trb = StatusStageTrb::new_in();
+
+        ep_ring.push(setup_trb.into())?;
+        let data_trb_addr = ep_ring.push(data_trb.into())?;
+        let status_trb_addr = ep_ring.push(status_trb.into())?;
+        let waiter = async {
+            let rem = EventFuture::new_for_trb(
+                &self.primary_event_ring,
+                data_trb_addr,
+            )
+            .await?
+            .transfer_result_len()?;
+            EventFuture::new_for_trb(&self.primary_event_ring, status_trb_addr)
+                .await?
+                .transfer_result_len()?;
+            if buf.len() < rem {
+                Err("rem transfer size is larger than buf len")
+            } else {
+                Ok(buf.len() - rem)
+            }
+        };
+
+        self.notify_ep(slot, dci)?;
+        waiter.await
+    }
     pub async fn request_set_config(
         &self,
         slot: u8,
