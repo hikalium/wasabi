@@ -12,12 +12,68 @@ use crate::usb::UsbDeviceDescriptor;
 use crate::usb::UsbDeviceDriver;
 use crate::xhci::Controller;
 use crate::xhci::TransferRing;
+use alloc::boxed::Box;
 use alloc::rc::Rc;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
 pub struct UsbNcmDriver;
 impl UsbNcmDriver {
+    pub async fn request_get_net_address(
+        xhc: &Rc<Controller>,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+    ) -> Result<Vec<u8>> {
+        let buf = vec![0u8; 6];
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        xhc.request_transfer_from_class_interface(
+            slot,
+            ctrl_ep_ring,
+            0x81,
+            0,
+            0,
+            &mut buf,
+        )
+        .await?;
+        Ok(buf.to_vec())
+    }
+    pub async fn request_get_ntb_parameters(
+        xhc: &Rc<Controller>,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+    ) -> Result<Vec<u8>> {
+        let buf = vec![0u8; 28];
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        xhc.request_transfer_from_class_interface(
+            slot,
+            ctrl_ep_ring,
+            0x80,
+            0,
+            0,
+            &mut buf,
+        )
+        .await?;
+        Ok(buf.to_vec())
+    }
+    pub async fn request_get_network_connection(
+        xhc: &Rc<Controller>,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+    ) -> Result<Vec<u8>> {
+        let buf = vec![0u8; 6];
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        xhc.request_transfer_from_class_interface(
+            slot,
+            ctrl_ep_ring,
+            0x81,
+            0,
+            0,
+            &mut buf,
+        )
+        .await?;
+        Ok(buf.to_vec())
+    }
     async fn run(
         xhc: &Rc<Controller>,
         _port: usize,
