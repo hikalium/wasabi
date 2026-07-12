@@ -6,6 +6,7 @@ use crate::eth::EthernetType;
 use crate::ip::IpV4Addr;
 use crate::ip::IpV4Packet;
 use crate::ip::IpV4Protocol;
+use crate::mutex::Mutex;
 use crate::result::Result;
 use crate::slice::Sliceable;
 use crate::udp::UdpPacket;
@@ -34,6 +35,26 @@ struct DnsHeader {
 }
 const _: () = assert!(size_of::<DnsHeader>() - size_of::<UdpPacket>() == 12);
 unsafe impl Sliceable for DnsHeader {}
+
+// Most recent DNS reply frame, stashed by the NCM rx path for the
+// waiting `dns` command to pick up.
+static DNS_RX: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+
+/// Called from the NCM rx path for any UDP frame whose source port is
+/// 53. Stores the raw frame so a pending query can parse it.
+pub fn deliver_response(frame: &[u8]) {
+    *DNS_RX.lock() = Some(frame.to_vec());
+}
+
+/// Clear any stale reply before sending a new query.
+pub fn clear_response() {
+    *DNS_RX.lock() = None;
+}
+
+/// Take a stored reply frame, if one has arrived.
+pub fn take_response() -> Option<Vec<u8>> {
+    DNS_RX.lock().take()
+}
 
 /// Build a DNS A-record query for `hostname` as a complete Ethernet
 /// frame. The frame is addressed at layer 2 to `next_hop_mac` (the
