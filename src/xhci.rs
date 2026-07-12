@@ -11,6 +11,7 @@ use crate::keyboard::UsbKeyboardDriver;
 use crate::mmio::IoBox;
 use crate::mmio::Mmio;
 use crate::mutex::Mutex;
+use crate::nic::UsbNcmDriver;
 use crate::pci::BarMem64;
 use crate::pci::BusDeviceFunction;
 use crate::pci::ClassCode;
@@ -410,8 +411,11 @@ impl PciXhciDriver {
         device_descriptor: UsbDeviceDescriptor,
         descriptors: Vec<UsbDescriptor>,
     ) -> Result<()> {
-        let drivers: Vec<Box<dyn UsbDeviceDriver>> =
-            vec![Box::new(UsbKeyboardDriver), Box::new(UsbTabletDriver)];
+        let drivers: Vec<Box<dyn UsbDeviceDriver>> = vec![
+            Box::new(UsbKeyboardDriver),
+            Box::new(UsbTabletDriver),
+            Box::new(UsbNcmDriver),
+        ];
         for d in drivers {
             if d.is_compatible(&descriptors, &device_descriptor) {
                 d.start(
