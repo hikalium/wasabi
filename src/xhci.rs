@@ -1105,6 +1105,115 @@ impl Controller {
         self.notify_ep(slot, dci)?;
         waiter.await
     }
+    pub async fn request_get_configuration(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        // [HID] 7.2.5
+        let setup_trb = SetupStageTrb::new(
+            0b10000000, 8, /* GET_CONFIGURATION */
+            0, 0, 1,
+        );
+        self.request_control_in_transfer(slot, ep_ring, dci, setup_trb, buf)
+            .await
+    }
+    pub async fn request_get_interface(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        //
+        interface_number: u8,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        // [usb2_0] 9.4
+        let setup_trb = SetupStageTrb::new(
+            0b10000001,
+            10, /* GET_INTERFACE */
+            0,
+            interface_number as u16,
+            1,
+        );
+        self.request_control_in_transfer(slot, ep_ring, dci, setup_trb, buf)
+            .await
+    }
+    pub async fn request_get_protocol(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        //
+        interface_number: u8,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        // [HID] 7.2.5
+        let setup_trb = SetupStageTrb::new(
+            0b10100001,
+            0x03, /* GET_PROTOCOL */
+            0,
+            interface_number as u16,
+            1,
+        );
+        self.request_control_in_transfer(slot, ep_ring, dci, setup_trb, buf)
+            .await
+    }
+    pub async fn request_get_status_of_device(
+        &self,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+    ) -> Result<(u8, u8)> {
+        // [usb_2_0] 9.4.5
+        // For device:
+        // bit 0: is_self_powered
+        // bit 1: enable_remote_wakeup
+        let buf = vec![0u8; 2];
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        let setup_trb =
+            SetupStageTrb::new(0b10000000, 0x00 /* GET_STATUS */, 0, 0, 2);
+        self.request_control_in_transfer(
+            slot,
+            ctrl_ep_ring,
+            1,
+            setup_trb,
+            &mut buf,
+        )
+        .await?;
+        Ok((buf[0], buf[1]))
+    }
+    pub async fn request_get_status_of_endpoint(
+        &self,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+        endpoint_addr: u8,
+    ) -> Result<(u8, u8)> {
+        // [usb_2_0] 9.4.5
+        // For endpoint:
+        // bit 0: is_halted
+        //
+        // endpoint_addr.bit[7] = direction(0: Out/Control, 1: IN)
+        // endpoint_addr.bit[0..4] = endpoint number
+        let buf = vec![0u8; 2];
+        let mut buf = Box::into_pin(buf.into_boxed_slice());
+        let setup_trb = SetupStageTrb::new(
+            0b10000010,
+            0x00, /* GET_STATUS */
+            0,
+            endpoint_addr as u16,
+            2,
+        );
+        self.request_control_in_transfer(
+            slot,
+            ctrl_ep_ring,
+            1,
+            setup_trb,
+            &mut buf,
+        )
+        .await?;
+        Ok((buf[0], buf[1]))
+    }
     pub async fn request_descriptor(
         &self,
         slot: u8,
@@ -1139,6 +1248,27 @@ impl Controller {
             SetupStageTrb::REQ_GET_DESCRIPTOR,
             (desc_type as u16) << 8 | (desc_index as u16),
             w_index,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
+            .await
+    }
+    pub async fn request_transfer_from_class_interface(
+        &self,
+        slot: u8,
+        ctrl_ep_ring: &mut TransferRing,
+        request: u8,
+        value: u16,
+        index: u16,
+        buf: &mut Pin<Box<[u8]>>,
+    ) -> Result<usize> {
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | SetupStageTrb::REQ_TYPE_TYPE_CLASS
+                | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+            request,
+            value,
+            index,
             buf.len() as u16,
         );
         self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
