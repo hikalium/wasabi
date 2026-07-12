@@ -197,9 +197,11 @@ pub struct EndpointDescriptor {
     pub max_packet_size: u16,
     // interval:
     // [xhci] Table 6-12
-    // interval_ms = interval (For FS/LS Interrupt)
-    // interval_ms = 2^(interval-1) (For FS Isoch)
-    // interval_ms = 2^(interval-1) (For SSP/SS/HS)
+    // interval_ms = interval (For FS/LS Interrupt) (1-255) (3-10)
+    // interval_ms = 2^(interval-1) (For FS Isoch) (1-16) (3-18)
+    // interval_us = 2^(interval-1) * 125us (For SSP/SS/HS) (1-16) (0-15)
+    //
+    // For example, if bInterval = 11 for SS Interrupt, Interval will be 10.
     pub interval: u8,
 }
 impl EndpointDescriptor {
@@ -418,6 +420,57 @@ pub fn pick_interface_with_triple(
     } else {
         None
     }
+}
+pub fn descriptors_under_config(
+    descriptors: &[UsbDescriptor],
+    config_value: u8,
+) -> Vec<UsbDescriptor> {
+    let mut in_target_config = false;
+    let mut desc_list: Vec<UsbDescriptor> = Vec::new();
+    for d in descriptors {
+        if let UsbDescriptor::Config(e) = d {
+            if in_target_config {
+                // Next config begins so it's end of the target config
+                break;
+            }
+            if e.config_value() != config_value {
+                // Not this config
+                continue;
+            }
+            in_target_config = true;
+        }
+        if in_target_config {
+            desc_list.push(d.clone())
+        }
+    }
+    desc_list
+}
+pub fn descriptors_under_interface(
+    descriptors: &[UsbDescriptor],
+    interface_number: u8,
+    alt_setting: u8,
+) -> Vec<UsbDescriptor> {
+    let mut in_target_interface = false;
+    let mut desc_list: Vec<UsbDescriptor> = Vec::new();
+    for d in descriptors {
+        if let UsbDescriptor::Interface(e) = d {
+            if in_target_interface {
+                // Next interface begins so it's end of the target interface
+                break;
+            }
+            if e.interface_number != interface_number
+                || e.alt_setting != alt_setting
+            {
+                // Not this config
+                continue;
+            }
+            in_target_interface = true;
+        }
+        if in_target_interface {
+            desc_list.push(d.clone())
+        }
+    }
+    desc_list
 }
 pub async fn request_hid_report_descriptor(
     xhc: &Rc<Controller>,
