@@ -162,6 +162,15 @@ impl UsbNcmDriver {
             .await?
         };
         info!("iMacAddress: {mac_addr:?}");
+
+        xhc.request_set_config(slot, ctrl_ep_ring, 2).await?;
+        xhc.request_set_interface(slot, ctrl_ep_ring, 0, 0).await?;
+        // start operation!
+        xhc.request_set_interface(slot, ctrl_ep_ring, 1, 1).await?;
+
+        let ntbparams =
+            Self::request_get_ntb_parameters(xhc, slot, ctrl_ep_ring).await?;
+        info!("ntbparams: {ntbparams:?}");
         Ok(())
     }
 }
