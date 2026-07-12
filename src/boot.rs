@@ -62,6 +62,7 @@ pub fn setup_system(
     let mut vram = init_vram(efi_system_table).expect("init_vram failed");
     init_display(&mut vram);
     set_global_vram(vram);
+    crate::gui::set_global_vram(vram);
     let acpi = efi_system_table.acpi_table().expect("ACPI table not found");
     init_acpi(acpi);
 
