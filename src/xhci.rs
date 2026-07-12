@@ -995,33 +995,6 @@ impl Controller {
     pub fn output_context_for_slot(&self, slot: u8) -> Result<OutputContext> {
         self.device_context_base_array.lock().output_context(slot)
     }
-    pub async fn request_report_bytes(
-        &self,
-        slot: u8,
-        ctrl_ep_ring: &mut TransferRing,
-        buf: &mut Pin<Box<[u8]>>,
-    ) -> Result<()> {
-        // [HID] 7.2.1 Get_Report Request
-        ctrl_ep_ring.push(
-            SetupStageTrb::new(
-                SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
-                    | SetupStageTrb::REQ_TYPE_TYPE_CLASS
-                    | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
-                SetupStageTrb::REQ_GET_REPORT,
-                0x0200, /* Report Type | Report ID */
-                0,
-                buf.len() as u16,
-            )
-            .into(),
-        )?;
-        let trb_ptr_waiting =
-            ctrl_ep_ring.push(DataStageTrb::new_in(buf).into())?;
-        ctrl_ep_ring.push(StatusStageTrb::new_out().into())?;
-        self.notify_ep(slot, 1)?;
-        EventFuture::new_for_trb(&self.primary_event_ring, trb_ptr_waiting)
-            .await?
-            .transfer_result_ok()
-    }
     pub async fn request_set_config(
         &self,
         slot: u8,
@@ -1169,6 +1142,32 @@ impl Controller {
             buf.len() as u16,
         );
         self.request_control_in_transfer(slot, ctrl_ep_ring, 1, setup_trb, buf)
+            .await
+    }
+    pub async fn request_report_bytes(
+        &self,
+        slot: u8,
+        ep_ring: &mut TransferRing,
+        dci: usize,
+        buf: &mut Pin<Box<[u8]>>,
+        interface_number: u8,
+        report_type: u16,
+    ) -> Result<usize> {
+        // [HID] 7.2.1 Get_Report Request
+        let setup_trb = SetupStageTrb::new(
+            SetupStageTrb::REQ_TYPE_DIR_DEVICE_TO_HOST
+                | SetupStageTrb::REQ_TYPE_TYPE_CLASS
+                | SetupStageTrb::REQ_TYPE_TO_INTERFACE,
+            SetupStageTrb::REQ_GET_REPORT,
+            // report type:
+            // 1: Input
+            // 2: Output
+            // 3: Feature
+            report_type << 8, /* ReportType | ReportID=0 */
+            interface_number as u16,
+            buf.len() as u16,
+        );
+        self.request_control_in_transfer(slot, ep_ring, dci, setup_trb, buf)
             .await
     }
 }
