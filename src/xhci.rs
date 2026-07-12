@@ -34,6 +34,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::cmp::max;
+use core::fmt::Debug;
 use core::future::Future;
 use core::marker::PhantomPinned;
 use core::mem::size_of;
@@ -1406,6 +1407,47 @@ impl PortSc {
         self.entries.get(port.wrapping_sub(1)).cloned()
     }
 }
+// 4.19.1.1 USB2 Root Hub Port
+// Figure 4-25: USB2 Root Hub Port State Machine
+// Powered-off -- Wr(PP=1) -> Disconnected
+// Disconnected -- CCS=1 -> Disabled
+// Disabled -- Wr(PR=1) -> Reset
+// Reset -- PR=0 -> Enabled
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum PortState {
+    // Values: (PP, CCS, PED, PR)
+    PoweredOff,   // (0, 0, 0, 0)
+    Disconnected, // (1, 0, 0, 0)
+    Disabled,     // (1, 1, 0, 0)
+    Enabled,      // (1, 1, 1, 0)
+    Reset,        // (1, 1, 0, 1)
+    TestMode,     // (1, _, _, 1)
+    Unknown {
+        pp: bool,
+        ccs: bool,
+        ped: bool,
+        pr: bool,
+    },
+}
+impl From<&PortScEntry> for PortState {
+    fn from(portsc: &PortScEntry) -> Self {
+        let pp = portsc.pp();
+        let ccs = portsc.ccs();
+        let ped = portsc.ped();
+        let pr = portsc.pr();
+        match (pp as u8, ccs as u8, ped as u8, pr as u8) {
+            (0, 0, 0, 0) => Self::PoweredOff,
+            (1, 0, 0, 0) => Self::Disconnected,
+            (1, 1, 0, 0) => Self::Disabled,
+            (1, 1, 1, 0) => Self::Enabled,
+            (1, 1, 0, 1) => Self::Reset,
+            (1, _, _, 1) => Self::TestMode,
+            (_, _, _, _) => Self::Unknown { pp, ccs, ped, pr },
+        }
+    }
+}
+
 #[repr(C)]
 struct PortScEntry {
     ptr: Mutex<*mut u32>,
@@ -1416,7 +1458,7 @@ impl PortScEntry {
             ptr: Mutex::new(ptr),
         }
     }
-    fn value(&self) -> u32 {
+    pub fn value(&self) -> u32 {
         let portsc = self.ptr.lock();
         unsafe { read_volatile(*portsc) }
     }
@@ -1456,6 +1498,10 @@ impl PortScEntry {
         // PR - Port Reset - RW1S
         self.assert_bit(4)
     }
+    pub fn pls(&self) -> u32 {
+        // PLS - Port Link State - RWS
+        extract_bits(self.value(), 5, 4)
+    }
     pub async fn reset_port(&self) {
         self.assert_pp();
         while !self.pp() {
@@ -1485,6 +1531,9 @@ impl PortScEntry {
             _ => Err("Unknown Protocol Speeed ID"),
         }
     }
+    pub fn port_state(&self) -> PortState {
+        PortState::from(self)
+    }
     pub fn port_speed(&self) -> UsbMode {
         // Port Speed - ROS
         // Returns Protocol Speed ID (PSI). See 7.2.1 of xhci spec.
@@ -1496,6 +1545,18 @@ impl PortScEntry {
             4 => UsbMode::SuperSpeed,
             v => UsbMode::Unknown(v),
         }
+    }
+}
+impl Debug for PortScEntry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "PortSc {{ value:{:#010X}, speed:{:?}, state:{:?}, PLS: {:?} }}",
+            self.value(),
+            self.port_speed(),
+            self.port_state(),
+            self.pls(),
+        )
     }
 }
 
