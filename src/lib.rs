@@ -23,6 +23,7 @@ pub mod init;
 pub mod keyboard;
 pub mod mmio;
 pub mod mutex;
+pub mod nic;
 pub mod pci;
 pub mod print;
 pub mod ps2kbd;
