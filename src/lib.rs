@@ -17,6 +17,7 @@ pub mod bits;
 pub mod checksum;
 pub mod cui;
 pub mod dhcp;
+pub mod dns;
 pub mod eth;
 pub mod executor;
 pub mod font;
