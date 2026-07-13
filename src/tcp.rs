@@ -249,6 +249,23 @@ impl TcpSocket {
         let mut inner = self.inner.lock();
         inner.last_active_at = Some(now);
 
+        // RST teardown: if the peer reset us at any point, drop straight
+        // back to Listen so the next SYN can be accepted. Without this
+        // the socket can wedge in Established forever after a peer
+        // crash or middlebox reset.
+        if in_tcp.is_rst() {
+            inner.state = TcpSocketState::Listen;
+            inner.peer_mac = EthernetAddr::zero();
+            inner.peer_ip = IpV4Addr::new([0, 0, 0, 0]);
+            inner.peer_port = 0;
+            inner.last_seq_to_ack = 0;
+            inner.rx_data.clear();
+            inner.send_buffer.clear();
+            inner.unacked_len = 0;
+            inner.last_tx_at = None;
+            return None;
+        }
+
         let prev_state = inner.state;
         let mut seq_to_ack = in_tcp.seq_num();
         let seq = inner.my_next_seq;
@@ -838,6 +855,33 @@ mod tests {
             .unwrap();
         let r2 = parse_reply(&next);
         assert_eq!(r2.seq_num(), r.seq_num().wrapping_add(1));
+    }
+
+    #[test_case]
+    fn handle_rx_rst_returns_to_listen() {
+        let (sock, client_seq) = established_socket();
+        // Build a RST segment from the peer.
+        let rst = {
+            let mut bytes = build_client_segment(
+                PEER_MAC,
+                PEER_IP,
+                12345,
+                OUR_MAC,
+                OUR_IP,
+                23,
+                client_seq,
+                Some(0),
+                false,
+                false,
+                &[],
+            );
+            // Patch flags byte to set RST and clear ACK.
+            let flags_off = size_of::<IpV4Packet>() + 13;
+            bytes[flags_off] = 1 << 2; // RST only
+            bytes
+        };
+        sock.handle_rx(&rst, OUR_MAC, OUR_IP, Duration::ZERO);
+        assert_eq!(sock.state(), TcpSocketState::Listen);
     }
 
     #[test_case]
