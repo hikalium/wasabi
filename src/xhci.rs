@@ -757,15 +757,33 @@ impl EndpointContext {
     }
 }
 
-#[repr(C, align(32))]
-#[derive(Default)]
-struct DeviceContext {
-    slot_ctx: [u32; 8],
-    ep_ctx: [EndpointContext; 2 * 15 + 1],
-    _pinned: PhantomPinned,
+#[derive(Debug)]
+pub enum SlotState {
+    DisabledOrEnabled,
+    Default,
+    Addressed,
+    Configured,
+    Error,
+    Invalid(u32),
 }
-const _: () = assert!(size_of::<DeviceContext>() == 0x400);
-impl DeviceContext {
+impl From<u32> for SlotState {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => Self::DisabledOrEnabled,
+            1 => Self::Default,
+            2 => Self::Addressed,
+            3 => Self::Configured,
+            e => Self::Invalid(e),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Default, Clone)]
+pub struct SlotContext {
+    slot_ctx: [u32; 8],
+}
+impl SlotContext {
     fn set_port_speed(&mut self, mode: UsbMode) -> Result<()> {
         if mode.psi() < 16u32 {
             self.slot_ctx[0] &= !(0xF << 20);
@@ -803,12 +821,38 @@ impl DeviceContext {
             Err("port out of range")
         }
     }
+    pub fn context_entries(&self) -> u32 {
+        self.slot_ctx[0] >> 27
+    }
+    pub fn slot_ctx(&self) -> [u32; 8] {
+        self.slot_ctx
+    }
+    pub fn slot_state(&self) -> SlotState {
+        SlotState::from(self.slot_ctx[3] >> 27)
+    }
+}
+
+#[repr(C, align(32))]
+#[derive(Default, Clone)]
+pub struct DeviceContext {
+    slot_ctx: SlotContext,                 // dci = 0
+    ep_ctx: [EndpointContext; 2 * 15 + 1], // dci = 1..=15
+    _pinned: PhantomPinned,
+}
+const _: () = assert!(size_of::<DeviceContext>() == 0x400);
+impl DeviceContext {
+    pub fn slot_ctx(&self) -> &SlotContext {
+        &self.slot_ctx
+    }
+    pub fn ep_ctx(&self, dci: usize) -> Result<&EndpointContext> {
+        self.ep_ctx.get(dci - 1).ok_or("dci out of range")
+    }
 }
 
 #[repr(C, align(4096))]
-#[derive(Default)]
-struct OutputContext {
-    device_ctx: DeviceContext,
+#[derive(Default, Clone)]
+pub struct OutputContext {
+    pub device_ctx: DeviceContext,
     _pinned: PhantomPinned,
 }
 const _: () = assert!(size_of::<OutputContext>() <= 4096);
@@ -1811,6 +1855,7 @@ impl InputContext {
     fn set_port_speed(self: &mut Pin<&mut Self>, psi: UsbMode) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
+            .slot_ctx
             .set_port_speed(psi)
     }
     fn set_root_hub_port_number(
@@ -1819,11 +1864,13 @@ impl InputContext {
     ) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
+            .slot_ctx
             .set_root_hub_port_number(port)
     }
     fn set_last_valid_dci(self: &mut Pin<&mut Self>, dci: usize) -> Result<()> {
         unsafe { self.as_mut().get_unchecked_mut() }
             .device_ctx
+            .slot_ctx
             .set_last_valid_dci(dci)
     }
 }
