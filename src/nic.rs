@@ -383,7 +383,8 @@ impl UsbNcmDriver {
     }
     async fn poll_tcp_tx(our_mac: EthernetAddr) -> Result<()> {
         loop {
-            if let Some(frame) = TCP_SOCKET.poll_tx(our_mac, OUR_IP) {
+            let now = crate::hpet::global_timestamp();
+            if let Some(frame) = TCP_SOCKET.poll_tx(our_mac, OUR_IP, now) {
                 enqueue_tx_frame(frame);
             }
             sleep(Duration::from_millis(20)).await;
