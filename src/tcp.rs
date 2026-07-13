@@ -676,6 +676,104 @@ mod tests {
     }
 
     #[test_case]
+    fn poll_tx_keeps_bytes_until_acked() {
+        let (sock, _client_seq) = established_socket();
+        sock.push_tx_bytes(b"hello");
+        // First poll: ships the data, advances my_next_seq.
+        let seg1 = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(0))
+            .unwrap();
+        let p1 = parse_reply(&seg1);
+        let first_seq = p1.seq_num();
+        // Within RTO and no new data: nothing to do.
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(100))
+            .is_none());
+        // ACK arrives covering the 5 bytes.
+        let ack = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5001,
+            Some(first_seq.wrapping_add(5)),
+            false,
+            false,
+            &[],
+        );
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        // No retransmit even after RTO, because there's nothing unacked.
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(2000))
+            .is_none());
+    }
+
+    #[test_case]
+    fn poll_tx_retransmits_after_rto() {
+        let (sock, _) = established_socket();
+        sock.push_tx_bytes(b"hello");
+        let seg1 = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(0))
+            .unwrap();
+        let p1 = parse_reply(&seg1);
+        let original_seq = p1.seq_num();
+
+        // Within RTO -> nothing.
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(400))
+            .is_none());
+
+        // After RTO with no ACK: retransmit. Same seq, same payload.
+        let seg2 = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(600))
+            .unwrap();
+        let p2 = parse_reply(&seg2);
+        assert_eq!(p2.seq_num(), original_seq);
+        assert_eq!(seg2.len(), seg1.len());
+        assert_eq!(
+            &seg2[size_of::<TcpPacket>()..],
+            &seg1[size_of::<TcpPacket>()..]
+        );
+    }
+
+    #[test_case]
+    fn poll_tx_fresh_data_after_partial_ack() {
+        let (sock, _) = established_socket();
+        sock.push_tx_bytes(b"hello");
+        let seg1 = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(0))
+            .unwrap();
+        let first_seq = parse_reply(&seg1).seq_num();
+
+        // ACK the 5 bytes, queue 3 more.
+        let ack = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5001,
+            Some(first_seq.wrapping_add(5)),
+            false,
+            false,
+            &[],
+        );
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        sock.push_tx_bytes(b"abc");
+
+        // Next poll sends the fresh 3 bytes with seq right after "hello".
+        let seg2 = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(100))
+            .unwrap();
+        let p2 = parse_reply(&seg2);
+        assert_eq!(p2.seq_num(), first_seq.wrapping_add(5));
+        assert_eq!(&seg2[size_of::<TcpPacket>()..], b"abc");
+    }
+
+    #[test_case]
     fn handle_rx_fin_to_lastack_then_close() {
         let (sock, client_seq) = established_socket();
         let fin = build_client_segment(
