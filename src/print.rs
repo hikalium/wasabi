@@ -1,4 +1,3 @@
-use crate::graphics::Bitmap;
 use crate::graphics::BitmapTextWriter;
 use crate::mutex::Mutex;
 use crate::serial::SerialPort;
@@ -14,18 +13,6 @@ pub fn set_global_vram(vram: VramBufferInfo) {
     assert!(GLOBAL_VRAM_WRITER.lock().is_none());
     let w = BitmapTextWriter::new(vram);
     *GLOBAL_VRAM_WRITER.lock() = Some(w);
-}
-// Temporary accessor for drawing directly on the global VRAM before the
-// GUI layer exists; removed when GLOBAL_VRAM moves into gui.rs.
-pub fn with_global_vram_buf(f: impl FnOnce(&mut VramBufferInfo)) {
-    if let Some(w) = &mut *GLOBAL_VRAM_WRITER.lock() {
-        f(w.buf_mut());
-    }
-}
-pub fn get_global_vram_resolutions() -> Option<(i64, i64)> {
-    (GLOBAL_VRAM_WRITER.lock())
-        .as_ref()
-        .map(|vram| (vram.buf().width(), vram.buf().height()))
 }
 // Mirrors `print!`/`println!` output into the TCP socket's tx queue
 // when a connection is Established. `push_tx_bytes` is itself a no-op
