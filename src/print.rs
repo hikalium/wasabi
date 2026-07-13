@@ -1,4 +1,5 @@
 use crate::graphics::BitmapTextWriter;
+use crate::gui::GLOBAL_VRAM;
 use crate::mutex::Mutex;
 use crate::serial::SerialPort;
 use crate::tcp::TCP_SOCKET;
@@ -7,13 +8,9 @@ use core::fmt;
 use core::mem::size_of;
 use core::slice;
 
-static GLOBAL_VRAM_WRITER: Mutex<Option<BitmapTextWriter<VramBufferInfo>>> =
-    Mutex::new(None);
-pub fn set_global_vram(vram: VramBufferInfo) {
-    assert!(GLOBAL_VRAM_WRITER.lock().is_none());
-    let w = BitmapTextWriter::new(vram);
-    *GLOBAL_VRAM_WRITER.lock() = Some(w);
-}
+static GLOBAL_PRINTER: Mutex<BitmapTextWriter<VramBufferInfo>> =
+    Mutex::new(BitmapTextWriter::new(&GLOBAL_VRAM));
+
 // Mirrors `print!`/`println!` output into the TCP socket's tx queue
 // when a connection is Established. `push_tx_bytes` is itself a no-op
 // in any other state, so this is safe to call unconditionally.
@@ -28,9 +25,7 @@ impl fmt::Write for TcpMirror {
 pub fn global_print(args: fmt::Arguments) {
     let mut writer = SerialPort::default();
     fmt::write(&mut writer, args).unwrap();
-    if let Some(w) = &mut *GLOBAL_VRAM_WRITER.lock() {
-        fmt::write(w, args).expect("Failed to write to GLOBAL_VRAM_WRITER");
-    }
+    let _ = fmt::write(&mut *GLOBAL_PRINTER.lock(), args);
     let _ = fmt::write(&mut TcpMirror, args);
 }
 
@@ -42,17 +37,15 @@ pub fn global_print(args: fmt::Arguments) {
 pub fn panic_print(args: fmt::Arguments) {
     let mut writer = SerialPort::default();
     let _ = fmt::write(&mut writer, args);
-    match GLOBAL_VRAM_WRITER.try_lock() {
+    match GLOBAL_PRINTER.try_lock() {
         Ok(mut printer) => {
-            if let Some(printer) = &mut *printer {
-                let _ = fmt::write(printer, args);
-            }
+            let _ = fmt::write(&mut *printer, args);
         }
         Err(_) => {
             let _ = fmt::write(
                 &mut writer,
                 format_args!(
-                    "[panic_print] GLOBAL_VRAM_WRITER is already locked — \
+                    "[panic_print] GLOBAL_PRINTER is already locked — \
                      panic likely originated inside the print path; \
                      screen output skipped\n"
                 ),
