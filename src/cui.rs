@@ -668,6 +668,7 @@ mod line_edit_tests {
     use super::*;
     use crate::bitmap::BitmapBuffer;
     use crate::graphics::BitmapTextWriter;
+    use crate::mutex::Mutex;
     use core::fmt::Write;
 
     fn console_with_ime() -> Console {
@@ -907,13 +908,14 @@ mod line_edit_tests {
     fn commit_redraw_matches_plain_text_pixels() {
         let pending = styled_line("", "今日");
         let committed = styled_line("今日", "");
-        let mut redrawn = BitmapTextWriter::new(BitmapBuffer::new(64, 16, 64));
-        redrawn.write_str(&encode_line_diff(&[], &pending)).unwrap();
-        redrawn
+        let redrawn = Mutex::new(BitmapBuffer::new(64, 16, 64));
+        let mut writer = BitmapTextWriter::new(&redrawn);
+        writer.write_str(&encode_line_diff(&[], &pending)).unwrap();
+        writer
             .write_str(&encode_line_diff(&pending, &committed))
             .unwrap();
-        let mut plain = BitmapTextWriter::new(BitmapBuffer::new(64, 16, 64));
-        plain.write_str("今日").unwrap();
-        assert_eq!(redrawn.buf(), plain.buf());
+        let plain = Mutex::new(BitmapBuffer::new(64, 16, 64));
+        BitmapTextWriter::new(&plain).write_str("今日").unwrap();
+        assert_eq!(*redrawn.lock(), *plain.lock());
     }
 }
