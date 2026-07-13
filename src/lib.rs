@@ -21,6 +21,7 @@ pub mod executor;
 pub mod font;
 pub mod graphics;
 pub mod hpet;
+pub mod icmp;
 pub mod ime;
 pub mod ime_dict;
 pub mod init;
