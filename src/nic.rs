@@ -355,8 +355,9 @@ impl UsbNcmDriver {
                                 }
                             }
                         } else if ip.protocol() == IpV4Protocol::tcp() {
-                            if let Some(reply) =
-                                TCP_SOCKET.handle_rx(frame, our_mac, OUR_IP)
+                            let now = crate::hpet::global_timestamp();
+                            if let Some(reply) = TCP_SOCKET
+                                .handle_rx(frame, our_mac, OUR_IP, now)
                             {
                                 replies.push(reply);
                             }
