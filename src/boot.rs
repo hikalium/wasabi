@@ -3,6 +3,7 @@ use crate::error;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
 use crate::executor::start_global_executor;
+use crate::gui::set_global_vram;
 use crate::info;
 use crate::init::init_acpi;
 use crate::init::init_allocator;
@@ -14,7 +15,6 @@ use crate::init::init_paging;
 use crate::init::init_pci;
 use crate::keyboard::KeyEvent;
 use crate::print::hexdump_struct;
-use crate::print::set_global_vram;
 use crate::println;
 use crate::ps2kbd::ps2kbd_task;
 use crate::serial::SerialPort;
@@ -62,7 +62,6 @@ pub fn setup_system(
     let mut vram = init_vram(efi_system_table).expect("init_vram failed");
     init_display(&mut vram);
     set_global_vram(vram);
-    crate::gui::set_global_vram(vram);
     let acpi = efi_system_table.acpi_table().expect("ACPI table not found");
     init_acpi(acpi);
 
