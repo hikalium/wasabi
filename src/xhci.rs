@@ -638,6 +638,49 @@ impl EndpointContext {
         // for control endpoints.
         Ok(ep)
     }
+    pub fn new_interrupt_in_endpoint(
+        max_packet_size: u16,
+        tr_dequeue_ptr: u64,
+        interval: u8,
+    ) -> Result<Self> {
+        // xhci: 4.3.6
+        let mut ep = Self::new();
+        ep.set_ep_type(EndpointType::InterruptIn)?;
+        ep.set_dequeue_cycle_state(true)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size)?;
+        ep.max_esit_payload_low.write(0);
+        // xhci: 4.14.2 says max allowed ESIT payload size is:
+        //   64 B  for FS Interrupt
+        //   1  KB for FS Isoch
+        //   3  KB for HS Interrupt
+        //   3  KB for HS Isoch
+        //   3  KB for SS Interrupt
+        //  48  KB for SS Isoch
+
+        // xhci: 6.2.3.6
+
+        ep.set_interval(interval);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.average_trb_length.write(1);
+        info!("New EndpointContext created: {ep:?}");
+        Ok(ep)
+    }
+    pub fn new_bulk_in_endpoint(
+        max_packet_size: u16,
+        tr_dequeue_ptr: u64,
+    ) -> Result<Self> {
+        let mut ep = Self::new();
+        ep.set_ep_type(EndpointType::BulkIn)?;
+        ep.set_dequeue_cycle_state(true)?;
+        ep.set_error_count(3)?;
+        ep.set_max_packet_size(max_packet_size)?;
+        //ep.set_max_burst_size(max_packet_size);
+        ep.set_interval(10);
+        ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
+        ep.average_trb_length.write(max_packet_size);
+        Ok(ep)
+    }
     fn set_ring_dequeue_pointer(&mut self, tr_dequeue_ptr: u64) -> Result<()> {
         self.tr_dequeue_ptr.write_bits(4, 60, tr_dequeue_ptr >> 4)
     }
@@ -682,6 +725,29 @@ impl EndpointContext {
     }
     pub fn ep_type(&self) -> Result<EndpointType> {
         self.data[1].read_bits(3, 3).try_into()
+    }
+    fn set_interval(&mut self, interval: u8) {
+        // [xhci] 6.2.3.6
+        // 0  =  125 us
+        // 1  =  250 us
+        // 2  =  500 us
+        // 3  = 1000 us = 1 ms
+        // 4            = 2 ms
+        // 5            = 4 ms
+        // 6            = 8 ms
+        // 7            = 16 ms
+        // 8            = 32 ms
+        // 9            = 64 ms
+        // 10           = 128 ms
+        // 11           = 256 ms
+        // 12           = 512 ms
+        // 13           = 1024 ms
+        // 14           = 2048 ms
+        // 15           = 4096 ms
+        let mut d = self.data[0].read();
+        d &= 0xff << 16;
+        d |= (interval as u32) << 16;
+        self.data[0].write(d);
     }
     pub fn ep_state(&self) -> EndpointState {
         EndpointState::from(extract_bits(self.data[0].read(), 0, 3))
