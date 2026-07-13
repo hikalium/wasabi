@@ -338,6 +338,110 @@ mod tests {
         assert!(p.is_syn());
     }
 
+    fn build_client_segment(
+        peer_mac: EthernetAddr,
+        peer_ip: IpV4Addr,
+        peer_port: u16,
+        our_mac: EthernetAddr,
+        our_ip: IpV4Addr,
+        listen_port: u16,
+        seq: u32,
+        ack_seq: Option<u32>,
+        syn: bool,
+        fin: bool,
+        data: &[u8],
+    ) -> Vec<u8> {
+        // Reuse build_segment with peer/us swapped.
+        super::build_segment(
+            peer_mac,
+            our_mac,
+            peer_ip,
+            our_ip,
+            peer_port,
+            listen_port,
+            seq,
+            ack_seq,
+            syn,
+            fin,
+            data,
+        )
+    }
+
+    fn parse_reply(reply: &[u8]) -> TcpPacket {
+        TcpPacket::copy_from_slice(&reply[..size_of::<TcpPacket>()]).unwrap()
+    }
+
+    const PEER_MAC: EthernetAddr =
+        EthernetAddr::new([0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA]);
+    const PEER_IP: IpV4Addr = IpV4Addr::new([10, 10, 10, 1]);
+    const OUR_MAC: EthernetAddr =
+        EthernetAddr::new([0x11, 0x11, 0x11, 0x11, 0x11, 0x11]);
+    const OUR_IP: IpV4Addr = IpV4Addr::new([10, 10, 10, 83]);
+
+    #[test_case]
+    fn handle_rx_listen_to_syn_received() {
+        let sock = TcpSocket::new_server(23);
+        let syn = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5000,
+            None,
+            true,
+            false,
+            &[],
+        );
+        let reply = sock.handle_rx(&syn, OUR_MAC, OUR_IP).unwrap();
+        let r = parse_reply(&reply);
+        assert!(r.is_syn() && r.is_ack());
+        assert_eq!(r.ack_num(), 5001); // SYN consumed one seq
+        assert_eq!(r.src_port(), 23);
+        assert_eq!(r.dst_port(), 12345);
+        assert_eq!(sock.state(), TcpSocketState::SynReceived);
+    }
+
+    #[test_case]
+    fn handle_rx_synreceived_to_established() {
+        let sock = TcpSocket::new_server(23);
+        let syn = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5000,
+            None,
+            true,
+            false,
+            &[],
+        );
+        let synack = sock.handle_rx(&syn, OUR_MAC, OUR_IP).unwrap();
+        let r = parse_reply(&synack);
+        let our_seq_plus_1 = r.seq_num().wrapping_add(1);
+
+        // Client's ACK of the SYN+ACK.
+        let ack = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5001,
+            Some(our_seq_plus_1),
+            false,
+            false,
+            &[],
+        );
+        let reply = sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        assert!(reply.is_none());
+        assert_eq!(sock.state(), TcpSocketState::Established);
+    }
+
     #[test_case]
     fn tcp_segment_checksum_self_check() {
         // Build a SYN segment by hand with the csum field zeroed,
