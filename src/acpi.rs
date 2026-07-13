@@ -97,6 +97,7 @@ trait AcpiTable {
     }
 }
 
+#[derive(Copy, Clone)]
 #[repr(packed)]
 pub struct GenericAddress {
     address_space_id: u8,
@@ -105,9 +106,24 @@ pub struct GenericAddress {
 }
 const _: () = assert!(size_of::<GenericAddress>() == 12);
 impl GenericAddress {
+    pub fn is_in_memory_space(&self) -> bool {
+        self.address_space_id == 0x00
+    }
+    pub fn is_in_register_space(&self) -> bool {
+        self.address_space_id == 0x01
+    }
     pub fn address_in_memory_space(&self) -> Result<usize> {
         if self.address_space_id == 0 {
             Ok(self.address as usize)
+        } else {
+            Err("ACPI Generic Address is not in system memory space")
+        }
+    }
+    pub fn address_in_io_space(&self) -> Result<u16> {
+        if self.address_space_id == 1 {
+            self.address
+                .try_into()
+                .or(Err("Address in IO space outside of 16bit range"))
         } else {
             Err("ACPI Generic Address is not in system memory space")
         }
@@ -158,6 +174,10 @@ impl AcpiRsdpStruct {
     pub fn mcfg(&self) -> Option<&AcpiMcfgDescriptor> {
         let xsdt = self.xsdt();
         xsdt.find_table(b"MCFG").map(AcpiMcfgDescriptor::new)
+    }
+    pub fn fadt(&self) -> Option<&AcpiFadtDescriptor> {
+        let xsdt = self.xsdt();
+        xsdt.find_table(b"FACP").map(AcpiFadtDescriptor::new)
     }
 }
 
@@ -221,5 +241,64 @@ impl fmt::Display for EcamEntry {
             "ECAM: Bus [{}..={}] is mapped at {:#X}",
             bus_start, bus_end, base
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum RebootParams {
+    Memory { addr: usize, value: u8 },
+    Io { addr: u16, value: u8 },
+}
+#[repr(C, packed)]
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct AcpiFadtDescriptor {
+    header: SystemDescriptionTableHeader,
+    firmware_ctrl: u32,
+    dsdt: u32,
+    reserved: u8,
+    preferred_pm_profile: u8,
+    sci_int: u16,
+    smi_cmd: u32,
+    acpi_enable: u8,
+    acpi_disable: u8,
+}
+impl AcpiTable for AcpiFadtDescriptor {
+    const SIGNATURE: &'static [u8; 4] = b"FACP";
+    type Table = Self;
+}
+const _: () = assert!(size_of::<AcpiFadtDescriptor>() == 54);
+impl AcpiFadtDescriptor {
+    fn reboot_address(&self) -> Result<GenericAddress> {
+        const OFFSET: isize = 116;
+        if self.header.length as isize >= OFFSET {
+            unsafe {
+                Ok(*(self as *const Self as *const GenericAddress)
+                    .byte_offset(OFFSET))
+            }
+        } else {
+            Err("Failed to get the reset register address")
+        }
+    }
+    fn reboot_value(&self) -> Result<u8> {
+        const OFFSET: isize = 128;
+        if self.header.length as isize >= OFFSET {
+            Ok(unsafe {
+                *(self as *const Self as *const u8).byte_offset(OFFSET)
+            })
+        } else {
+            Err("Failed to get the reset register address")
+        }
+    }
+    pub fn reset_params(&self) -> Result<RebootParams> {
+        let addr = self.reboot_address()?;
+        let value = self.reboot_value()?;
+        if let Ok(addr) = addr.address_in_memory_space() {
+            Ok(RebootParams::Memory { addr, value })
+        } else if let Ok(addr) = addr.address_in_io_space() {
+            Ok(RebootParams::Io { addr, value })
+        } else {
+            Err("Unsupported Generic Address type")
+        }
     }
 }
