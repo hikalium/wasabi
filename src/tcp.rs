@@ -2,9 +2,16 @@ extern crate alloc;
 
 use crate::checksum::InternetChecksum;
 use crate::checksum::InternetChecksumGenerator;
+use crate::eth::EthernetAddr;
+use crate::eth::EthernetHeader;
+use crate::eth::EthernetType;
 use crate::ip::IpV4Addr;
 use crate::ip::IpV4Packet;
+use crate::ip::IpV4Protocol;
+use crate::mutex::Mutex;
 use crate::slice::Sliceable;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::mem::size_of;
 
 // TCP header per RFC 9293 §3.1, layered over IpV4Packet (which itself
@@ -110,6 +117,187 @@ pub fn tcp_segment_checksum(
     g.feed(&[0x00, 0x06]);
     g.feed(&(segment.len() as u16).to_be_bytes());
     g.checksum()
+}
+
+// Subset of RFC 9293 §3.3.2 states actually traversed by a passive
+// (server) socket that doesn't initiate active close. Initial open
+// (SynSent) and active-close states (FinWait*, Closing, TimeWait) are
+// intentionally omitted — the server reaches the four-way close from
+// CloseWait/LastAck only.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TcpSocketState {
+    Listen,
+    SynReceived,
+    Established,
+}
+
+struct TcpSocketInner {
+    state: TcpSocketState,
+    peer_mac: EthernetAddr,
+    peer_ip: IpV4Addr,
+    peer_port: u16,
+    my_next_seq: u32,
+}
+
+pub struct TcpSocket {
+    listen_port: u16,
+    inner: Mutex<TcpSocketInner>,
+}
+
+impl TcpSocket {
+    pub const fn new_server(listen_port: u16) -> Self {
+        Self {
+            listen_port,
+            inner: Mutex::new(TcpSocketInner {
+                state: TcpSocketState::Listen,
+                peer_mac: EthernetAddr::zero(),
+                peer_ip: IpV4Addr::new([0, 0, 0, 0]),
+                peer_port: 0,
+                // RFC 9293 doesn't require any specific ISS; a fixed value
+                // is fine for our purposes since this isn't security-grade.
+                my_next_seq: 1234,
+            }),
+        }
+    }
+    pub fn state(&self) -> TcpSocketState {
+        self.inner.lock().state
+    }
+
+    /// Drive the state machine for one received frame
+    /// (Ethernet+IPv4+TCP+data). Returns the immediate reply frame, if
+    /// any (SYN+ACK on SYN, ACK on data, FIN+ACK on FIN, etc.).
+    pub fn handle_rx(
+        &self,
+        frame: &[u8],
+        our_mac: EthernetAddr,
+        our_ip: IpV4Addr,
+    ) -> Option<Vec<u8>> {
+        if frame.len() < size_of::<TcpPacket>() {
+            return None;
+        }
+        let in_tcp =
+            TcpPacket::copy_from_slice(&frame[..size_of::<TcpPacket>()])
+                .ok()?;
+        if in_tcp.dst_port() != self.listen_port {
+            return None;
+        }
+
+        let tcp_total = in_tcp.ip.total_length()
+            - (size_of::<IpV4Packet>() - size_of::<EthernetHeader>());
+        let header_len = in_tcp.header_len_bytes();
+        if header_len < 20 || tcp_total < header_len {
+            return None;
+        }
+
+        let mut inner = self.inner.lock();
+        let prev_state = inner.state;
+        let mut seq_to_ack = in_tcp.seq_num();
+        let seq = inner.my_next_seq;
+
+        match prev_state {
+            TcpSocketState::Listen => {
+                if !in_tcp.is_syn() {
+                    return None;
+                }
+                // SYN consumes one seq-space slot.
+                seq_to_ack = seq_to_ack.wrapping_add(1);
+                inner.peer_mac = in_tcp.ip.eth.src();
+                inner.peer_ip = in_tcp.ip.src();
+                inner.peer_port = in_tcp.src_port();
+                inner.my_next_seq = seq.wrapping_add(1);
+                inner.state = TcpSocketState::SynReceived;
+            }
+            TcpSocketState::SynReceived => {
+                if !in_tcp.is_ack() || in_tcp.ack_num() != inner.my_next_seq {
+                    return None;
+                }
+                inner.state = TcpSocketState::Established;
+                return None;
+            }
+            TcpSocketState::Established => {
+                // Data transfer and the passive close are added in the
+                // next commit; for now an established socket has nothing
+                // further to reply to here.
+                return None;
+            }
+        }
+
+        let peer_mac = inner.peer_mac;
+        let peer_ip = inner.peer_ip;
+        let peer_port = inner.peer_port;
+        drop(inner);
+
+        Some(build_segment(
+            our_mac,
+            peer_mac,
+            our_ip,
+            peer_ip,
+            self.listen_port,
+            peer_port,
+            seq,
+            Some(seq_to_ack),
+            true,
+            false,
+            &[],
+        ))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_segment(
+    our_mac: EthernetAddr,
+    peer_mac: EthernetAddr,
+    our_ip: IpV4Addr,
+    peer_ip: IpV4Addr,
+    src_port: u16,
+    dst_port: u16,
+    seq: u32,
+    ack_seq: Option<u32>,
+    syn: bool,
+    fin: bool,
+    data: &[u8],
+) -> Vec<u8> {
+    let total_frame_len = size_of::<TcpPacket>() + data.len();
+    let mut bytes = vec![0u8; total_frame_len];
+
+    let eth = EthernetHeader::new(peer_mac, our_mac, EthernetType::ip_v4());
+    let mut tcp = TcpPacket {
+        ip: IpV4Packet::new(
+            eth,
+            peer_ip,
+            our_ip,
+            IpV4Protocol::tcp(),
+            20 + data.len(),
+        ),
+        ..TcpPacket::default()
+    };
+    tcp.set_src_port(src_port);
+    tcp.set_dst_port(dst_port);
+    tcp.set_seq_num(seq);
+    tcp.set_window(0xFFFF);
+    tcp.set_header_len_nibble(5);
+    if let Some(a) = ack_seq {
+        tcp.set_ack();
+        tcp.set_ack_num(a);
+    }
+    if syn {
+        tcp.set_syn();
+    }
+    if fin {
+        tcp.set_fin();
+    }
+    tcp.ip.recompute_checksum();
+
+    bytes[..size_of::<TcpPacket>()].copy_from_slice(tcp.as_slice());
+    bytes[size_of::<TcpPacket>()..].copy_from_slice(data);
+
+    let segment_off = size_of::<IpV4Packet>();
+    let csum = tcp_segment_checksum(&bytes[segment_off..], our_ip, peer_ip);
+    let csum_off_in_tcp = 16; // offset of csum within the TCP header
+    bytes[segment_off + csum_off_in_tcp..segment_off + csum_off_in_tcp + 2]
+        .copy_from_slice(&csum.bytes());
+
+    bytes
 }
 
 #[cfg(test)]

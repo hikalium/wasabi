@@ -42,6 +42,9 @@ impl IpV4Protocol {
     pub const fn icmp() -> Self {
         Self(1)
     }
+    pub const fn tcp() -> Self {
+        Self(6)
+    }
 }
 
 #[repr(packed)]
