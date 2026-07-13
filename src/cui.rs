@@ -541,6 +541,7 @@ async fn demo_button_task() -> Result<()> {
         128,
         32,
         0xc6c6c6,
+        false,
     );
     Ok(())
 }
