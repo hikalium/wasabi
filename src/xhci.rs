@@ -587,13 +587,35 @@ impl ScratchpadBuffers {
     }
 }
 
+#[derive(Debug)]
+pub enum EndpointState {
+    Disabled,
+    Running,
+    Halted,
+    Stopped,
+    Error,
+    Invalid(u32),
+}
+impl From<u32> for EndpointState {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => Self::Disabled,
+            1 => Self::Running,
+            2 => Self::Halted,
+            3 => Self::Stopped,
+            4 => Self::Error,
+            e => Self::Invalid(e),
+        }
+    }
+}
+
 #[repr(C, align(32))]
-#[derive(Default, Debug)]
-struct EndpointContext {
-    data: [u32; 2],
+#[derive(Debug, Default, Clone)]
+pub struct EndpointContext {
+    data: [Volatile<u32>; 2],
     tr_dequeue_ptr: Volatile<u64>,
-    average_trb_length: u16,
-    max_esit_payload_low: u16,
+    average_trb_length: Volatile<u16>,
+    max_esit_payload_low: Volatile<u16>,
     _reserved: [u32; 3],
 }
 const _: () = assert!(size_of::<EndpointContext>() == 0x20);
@@ -609,9 +631,9 @@ impl EndpointContext {
         ep.set_ep_type(EndpointType::Control)?;
         ep.set_dequeue_cycle_state(true)?;
         ep.set_error_count(3)?;
-        ep.set_max_packet_size(max_packet_size);
+        ep.set_max_packet_size(max_packet_size)?;
         ep.set_ring_dequeue_pointer(tr_dequeue_ptr)?;
-        ep.average_trb_length = 8;
+        ep.average_trb_length.write(8);
         // 6.2.3: Software shall set Average TRB Length to ‘8’
         // for control endpoints.
         Ok(ep)
@@ -619,19 +641,29 @@ impl EndpointContext {
     fn set_ring_dequeue_pointer(&mut self, tr_dequeue_ptr: u64) -> Result<()> {
         self.tr_dequeue_ptr.write_bits(4, 60, tr_dequeue_ptr >> 4)
     }
-    fn set_max_packet_size(&mut self, max_packet_size: u16) {
-        let max_packet_size = max_packet_size as u32;
-        self.data[1] &= !(0xffff << 16);
-        self.data[1] |= max_packet_size << 16;
+    pub fn max_packet_size(&self) -> u32 {
+        extract_bits(self.data[1].read(), 16, 16)
+    }
+    fn set_max_packet_size(&mut self, max_packet_size: u16) -> Result<()> {
+        self.data[1].write_bits(16, 16, max_packet_size as u32)
+    }
+    pub fn max_esit_payload(&self) -> usize {
+        (self.max_esit_payload_low.read() as usize)
+            | (self.data[0].read_bits(24, 8) as usize)
     }
     fn set_error_count(&mut self, error_count: u32) -> Result<()> {
         if error_count & !0b11 == 0 {
-            self.data[1] &= !(0b11 << 1);
-            self.data[1] |= error_count << 1;
+            let mut d = self.data[1].read();
+            d &= !(0b11 << 1);
+            d |= error_count << 1;
+            self.data[1].write(d);
             Ok(())
         } else {
             Err("invalid error_count")
         }
+    }
+    pub fn error_count(&self) -> u32 {
+        self.data[1].read_bits(1, 2)
     }
     fn set_dequeue_cycle_state(&mut self, dcs: bool) -> Result<()> {
         self.tr_dequeue_ptr.write_bits(0, 1, dcs.into())
@@ -639,12 +671,23 @@ impl EndpointContext {
     fn set_ep_type(&mut self, ep_type: EndpointType) -> Result<()> {
         let raw_ep_type = ep_type as u32;
         if raw_ep_type < 8 {
-            self.data[1] &= !(0b111 << 3);
-            self.data[1] |= raw_ep_type << 3;
+            let mut d = self.data[1].read();
+            d &= !(0b111 << 3);
+            d |= raw_ep_type << 3;
+            self.data[1].write(d);
             Ok(())
         } else {
             Err("Invalid ep_type")
         }
+    }
+    pub fn ep_type(&self) -> Result<EndpointType> {
+        self.data[1].read_bits(3, 3).try_into()
+    }
+    pub fn ep_state(&self) -> EndpointState {
+        EndpointState::from(extract_bits(self.data[0].read(), 0, 3))
+    }
+    pub fn tr_dequeue_ptr(&self) -> u64 {
+        self.tr_dequeue_ptr.read()
     }
 }
 
