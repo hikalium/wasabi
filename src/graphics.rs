@@ -3,8 +3,10 @@ use crate::font::lookup_font_16x16;
 use crate::font::lookup_font_8x16;
 use crate::mutex::Mutex;
 use crate::result::Result;
+use core::cmp::max;
 use core::cmp::min;
 use core::fmt;
+use core::ops::Range;
 
 pub trait Bitmap {
     fn bytes_per_pixel(&self) -> i64;
@@ -376,6 +378,63 @@ mod bmp_text_writer_tests {
             assert_eq!(writer.cursor_x, *x, "input: {s:?}");
             assert_eq!(writer.cursor_y, *y, "input: {s:?}");
         }
+    }
+}
+
+/// A non-empty i64 scalar range, for graphics operations
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct ScalarRange {
+    pub range: Range<i64>,
+}
+impl ScalarRange {
+    pub fn new(start: i64, end: i64) -> Option<Self> {
+        let range = start..end;
+        if range.is_empty() {
+            None
+        } else {
+            Some(Self { range })
+        }
+    }
+    pub fn intersection(&self, another: &Self) -> Option<Self> {
+        let range = max(self.range.start, another.range.start)
+            ..min(self.range.end, another.range.end);
+        Self::new(range.start, range.end)
+    }
+    pub fn start(&self) -> i64 {
+        self.range.start
+    }
+    pub fn end(&self) -> i64 {
+        self.range.end
+    }
+}
+#[cfg(test)]
+mod scalar_range_tests {
+    use super::ScalarRange;
+    #[test_case]
+    fn creates_range() {
+        let r = ScalarRange::new(0, 0);
+        assert!(r.is_none());
+        let r = ScalarRange::new(1, 0);
+        assert!(r.is_none());
+        let r = ScalarRange::new(0, 1).unwrap();
+        assert_eq!(r.start(), 0);
+        assert_eq!(r.end(), 1);
+    }
+    #[test_case]
+    fn intersections() {
+        let a = ScalarRange::new(2, 3).unwrap();
+        let b = ScalarRange::new(1, 2).unwrap();
+        let c = ScalarRange::new(3, 4).unwrap();
+        let d = ScalarRange::new(1, 4).unwrap();
+        let e = ScalarRange::new(0, 2).unwrap();
+        let f = ScalarRange::new(3, 5).unwrap();
+
+        assert!(a.intersection(&a).unwrap() == a);
+        assert!(a.intersection(&b).is_none());
+        assert!(a.intersection(&c).is_none());
+        assert!(a.intersection(&d).unwrap() == a);
+        assert!(a.intersection(&e).is_none());
+        assert!(a.intersection(&f).is_none());
     }
 }
 
