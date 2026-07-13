@@ -142,31 +142,80 @@ impl PciXhciDriver {
             })
         }
         if let Some(port) = connected_port {
-            info!("xhci: port {port} is connected");
-            let slot = Self::init_port(&xhc, port).await?;
-            info!("slot {slot} is assigned for port {port}");
-            let mut ctrl_ep_ring =
-                Self::address_device(&xhc, port, slot).await?;
-            info!("AddressDeviceCommand succeeded");
-            let device_descriptor =
-                usb::request_device_descriptor(&xhc, slot, &mut ctrl_ep_ring)
-                    .await?;
-            info!("Got a DeviceDescriptor: {device_descriptor:?}");
-            let vid = device_descriptor.vendor_id;
-            let pid = device_descriptor.product_id;
-            info!("xhci: device detected: vid:pid = {vid:#06X}:{pid:#06X}",);
-            if let Ok(e) = usb::request_string_descriptor_zero(
-                &xhc,
-                slot,
-                &mut ctrl_ep_ring,
-            )
-            .await
+            Self::handle_port_connect(&xhc, port).await?;
+        }
+        Ok(())
+    }
+    async fn handle_port_connect(
+        xhc: &Rc<Controller>,
+        port: usize,
+    ) -> Result<()> {
+        info!("xhci: port {port} is connected");
+        let slot = Self::init_port(xhc, port).await?;
+        info!("slot {slot} is assigned for port {port}");
+        let mut ctrl_ep_ring = Self::address_device(xhc, port, slot).await?;
+        info!("AddressDeviceCommand succeeded");
+        let device_descriptor =
+            usb::request_device_descriptor(xhc, slot, &mut ctrl_ep_ring)
+                .await?;
+        info!("Got a DeviceDescriptor: {device_descriptor:?}");
+        let vid = device_descriptor.vendor_id;
+        let pid = device_descriptor.product_id;
+        info!("xhci: device detected: vid:pid = {vid:#06X}:{pid:#06X}",);
+        if let Ok(e) =
+            usb::request_string_descriptor_zero(xhc, slot, &mut ctrl_ep_ring)
+                .await
+        {
+            let lang_id = u16::from_le_bytes([e[0], e[1]]);
+            let vendor = if device_descriptor.manufacturer_idx != 0 {
+                Some(
+                    usb::request_string_descriptor(
+                        xhc,
+                        slot,
+                        &mut ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.manufacturer_idx,
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+            let product = if device_descriptor.product_idx != 0 {
+                Some(
+                    usb::request_string_descriptor(
+                        xhc,
+                        slot,
+                        &mut ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.product_idx,
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+            let serial = if device_descriptor.serial_idx != 0 {
+                Some(
+                    usb::request_string_descriptor(
+                        xhc,
+                        slot,
+                        &mut ctrl_ep_ring,
+                        lang_id,
+                        device_descriptor.serial_idx,
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+            info!("xhci: v/p/s = {vendor:?}/{product:?}/{serial:?}");
             {
                 let lang_id = u16::from_le_bytes([e[0], e[1]]);
                 let vendor = if device_descriptor.manufacturer_idx != 0 {
                     Some(
                         usb::request_string_descriptor(
-                            &xhc,
+                            xhc,
                             slot,
                             &mut ctrl_ep_ring,
                             lang_id,
@@ -180,7 +229,7 @@ impl PciXhciDriver {
                 let product = if device_descriptor.product_idx != 0 {
                     Some(
                         usb::request_string_descriptor(
-                            &xhc,
+                            xhc,
                             slot,
                             &mut ctrl_ep_ring,
                             lang_id,
@@ -194,7 +243,7 @@ impl PciXhciDriver {
                 let serial = if device_descriptor.serial_idx != 0 {
                     Some(
                         usb::request_string_descriptor(
-                            &xhc,
+                            xhc,
                             slot,
                             &mut ctrl_ep_ring,
                             lang_id,
@@ -206,38 +255,33 @@ impl PciXhciDriver {
                     None
                 };
                 info!("xhci: v/p/s = {vendor:?}/{product:?}/{serial:?}");
-                let descriptors = usb::request_config_descriptor_and_rest(
-                    &xhc,
-                    slot,
-                    &mut ctrl_ep_ring,
-                )
-                .await?;
-                info!("xhci: {descriptors:?}");
-                if start_usb_keyboard(
-                    &xhc,
-                    slot,
-                    &mut ctrl_ep_ring,
-                    &descriptors,
-                )
-                .await
-                .is_ok()
-                {
-                    return Ok(());
-                }
-                if start_usb_tablet(
-                    &xhc,
-                    slot,
-                    &mut ctrl_ep_ring,
-                    &device_descriptor,
-                    &descriptors,
-                )
-                .await
-                .is_ok()
-                {
-                    return Ok(());
-                }
-                info!("xhci: No available drivers...");
             }
+            let descriptors = usb::request_config_descriptor_and_rest(
+                xhc,
+                slot,
+                &mut ctrl_ep_ring,
+            )
+            .await?;
+            info!("xhci: {descriptors:?}");
+            if start_usb_keyboard(xhc, slot, &mut ctrl_ep_ring, &descriptors)
+                .await
+                .is_ok()
+            {
+                return Ok(());
+            }
+            if start_usb_tablet(
+                xhc,
+                slot,
+                &mut ctrl_ep_ring,
+                &device_descriptor,
+                &descriptors,
+            )
+            .await
+            .is_ok()
+            {
+                return Ok(());
+            }
+            info!("xhci: No available drivers...");
         }
         Ok(())
     }
