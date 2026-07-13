@@ -8,6 +8,7 @@ use crate::graphics::Bitmap;
 use crate::hpet::set_global_hpet;
 use crate::hpet::Hpet;
 use crate::info;
+use crate::mutex::Mutex;
 use crate::pci::Pci;
 use crate::uefi::exit_from_efi_boot_services;
 use crate::uefi::EfiHandle;
@@ -23,6 +24,8 @@ use crate::x86::PML4;
 use alloc::boxed::Box;
 use core::cmp::max;
 
+pub static EFI_MEMORY_MAP: Mutex<Option<MemoryMapHolder>> = Mutex::new(None);
+
 pub fn init_basic_runtime(
     image_handle: EfiHandle,
     efi_system_table: &EfiSystemTable,
@@ -34,6 +37,7 @@ pub fn init_basic_runtime(
         &mut memory_map,
     );
     ALLOCATOR.init_with_mmap(&memory_map);
+    *EFI_MEMORY_MAP.lock() = Some(memory_map.clone());
     memory_map
 }
 

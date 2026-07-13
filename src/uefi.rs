@@ -107,6 +107,7 @@ impl fmt::Debug for EfiMemoryDescriptor {
 
 const MEMORY_MAP_BUFFER_SIZE: usize = 0x8000;
 
+#[derive(Clone)]
 pub struct MemoryMapHolder {
     memory_map_buffer: [u8; MEMORY_MAP_BUFFER_SIZE],
     memory_map_size: usize,
