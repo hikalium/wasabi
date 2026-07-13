@@ -208,14 +208,22 @@ pub fn draw_button<T: Bitmap>(
     w: i64,
     h: i64,
     fgc: u32,
+    is_pressed: bool,
 ) -> Result<()> {
     fill_rect(buf, fgc, left, top, w, h)?;
     let right = left + w - 1;
     let bottom = top + h - 1;
-    draw_line(buf, 0xffffff, left, top, right, top)?;
-    draw_line(buf, 0xffffff, left, top, left, bottom)?;
-    draw_line(buf, 0x000000, right, bottom, right, top)?;
-    draw_line(buf, 0x000000, right, bottom, left, bottom)?;
+    draw_line(buf, 0xffffff * !is_pressed as u32, left, top, right, top)?;
+    draw_line(buf, 0xffffff * !is_pressed as u32, left, top, left, bottom)?;
+    draw_line(buf, 0xffffff * is_pressed as u32, right, bottom, right, top)?;
+    draw_line(
+        buf,
+        0xffffff * is_pressed as u32,
+        right,
+        bottom,
+        left,
+        bottom,
+    )?;
     Ok(())
 }
 
