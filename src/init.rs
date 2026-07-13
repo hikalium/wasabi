@@ -1,6 +1,7 @@
 extern crate alloc;
 
 use crate::acpi::AcpiRsdpStruct;
+use crate::acpi::RebootParams;
 use crate::allocator::ALLOCATOR;
 use crate::graphics::draw_test_pattern;
 use crate::graphics::fill_rect;
@@ -17,6 +18,7 @@ use crate::uefi::EfiMemoryType::*;
 use crate::uefi::EfiSystemTable;
 use crate::uefi::MemoryMapHolder;
 use crate::uefi::VramBufferInfo;
+use crate::warn;
 use crate::x86::write_cr3;
 use crate::x86::PageAttr;
 use crate::x86::PAGE_SIZE;
@@ -107,5 +109,24 @@ pub fn init_pci(acpi: &AcpiRsdpStruct) {
         }
         let pci = Pci::new(mcfg);
         pci.probe_devices();
+    }
+}
+
+pub static REBOOT_PARAMS: Mutex<Option<RebootParams>> = Mutex::new(None);
+
+pub fn init_acpi(acpi: &AcpiRsdpStruct) {
+    if let Some(fadt) = acpi.fadt() {
+        info!("FADT found: {fadt:?}");
+        match fadt.reset_params() {
+            Ok(params) => {
+                info!("RESET_PARAMS={params:?}");
+                (*REBOOT_PARAMS.lock()) = Some(params)
+            }
+            Err(e) => {
+                warn!("Failed to get reset params: {e:?}")
+            }
+        }
+    } else {
+        info!("FADT not found");
     }
 }

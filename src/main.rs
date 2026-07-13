@@ -10,6 +10,7 @@ use wasabi::executor::sleep;
 use wasabi::executor::spawn_global;
 use wasabi::executor::start_global_executor;
 use wasabi::info;
+use wasabi::init::init_acpi;
 use wasabi::init::init_allocator;
 use wasabi::init::init_basic_runtime;
 use wasabi::init::init_display;
@@ -48,6 +49,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     init_display(&mut vram);
     set_global_vram(vram);
     let acpi = efi_system_table.acpi_table().expect("ACPI table not found");
+    init_acpi(acpi);
 
     let memory_map = init_basic_runtime(image_handle, efi_system_table);
     info!("Hello, Non-UEFI world!");
@@ -56,6 +58,7 @@ fn efi_main(image_handle: EfiHandle, efi_system_table: &EfiSystemTable) {
     init_paging(&memory_map);
     init_hpet(acpi);
     init_pci(acpi);
+
     let serial_task = async {
         let sp = SerialPort::default();
         if let Err(e) = sp.loopback_test() {
