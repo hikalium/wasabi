@@ -1,6 +1,8 @@
 extern crate alloc;
 
 use crate::checksum::InternetChecksum;
+use crate::checksum::InternetChecksumGenerator;
+use crate::ip::IpV4Addr;
 use crate::ip::IpV4Packet;
 use crate::slice::Sliceable;
 use core::mem::size_of;
@@ -90,9 +92,30 @@ impl TcpPacket {
     }
 }
 
+/// Internet checksum over the TCP segment with the IPv4 pseudo-header
+/// prepended, per RFC 9293 §3.1. `segment` is the bytes from the TCP
+/// header (including its own zeroed `csum` field) through the end of
+/// the TCP payload. The result, when written into the segment's `csum`
+/// field, makes a self-consistent packet (re-summing yields 0).
+pub fn tcp_segment_checksum(
+    segment: &[u8],
+    src: IpV4Addr,
+    dst: IpV4Addr,
+) -> InternetChecksum {
+    let mut g = InternetChecksumGenerator::new();
+    g.feed(segment);
+    g.feed(&src.bytes());
+    g.feed(&dst.bytes());
+    // 0x00 || protocol(=6 for TCP) || length-in-be-bytes.
+    g.feed(&[0x00, 0x06]);
+    g.feed(&(segment.len() as u16).to_be_bytes());
+    g.checksum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test_case]
     fn tcp_packet_header_size_is_20() {
@@ -125,5 +148,38 @@ mod tests {
         p.set_header_len_nibble(8);
         assert_eq!(p.header_len_bytes(), 32);
         assert!(p.is_syn());
+    }
+
+    #[test_case]
+    fn tcp_segment_checksum_self_check() {
+        // Build a SYN segment by hand with the csum field zeroed,
+        // compute the checksum, then verify the standard self-check:
+        // re-summing segment+pseudo-header with the csum field filled
+        // in yields 0x0000.
+        let src = IpV4Addr::new([10, 10, 10, 1]);
+        let dst = IpV4Addr::new([10, 10, 10, 83]);
+        let mut seg = vec![0u8; 20];
+        // src_port=12345, dst_port=23
+        seg[0..2].copy_from_slice(&12345u16.to_be_bytes());
+        seg[2..4].copy_from_slice(&23u16.to_be_bytes());
+        // seq=0xDEADBEEF, ack=0
+        seg[4..8].copy_from_slice(&0xDEADBEEFu32.to_be_bytes());
+        // Data Offset = 5 (=> 20 bytes), no flags except SYN.
+        seg[12] = 5 << 4;
+        seg[13] = 1 << 1; // SYN
+                          // Window = 0xFFFF.
+        seg[14..16].copy_from_slice(&0xFFFFu16.to_be_bytes());
+        // csum (16..18) = 0, urgent (18..20) = 0.
+
+        let csum = tcp_segment_checksum(&seg, src, dst);
+        seg[16..18].copy_from_slice(&csum.bytes());
+
+        let mut g = InternetChecksumGenerator::new();
+        g.feed(&seg);
+        g.feed(&src.bytes());
+        g.feed(&dst.bytes());
+        g.feed(&[0x00, 0x06]);
+        g.feed(&(seg.len() as u16).to_be_bytes());
+        assert_eq!(g.checksum(), InternetChecksum::default());
     }
 }
