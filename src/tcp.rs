@@ -531,6 +531,111 @@ mod tests {
         assert_eq!(sock.state(), TcpSocketState::Established);
     }
 
+    fn established_socket() -> (TcpSocket, u32) {
+        let sock = TcpSocket::new_server(23);
+        let syn = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5000,
+            None,
+            true,
+            false,
+            &[],
+        );
+        let synack = sock.handle_rx(&syn, OUR_MAC, OUR_IP).unwrap();
+        let our_seq_plus_1 = parse_reply(&synack).seq_num().wrapping_add(1);
+        let ack = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5001,
+            Some(our_seq_plus_1),
+            false,
+            false,
+            &[],
+        );
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        (sock, 5001)
+    }
+
+    #[test_case]
+    fn handle_rx_data_acks_and_buffers() {
+        let (sock, client_seq) = established_socket();
+        let data = b"hello";
+        let seg = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            client_seq,
+            Some(0),
+            false,
+            false,
+            data,
+        );
+        let reply = sock.handle_rx(&seg, OUR_MAC, OUR_IP).unwrap();
+        let r = parse_reply(&reply);
+        assert!(r.is_ack());
+        assert!(!r.is_syn() && !r.is_fin());
+        assert_eq!(r.ack_num(), client_seq.wrapping_add(data.len() as u32));
+        // rx_data was populated with the payload.
+        let mut got = Vec::new();
+        while let Some(b) = sock.pop_rx_byte() {
+            got.push(b);
+        }
+        assert_eq!(got, data);
+    }
+
+    #[test_case]
+    fn handle_rx_fin_to_lastack_then_close() {
+        let (sock, client_seq) = established_socket();
+        let fin = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            client_seq,
+            Some(0),
+            false,
+            true,
+            &[],
+        );
+        let reply = sock.handle_rx(&fin, OUR_MAC, OUR_IP).unwrap();
+        let r = parse_reply(&reply);
+        assert!(r.is_fin() && r.is_ack());
+        assert_eq!(r.ack_num(), client_seq.wrapping_add(1));
+        assert_eq!(sock.state(), TcpSocketState::LastAck);
+
+        // Client's final ACK closes us back to Listen.
+        let our_seq = r.seq_num().wrapping_add(1);
+        let ack = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            client_seq.wrapping_add(1),
+            Some(our_seq),
+            false,
+            false,
+            &[],
+        );
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP);
+        assert_eq!(sock.state(), TcpSocketState::Listen);
+    }
+
     #[test_case]
     fn tcp_segment_checksum_self_check() {
         // Build a SYN segment by hand with the csum field zeroed,
