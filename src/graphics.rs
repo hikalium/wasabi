@@ -1,6 +1,7 @@
 use crate::font::get_glyph_width;
 use crate::font::lookup_font_16x16;
 use crate::font::lookup_font_8x16;
+use crate::mutex::Mutex;
 use crate::result::Result;
 use core::cmp::min;
 use core::fmt;
@@ -210,15 +211,15 @@ enum EscapeState {
     Csi { param: u32 },
 }
 
-pub struct BitmapTextWriter<T> {
-    buf: T,
+pub struct BitmapTextWriter<'a, T> {
+    buf: &'a Mutex<T>,
     cursor_x: i64,
     cursor_y: i64,
     underline: bool,
     esc: EscapeState,
 }
-impl<T: Bitmap> BitmapTextWriter<T> {
-    pub fn new(buf: T) -> Self {
+impl<'a, T: Bitmap> BitmapTextWriter<'a, T> {
+    pub const fn new(buf: &'a Mutex<T>) -> Self {
         Self {
             buf,
             cursor_x: 0,
@@ -288,15 +289,12 @@ impl<T: Bitmap> BitmapTextWriter<T> {
             }
         }
     }
-    pub fn buf(&self) -> &T {
-        &self.buf
-    }
-    pub fn buf_mut(&mut self) -> &mut T {
-        &mut self.buf
-    }
     fn adjust_cursor_pos_pre(&mut self, next_glyph_width: i64) -> bool {
         let mut adjusted = false;
-        let (w, h) = (self.buf.width(), self.buf.height());
+        let (w, h) = {
+            let bmp = self.buf.lock();
+            (bmp.width(), bmp.height())
+        };
         if self.cursor_x + next_glyph_width > w {
             self.cursor_x = 0;
             self.cursor_y += 16;
@@ -310,25 +308,29 @@ impl<T: Bitmap> BitmapTextWriter<T> {
     }
     fn adjust_cursor_pos(&mut self) -> bool {
         let mut adjusted = false;
+        let (w, h) = {
+            let bmp = self.buf.lock();
+            (bmp.width(), bmp.height())
+        };
         if self.cursor_x < 0 {
             self.cursor_x = 0;
             adjusted = true;
         }
-        if self.cursor_x >= self.buf.width() {
+        if self.cursor_x >= w {
             self.cursor_x = 0;
             self.cursor_y += 16;
             adjusted = true;
         }
-        if self.cursor_y >= self.buf.height() {
+        if self.cursor_y >= h {
             self.cursor_y = 0;
             adjusted = true;
         }
         adjusted
     }
 }
-impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
+impl<'a, T: Bitmap> fmt::Write for BitmapTextWriter<'a, T> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        let w = self.buf.width();
+        let w = self.buf.lock().width();
         for c in s.chars() {
             // Escape sequences change how later chars are drawn, so
             // they must be taken out before c could be looked up as a
@@ -340,14 +342,21 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
                 self.cursor_y += 16;
                 self.cursor_x = 0;
                 self.adjust_cursor_pos();
-                fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16)
-                    .or(Err(fmt::Error))?;
+                fill_rect(
+                    &mut *self.buf.lock(),
+                    0x000000,
+                    0,
+                    self.cursor_y,
+                    w,
+                    16,
+                )
+                .or(Err(fmt::Error))?;
                 continue;
             } else if c == '\x08' {
                 self.cursor_x -= 8;
                 self.adjust_cursor_pos();
                 fill_rect(
-                    &mut self.buf,
+                    &mut *self.buf.lock(),
                     0x000000,
                     self.cursor_x,
                     self.cursor_y,
@@ -359,12 +368,19 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
             }
             let gw = get_glyph_width(c);
             if self.adjust_cursor_pos_pre(gw) {
-                fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16)
-                    .or(Err(fmt::Error))?;
+                fill_rect(
+                    &mut *self.buf.lock(),
+                    0x000000,
+                    0,
+                    self.cursor_y,
+                    w,
+                    16,
+                )
+                .or(Err(fmt::Error))?;
             }
 
             let dx = draw_font_fg(
-                &mut self.buf,
+                &mut *self.buf.lock(),
                 self.cursor_x,
                 self.cursor_y,
                 0xffffff,
@@ -374,7 +390,7 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
             // Backspace's 8x16 erase wipes it along with the glyph.
             if self.underline && dx > 0 {
                 fill_rect(
-                    &mut self.buf,
+                    &mut *self.buf.lock(),
                     0xffffff,
                     self.cursor_x,
                     self.cursor_y + 15,
@@ -385,8 +401,15 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
             }
             self.cursor_x += dx;
             if self.adjust_cursor_pos() {
-                fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16)
-                    .or(Err(fmt::Error))?;
+                fill_rect(
+                    &mut *self.buf.lock(),
+                    0x000000,
+                    0,
+                    self.cursor_y,
+                    w,
+                    16,
+                )
+                .or(Err(fmt::Error))?;
             }
         }
         Ok(())
@@ -497,8 +520,8 @@ mod bmp_text_writer_tests {
 
     #[test_case]
     fn create_writer() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let writer = BitmapTextWriter::new(bmp);
+        let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+        let writer = BitmapTextWriter::new(&bmp);
         assert_eq!(writer.cursor_x, 0);
         assert_eq!(writer.cursor_y, 0);
     }
@@ -521,8 +544,8 @@ mod bmp_text_writer_tests {
             ("あああ", 16, 0),
         ];
         for (s, x, y) in cases {
-            let bmp = BitmapBuffer::new(24, 32, 24);
-            let mut writer = BitmapTextWriter::new(bmp);
+            let bmp = Mutex::new(BitmapBuffer::new(24, 32, 24));
+            let mut writer = BitmapTextWriter::new(&bmp);
             write!(writer, "{s}").unwrap();
             assert_eq!(writer.cursor_x, *x, "input: {s:?}");
             assert_eq!(writer.cursor_y, *y, "input: {s:?}");
@@ -530,13 +553,14 @@ mod bmp_text_writer_tests {
     }
 
     // One text line, wide enough that nothing below wraps.
-    fn new_line_bmp() -> BitmapBuffer {
-        BitmapBuffer::new(64, 16, 64)
+    fn new_line_bmp() -> Mutex<BitmapBuffer> {
+        Mutex::new(BitmapBuffer::new(64, 16, 64))
     }
 
     #[test_case]
     fn sgr_survives_split_write_str_calls() {
-        let mut writer = BitmapTextWriter::new(new_line_bmp());
+        let bmp = new_line_bmp();
+        let mut writer = BitmapTextWriter::new(&bmp);
         for piece in ["\x1b", "[4", "mA"] {
             writer.write_str(piece).unwrap();
         }
@@ -551,48 +575,56 @@ mod bmp_text_writer_tests {
 
     #[test_case]
     fn sgr_whole_and_split_input_produce_identical_pixels() {
-        let mut whole = BitmapTextWriter::new(new_line_bmp());
-        whole.write_str("\x1b[4m日\x1b[24mA").unwrap();
-        let mut split = BitmapTextWriter::new(new_line_bmp());
+        let whole = new_line_bmp();
+        BitmapTextWriter::new(&whole)
+            .write_str("\x1b[4m日\x1b[24mA")
+            .unwrap();
+        let split = new_line_bmp();
+        let mut writer = BitmapTextWriter::new(&split);
         for piece in ["\x1b", "[", "4", "m日", "\x1b[2", "4", "mA"] {
-            split.write_str(piece).unwrap();
+            writer.write_str(piece).unwrap();
         }
-        assert_eq!(whole.buf, split.buf);
+        assert_eq!(*whole.lock(), *split.lock());
     }
 
     #[test_case]
     fn underline_spans_ascii_and_wide_glyphs() {
-        let mut drawn = BitmapTextWriter::new(new_line_bmp());
-        drawn.write_str("\x1b[4mA日").unwrap();
+        let drawn = new_line_bmp();
+        BitmapTextWriter::new(&drawn)
+            .write_str("\x1b[4mA日")
+            .unwrap();
         // Same as the plain text plus a line under its 8 + 16 pixels.
-        let mut expected = BitmapTextWriter::new(new_line_bmp());
-        expected.write_str("A日").unwrap();
-        fill_rect(&mut expected.buf, 0xffffff, 0, 15, 24, 1).unwrap();
-        assert_eq!(drawn.buf, expected.buf);
+        let expected = new_line_bmp();
+        BitmapTextWriter::new(&expected).write_str("A日").unwrap();
+        fill_rect(&mut *expected.lock(), 0xffffff, 0, 15, 24, 1).unwrap();
+        assert_eq!(*drawn.lock(), *expected.lock());
     }
 
     #[test_case]
     fn two_backspaces_erase_wide_glyph_and_underline() {
-        let mut writer = BitmapTextWriter::new(new_line_bmp());
+        let bmp = new_line_bmp();
+        let mut writer = BitmapTextWriter::new(&bmp);
         writer.write_str("\x1b[4m日\x08\x08").unwrap();
         assert_eq!(writer.cursor_x, 0);
-        assert_eq!(writer.buf, new_line_bmp());
+        assert_eq!(*bmp.lock(), *new_line_bmp().lock());
     }
 
     #[test_case]
     fn unsupported_csi_does_not_draw_parameter_text() {
-        let mut writer = BitmapTextWriter::new(new_line_bmp());
+        let bmp = new_line_bmp();
+        let mut writer = BitmapTextWriter::new(&bmp);
         writer.write_str("\x1b[2J").unwrap();
         assert_eq!(writer.cursor_x, 0);
-        assert_eq!(writer.buf, new_line_bmp());
+        assert_eq!(*bmp.lock(), *new_line_bmp().lock());
     }
 
     #[test_case]
     fn sgr_does_not_advance_cursor() {
-        let mut writer = BitmapTextWriter::new(new_line_bmp());
+        let bmp = new_line_bmp();
+        let mut writer = BitmapTextWriter::new(&bmp);
         writer.write_str("\x1b[4m\x1b[0;24m").unwrap();
         assert_eq!(writer.cursor_x, 0);
         assert_eq!(writer.cursor_y, 0);
-        assert_eq!(writer.buf, new_line_bmp());
+        assert_eq!(*bmp.lock(), *new_line_bmp().lock());
     }
 }
