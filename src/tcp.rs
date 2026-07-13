@@ -10,6 +10,7 @@ use crate::ip::IpV4Packet;
 use crate::ip::IpV4Protocol;
 use crate::mutex::Mutex;
 use crate::slice::Sliceable;
+use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
@@ -129,6 +130,7 @@ pub enum TcpSocketState {
     Listen,
     SynReceived,
     Established,
+    LastAck,
 }
 
 struct TcpSocketInner {
@@ -137,6 +139,9 @@ struct TcpSocketInner {
     peer_ip: IpV4Addr,
     peer_port: u16,
     my_next_seq: u32,
+    last_seq_to_ack: u32,
+    rx_data: VecDeque<u8>,
+    tx_data: VecDeque<u8>,
 }
 
 pub struct TcpSocket {
@@ -156,11 +161,20 @@ impl TcpSocket {
                 // RFC 9293 doesn't require any specific ISS; a fixed value
                 // is fine for our purposes since this isn't security-grade.
                 my_next_seq: 1234,
+                last_seq_to_ack: 0,
+                rx_data: VecDeque::new(),
+                tx_data: VecDeque::new(),
             }),
         }
     }
     pub fn state(&self) -> TcpSocketState {
         self.inner.lock().state
+    }
+    pub fn pop_rx_byte(&self) -> Option<u8> {
+        self.inner.lock().rx_data.pop_front()
+    }
+    pub fn push_tx_bytes(&self, data: &[u8]) {
+        self.inner.lock().tx_data.extend(data.iter().copied());
     }
 
     /// Drive the state machine for one received frame
@@ -188,11 +202,21 @@ impl TcpSocket {
         if header_len < 20 || tcp_total < header_len {
             return None;
         }
+        let data_start = size_of::<IpV4Packet>() + header_len;
+        let data_end = size_of::<IpV4Packet>()
+            + tcp_total.min(frame.len() - size_of::<IpV4Packet>());
+        let data: &[u8] = if data_end > data_start {
+            &frame[data_start..data_end]
+        } else {
+            &[]
+        };
 
         let mut inner = self.inner.lock();
         let prev_state = inner.state;
         let mut seq_to_ack = in_tcp.seq_num();
         let seq = inner.my_next_seq;
+        let mut send_syn = false;
+        let mut send_fin = false;
 
         match prev_state {
             TcpSocketState::Listen => {
@@ -201,6 +225,7 @@ impl TcpSocket {
                 }
                 // SYN consumes one seq-space slot.
                 seq_to_ack = seq_to_ack.wrapping_add(1);
+                send_syn = true;
                 inner.peer_mac = in_tcp.ip.eth.src();
                 inner.peer_ip = in_tcp.ip.src();
                 inner.peer_port = in_tcp.src_port();
@@ -212,16 +237,43 @@ impl TcpSocket {
                     return None;
                 }
                 inner.state = TcpSocketState::Established;
+                inner.last_seq_to_ack = in_tcp.seq_num();
                 return None;
             }
             TcpSocketState::Established => {
-                // Data transfer and the passive close are added in the
-                // next commit; for now an established socket has nothing
-                // further to reply to here.
+                if !data.is_empty() {
+                    inner.rx_data.extend(data.iter().copied());
+                    // M2 echo: queue the same bytes back. Removed in M3.
+                    inner.tx_data.extend(data.iter().copied());
+                    seq_to_ack = seq_to_ack.wrapping_add(data.len() as u32);
+                }
+                if in_tcp.is_fin() {
+                    seq_to_ack = seq_to_ack.wrapping_add(1);
+                    send_fin = true;
+                    inner.state = TcpSocketState::LastAck;
+                    inner.my_next_seq = seq.wrapping_add(1);
+                }
+                if data.is_empty() && !in_tcp.is_fin() {
+                    // Bare ACK from peer (e.g., ACKing our data) — nothing
+                    // to send back.
+                    return None;
+                }
+            }
+            TcpSocketState::LastAck => {
+                if in_tcp.is_ack() {
+                    inner.state = TcpSocketState::Listen;
+                    inner.peer_mac = EthernetAddr::zero();
+                    inner.peer_ip = IpV4Addr::new([0, 0, 0, 0]);
+                    inner.peer_port = 0;
+                    inner.last_seq_to_ack = 0;
+                    inner.rx_data.clear();
+                    inner.tx_data.clear();
+                }
                 return None;
             }
         }
 
+        inner.last_seq_to_ack = seq_to_ack;
         let peer_mac = inner.peer_mac;
         let peer_ip = inner.peer_ip;
         let peer_port = inner.peer_port;
@@ -236,9 +288,46 @@ impl TcpSocket {
             peer_port,
             seq,
             Some(seq_to_ack),
-            true,
-            false,
+            send_syn,
+            send_fin,
             &[],
+        ))
+    }
+
+    /// Drain queued tx bytes into a single data segment. Returns
+    /// `None` when nothing to send or when not in Established.
+    pub fn poll_tx(
+        &self,
+        our_mac: EthernetAddr,
+        our_ip: IpV4Addr,
+    ) -> Option<Vec<u8>> {
+        let mut inner = self.inner.lock();
+        if inner.state != TcpSocketState::Established
+            || inner.tx_data.is_empty()
+        {
+            return None;
+        }
+        let data: Vec<u8> = inner.tx_data.drain(..).collect();
+        let seq = inner.my_next_seq;
+        let seq_to_ack = inner.last_seq_to_ack;
+        inner.my_next_seq = seq.wrapping_add(data.len() as u32);
+        let peer_mac = inner.peer_mac;
+        let peer_ip = inner.peer_ip;
+        let peer_port = inner.peer_port;
+        drop(inner);
+
+        Some(build_segment(
+            our_mac,
+            peer_mac,
+            our_ip,
+            peer_ip,
+            self.listen_port,
+            peer_port,
+            seq,
+            Some(seq_to_ack),
+            false,
+            false,
+            &data,
         ))
     }
 }
