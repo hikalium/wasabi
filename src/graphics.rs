@@ -310,75 +310,28 @@ mod bmp_text_writer_tests {
     }
 
     #[test_case]
-    fn write_char_w8() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "A").unwrap();
-        assert_eq!(writer.cursor_x, 8);
-        assert_eq!(writer.cursor_y, 0);
-    }
-    #[test_case]
-    fn write_char_w16() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "あ").unwrap();
-        assert_eq!(writer.cursor_x, 16);
-        assert_eq!(writer.cursor_y, 0);
-    }
-    #[test_case]
-    fn write_char_w16x2() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "ああ").unwrap();
-        assert_eq!(writer.cursor_x, 16);
-        assert_eq!(writer.cursor_y, 16);
-    }
-    #[test_case]
-    fn write_char_w8x3() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "AAA").unwrap();
-        assert_eq!(writer.cursor_x, 0);
-        assert_eq!(writer.cursor_y, 16);
-    }
-    #[test_case]
-    fn write_char_w8x4() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "AAAA").unwrap();
-        assert_eq!(writer.cursor_x, 8);
-        assert_eq!(writer.cursor_y, 16);
-    }
-    #[test_case]
-    fn write_char_w8_w16() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "Aあ").unwrap();
-        assert_eq!(writer.cursor_x, 0);
-        assert_eq!(writer.cursor_y, 16);
-    }
-    #[test_case]
-    fn write_char_w16_w8() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "あA").unwrap();
-        assert_eq!(writer.cursor_x, 0);
-        assert_eq!(writer.cursor_y, 16);
-    }
-    #[test_case]
-    fn write_char_w8x6() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "AAAAAA").unwrap();
-        assert_eq!(writer.cursor_x, 0);
-        assert_eq!(writer.cursor_y, 0);
-    }
-    #[test_case]
-    fn write_char_w16x3() {
-        let bmp = BitmapBuffer::new(24, 32, 24);
-        let mut writer = BitmapTextWriter::new(bmp);
-        write!(writer, "あああ").unwrap();
-        assert_eq!(writer.cursor_x, 16);
-        assert_eq!(writer.cursor_y, 0);
+    fn write_advances_cursor() {
+        // On a 24x32 bitmap: an ASCII glyph is 8px wide, a wide glyph
+        // is 16px, so 3 ASCII chars (or 24px worth) wrap to the next
+        // 16px-tall line, and 32px of height wraps back to the top.
+        // (input, expected cursor_x, expected cursor_y)
+        let cases: &[(&str, i64, i64)] = &[
+            ("A", 8, 0),
+            ("あ", 16, 0),
+            ("ああ", 16, 16), // wide-wide: the second one wraps
+            ("AAA", 0, 16),   // the third ASCII char wraps
+            ("AAAA", 8, 16),
+            ("Aあ", 0, 16), // 8 + 16 > 24: the wide glyph wraps
+            ("あA", 0, 16),
+            ("AAAAAA", 0, 0), // wraps twice: back to the top line
+            ("あああ", 16, 0),
+        ];
+        for (s, x, y) in cases {
+            let bmp = BitmapBuffer::new(24, 32, 24);
+            let mut writer = BitmapTextWriter::new(bmp);
+            write!(writer, "{s}").unwrap();
+            assert_eq!(writer.cursor_x, *x, "input: {s:?}");
+            assert_eq!(writer.cursor_y, *y, "input: {s:?}");
+        }
     }
 }
