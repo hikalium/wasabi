@@ -14,6 +14,13 @@ use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
+use core::time::Duration;
+
+// Fixed retransmission timeout. With no RTT estimation we just pick a
+// value comfortably above the typical interactive round-trip on a USB
+// link (single-digit milliseconds). Too low burns the link with
+// duplicates; too high makes a lost segment feel like a hang.
+const TCP_RTO: Duration = Duration::from_millis(500);
 
 // TCP header per RFC 9293 §3.1, layered over IpV4Packet (which itself
 // embeds the Ethernet header). Total prefix is 14 + 20 + 20 = 54 bytes
@@ -141,7 +148,12 @@ struct TcpSocketInner {
     my_next_seq: u32,
     last_seq_to_ack: u32,
     rx_data: VecDeque<u8>,
-    tx_data: VecDeque<u8>,
+    // `send_buffer[0..unacked_len]` are bytes that have been transmitted
+    // and are waiting for an ACK; `send_buffer[unacked_len..]` are queued
+    // for first transmission. ACKs drain bytes from the front.
+    send_buffer: VecDeque<u8>,
+    unacked_len: usize,
+    last_tx_at: Option<Duration>,
 }
 
 pub struct TcpSocket {
@@ -167,7 +179,9 @@ impl TcpSocket {
                 my_next_seq: 1234,
                 last_seq_to_ack: 0,
                 rx_data: VecDeque::new(),
-                tx_data: VecDeque::new(),
+                send_buffer: VecDeque::new(),
+                unacked_len: 0,
+                last_tx_at: None,
             }),
         }
     }
@@ -184,7 +198,7 @@ impl TcpSocket {
     pub fn push_tx_bytes(&self, data: &[u8]) {
         let mut inner = self.inner.lock();
         if inner.state == TcpSocketState::Established {
-            inner.tx_data.extend(data.iter().copied());
+            inner.send_buffer.extend(data.iter().copied());
         }
     }
 
@@ -252,6 +266,25 @@ impl TcpSocket {
                 return None;
             }
             TcpSocketState::Established => {
+                // Free any of our previously-sent bytes the peer has
+                // now ACKed. The wrapping subtraction handles seq-space
+                // wrap correctly: a stale or out-of-range ack_num
+                // produces a value larger than `unacked_len` and is
+                // ignored.
+                if in_tcp.is_ack() && inner.unacked_len > 0 {
+                    let first_unacked_seq = inner
+                        .my_next_seq
+                        .wrapping_sub(inner.unacked_len as u32);
+                    let acked = in_tcp.ack_num().wrapping_sub(first_unacked_seq)
+                        as usize;
+                    if acked > 0 && acked <= inner.unacked_len {
+                        inner.send_buffer.drain(..acked);
+                        inner.unacked_len -= acked;
+                        if inner.unacked_len == 0 {
+                            inner.last_tx_at = None;
+                        }
+                    }
+                }
                 if !data.is_empty() {
                     inner.rx_data.extend(data.iter().copied());
                     seq_to_ack = seq_to_ack.wrapping_add(data.len() as u32);
@@ -276,7 +309,9 @@ impl TcpSocket {
                     inner.peer_port = 0;
                     inner.last_seq_to_ack = 0;
                     inner.rx_data.clear();
-                    inner.tx_data.clear();
+                    inner.send_buffer.clear();
+                    inner.unacked_len = 0;
+                    inner.last_tx_at = None;
                 }
                 return None;
             }
@@ -303,23 +338,59 @@ impl TcpSocket {
         ))
     }
 
-    /// Drain queued tx bytes into a single data segment. Returns
-    /// `None` when nothing to send or when not in Established.
+    /// Periodic transmit pump. Returns at most one segment per call:
+    /// either a retransmit of the oldest unacked bytes (if RTO has
+    /// elapsed since they were last sent), or a fresh segment carrying
+    /// any newly queued bytes.
+    ///
+    /// `now` is the caller's monotonic clock — pulled from
+    /// `hpet::global_timestamp` in production, an arbitrary `Duration`
+    /// in unit tests.
     pub fn poll_tx(
         &self,
         our_mac: EthernetAddr,
         our_ip: IpV4Addr,
+        now: Duration,
     ) -> Option<Vec<u8>> {
         let mut inner = self.inner.lock();
-        if inner.state != TcpSocketState::Established
-            || inner.tx_data.is_empty()
-        {
+        if inner.state != TcpSocketState::Established {
             return None;
         }
-        let data: Vec<u8> = inner.tx_data.drain(..).collect();
-        let seq = inner.my_next_seq;
+
+        // Decide whether this tick retransmits or sends fresh data.
+        let need_retransmit = inner.unacked_len > 0
+            && inner
+                .last_tx_at
+                .map_or(true, |t| now.saturating_sub(t) >= TCP_RTO);
+        let has_fresh = inner.send_buffer.len() > inner.unacked_len;
+
+        let (data, seq) = if need_retransmit {
+            let bytes: Vec<u8> = inner
+                .send_buffer
+                .iter()
+                .take(inner.unacked_len)
+                .copied()
+                .collect();
+            let first_unacked_seq =
+                inner.my_next_seq.wrapping_sub(inner.unacked_len as u32);
+            (bytes, first_unacked_seq)
+        } else if has_fresh {
+            let bytes: Vec<u8> = inner
+                .send_buffer
+                .iter()
+                .skip(inner.unacked_len)
+                .copied()
+                .collect();
+            let seq = inner.my_next_seq;
+            inner.my_next_seq = seq.wrapping_add(bytes.len() as u32);
+            inner.unacked_len += bytes.len();
+            (bytes, seq)
+        } else {
+            return None;
+        };
+
+        inner.last_tx_at = Some(now);
         let seq_to_ack = inner.last_seq_to_ack;
-        inner.my_next_seq = seq.wrapping_add(data.len() as u32);
         let peer_mac = inner.peer_mac;
         let peer_ip = inner.peer_ip;
         let peer_port = inner.peer_port;
