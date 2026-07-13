@@ -809,6 +809,38 @@ mod tests {
     }
 
     #[test_case]
+    fn poll_tx_emits_keepalive_when_idle() {
+        let (sock, _) = established_socket();
+        // Right after connect, we're not yet "idle" — last_active_at
+        // was set during the handshake (Duration::ZERO).
+        // Inside KEEPALIVE_INTERVAL: nothing to send.
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(500))
+            .is_none());
+        // Past KEEPALIVE_INTERVAL: send a keepalive.
+        let seg = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(1500))
+            .unwrap();
+        let r = parse_reply(&seg);
+        assert!(r.is_ack());
+        assert!(!r.is_syn() && !r.is_fin());
+        // No data payload — segment is just the TCP header.
+        assert_eq!(seg.len(), size_of::<TcpPacket>());
+        // seq is SND.NXT - 1 (the "old byte" probe trick).
+        // After established_socket, my_next_seq is the original ISN+1
+        // from the SYN, with no data sent yet. So keepalive seq is
+        // my_next_seq - 1 = ISN.
+        // The exact ISN is internal, so check the relationship:
+        // a fresh push then poll_tx uses my_next_seq, which == seq + 1.
+        sock.push_tx_bytes(b"x");
+        let next = sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(1500))
+            .unwrap();
+        let r2 = parse_reply(&next);
+        assert_eq!(r2.seq_num(), r.seq_num().wrapping_add(1));
+    }
+
+    #[test_case]
     fn handle_rx_fin_to_lastack_then_close() {
         let (sock, client_seq) = established_socket();
         let fin = build_client_segment(
