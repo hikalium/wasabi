@@ -39,6 +39,7 @@ pub mod result;
 pub mod serial;
 pub mod slice;
 pub mod tablet;
+pub mod tcp;
 pub mod uefi;
 pub mod usb;
 pub mod volatile;
