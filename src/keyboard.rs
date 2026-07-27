@@ -7,7 +7,6 @@ use crate::xhci::CommandRing;
 use crate::xhci::Controller;
 use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
-use alloc::vec::Vec;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyEvent {
@@ -46,7 +45,7 @@ pub async fn start_usb_keyboard(
     xhc: &Rc<Controller>,
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
-    descriptors: &Vec<UsbDescriptor>,
+    descriptors: &[UsbDescriptor],
 ) -> Result<()> {
     let (config_desc, interface_desc, _) =
         pick_interface_with_triple(descriptors, (3, 1, 1))
