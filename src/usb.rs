@@ -367,3 +367,23 @@ pub struct HidDescriptor {
 }
 const _: () = assert!(size_of::<HidDescriptor>() == 9);
 unsafe impl Sliceable for HidDescriptor {}
+
+pub trait UsbDeviceDriver {
+    fn is_compatible(
+        &self,
+        _descriptors: &[UsbDescriptor],
+        _device_descriptor: &UsbDeviceDescriptor,
+    ) -> bool {
+        false
+    }
+    fn start(
+        &self,
+        _xhc: Rc<Controller>,
+        _slot: u8,
+        _ctrl_ep_ring: CommandRing,
+        _descriptors: Vec<UsbDescriptor>,
+        _device_descriptor: &UsbDeviceDescriptor,
+    ) {
+        unimplemented!()
+    }
+}
