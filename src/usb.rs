@@ -299,7 +299,7 @@ pub async fn request_hid_report(
 }
 
 pub fn pick_interface_with_triple(
-    descriptors: &Vec<UsbDescriptor>,
+    descriptors: &[UsbDescriptor],
     triple: (u8, u8, u8),
 ) -> Option<(ConfigDescriptor, InterfaceDescriptor, Vec<UsbDescriptor>)> {
     let mut config: Option<ConfigDescriptor> = None;
