@@ -285,7 +285,7 @@ pub async fn start_usb_tablet(
     slot: u8,
     ctrl_ep_ring: &mut CommandRing,
     device_descriptor: &UsbDeviceDescriptor,
-    descriptors: &Vec<UsbDescriptor>,
+    descriptors: &[UsbDescriptor],
 ) -> Result<()> {
     // vid:pid = 0x0627:0x0001
     if device_descriptor.device_class != 0
