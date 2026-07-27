@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::executor::spawn_global;
 use crate::info;
 use crate::result::Result;
 use crate::usb::*;
@@ -7,6 +8,7 @@ use crate::xhci::CommandRing;
 use crate::xhci::Controller;
 use alloc::collections::BTreeSet;
 use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyEvent {
@@ -38,6 +40,30 @@ impl KeyEvent {
             KeyEvent::Enter => Some('\n'),
             _ => None,
         }
+    }
+}
+
+pub struct UsbKeyboardDriver;
+impl UsbDeviceDriver for UsbKeyboardDriver {
+    fn is_compatible(
+        &self,
+        descriptors: &[UsbDescriptor],
+        _device_descriptor: &UsbDeviceDescriptor,
+    ) -> bool {
+        pick_interface_with_triple(descriptors, (3, 1, 1)).is_some()
+    }
+    fn start(
+        &self,
+        xhc: Rc<Controller>,
+        slot: u8,
+        mut ctrl_ep_ring: CommandRing,
+        descriptors: Vec<UsbDescriptor>,
+        _device_descriptor: &UsbDeviceDescriptor,
+    ) {
+        spawn_global(async move {
+            start_usb_keyboard(&xhc, slot, &mut ctrl_ep_ring, &descriptors)
+                .await
+        });
     }
 }
 
