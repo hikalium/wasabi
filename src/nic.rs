@@ -3,10 +3,14 @@ extern crate alloc;
 use crate::arp::ArpPacket;
 use crate::cui::Console;
 use crate::dhcp::DhcpPacket;
+use crate::dhcp::DHCP_OPT_MESSAGE_TYPE;
+use crate::dhcp::DHCP_OPT_MESSAGE_TYPE_ACK;
 use crate::dhcp::DHCP_OPT_MESSAGE_TYPE_END;
+use crate::dhcp::DHCP_OPT_MESSAGE_TYPE_OFFER;
 use crate::dhcp::DHCP_OPT_MESSAGE_TYPE_PADDING;
 use crate::dhcp::DHCP_OPT_NETMASK;
 use crate::dhcp::DHCP_OPT_ROUTER;
+use crate::dhcp::DHCP_OPT_SERVER_ID;
 use crate::eth::EthernetAddr;
 use crate::executor::sleep;
 use crate::executor::spawn_global;
@@ -606,10 +610,11 @@ impl UsbNcmDriver {
             }
         }
     }
-    /// Broadcast DHCP DISCOVERs until we are granted an address. Once
-    /// `handle_dhcp_rx` records a lease we stop asking. Kept deliberately
-    /// small: we accept the first BOOTREPLY's `yiaddr` instead of running
-    /// the full DISCOVER/OFFER/REQUEST/ACK handshake.
+    /// Broadcast DHCP DISCOVERs until we are granted an address.
+    /// `handle_dhcp_rx` answers the OFFER with a REQUEST, and once its
+    /// ACK records a lease we stop asking. Retransmitting the DISCOVER
+    /// while the handshake is in flight is how we recover from a lost
+    /// OFFER or a server that refuses the address we requested.
     async fn poll_dhcp(our_mac: EthernetAddr) -> Result<()> {
         loop {
             if has_ip() {
@@ -625,10 +630,11 @@ impl UsbNcmDriver {
             sleep(Duration::from_secs(2)).await;
         }
     }
-    /// Handle an inbound UDP frame that may be a DHCP reply. On a valid
-    /// BOOTREPLY we adopt the offered `yiaddr` as our address and record
-    /// the netmask/router options. Returns a gratuitous ARP to announce
-    /// the freshly-leased address, or `None` when there is nothing new.
+    /// Handle an inbound UDP frame that may be a DHCP reply. An OFFER is
+    /// answered with a REQUEST for the offered `yiaddr`; an ACK makes
+    /// that address ours. Returns the frame to send back — the REQUEST,
+    /// or a gratuitous ARP announcing the freshly-leased address — or
+    /// `None` when there is nothing to send.
     fn handle_dhcp_rx(frame: &[u8], our_mac: EthernetAddr) -> Option<Vec<u8>> {
         let need = core::mem::size_of::<DhcpPacket>();
         if frame.len() < need {
@@ -642,15 +648,15 @@ impl UsbNcmDriver {
         if yiaddr == IpV4Addr::new([0, 0, 0, 0]) {
             return None;
         }
-        let is_new = our_ip() != yiaddr;
-        set_our_ip(yiaddr);
-        if is_new {
-            info!("DHCP: assigned IP {yiaddr}");
-        }
-        // Walk the option field (after the fixed 282-byte header) for
-        // the subnet mask and default router. Options are
-        // type/length/value, with single-byte PAD (0) and END (255).
+        // Walk the option field (after the fixed 282-byte header) for the
+        // message type, the server that sent it, the subnet mask and the
+        // default router. Options are type/length/value, with single-byte
+        // PAD (0) and END (255).
         let opts = &frame[need..];
+        let mut msg_type = None;
+        let mut server_id = None;
+        let mut netmask = None;
+        let mut router = None;
         let mut i = 0;
         while i < opts.len() {
             let op = opts[i];
@@ -668,24 +674,68 @@ impl UsbNcmDriver {
             }
             let data = &opts[data_start..data_start + len];
             match op {
+                DHCP_OPT_MESSAGE_TYPE if len >= 1 => msg_type = Some(data[0]),
+                DHCP_OPT_SERVER_ID if len >= 4 => {
+                    server_id = Some(IpV4Addr::new([
+                        data[0], data[1], data[2], data[3],
+                    ]))
+                }
                 DHCP_OPT_NETMASK if len >= 4 => {
-                    let m = IpV4Addr::new([data[0], data[1], data[2], data[3]]);
-                    info!("DHCP: netmask {m}");
-                    *NETMASK.lock() = Some(m);
+                    netmask = Some(IpV4Addr::new([
+                        data[0], data[1], data[2], data[3],
+                    ]))
                 }
                 DHCP_OPT_ROUTER if len >= 4 => {
-                    let r = IpV4Addr::new([data[0], data[1], data[2], data[3]]);
-                    info!("DHCP: router {r}");
-                    *ROUTER.lock() = Some(r);
+                    router = Some(IpV4Addr::new([
+                        data[0], data[1], data[2], data[3],
+                    ]))
                 }
                 _ => {}
             }
             i = data_start + len;
         }
-        if is_new {
-            Some(ArpPacket::gratuitous(our_mac, yiaddr).as_slice().to_vec())
-        } else {
-            None
+        // A reply carrying no message type at all is a plain BOOTP one,
+        // which has no handshake to continue: take it as final.
+        match msg_type.unwrap_or(DHCP_OPT_MESSAGE_TYPE_ACK) {
+            DHCP_OPT_MESSAGE_TYPE_OFFER => {
+                let Some(server) = server_id else {
+                    warn!("DHCP: OFFER of {yiaddr} without a server id");
+                    return None;
+                };
+                info!("DHCP: offered {yiaddr} by {server}, requesting it");
+                match DhcpPacket::request(our_mac, yiaddr, server) {
+                    Ok(req) => Some(req),
+                    Err(e) => {
+                        warn!("DHCP: failed to build REQUEST: {e:?}");
+                        None
+                    }
+                }
+            }
+            DHCP_OPT_MESSAGE_TYPE_ACK => {
+                let is_new = our_ip() != yiaddr;
+                set_our_ip(yiaddr);
+                if is_new {
+                    info!("DHCP: assigned IP {yiaddr}");
+                }
+                if let Some(m) = netmask {
+                    info!("DHCP: netmask {m}");
+                    *NETMASK.lock() = Some(m);
+                }
+                if let Some(r) = router {
+                    info!("DHCP: router {r}");
+                    *ROUTER.lock() = Some(r);
+                }
+                if is_new {
+                    Some(
+                        ArpPacket::gratuitous(our_mac, yiaddr)
+                            .as_slice()
+                            .to_vec(),
+                    )
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
     async fn poll_tcp_tx(our_mac: EthernetAddr) -> Result<()> {
