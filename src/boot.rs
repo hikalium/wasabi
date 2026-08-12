@@ -105,29 +105,47 @@ pub fn setup_system(
     spawn_global(ps2kbd_task());
     let abp_uart_task = async {
         // https://caro.su/msx/ocm_de1/16550.pdf
+        //
+        // This is a DW_apb_uart (Synopsys DesignWare) behind Intel's
+        // LPSS, not a plain 16550: the registers keep the 16550 layout
+        // but sit on a 32-bit grid, so register n is at base + n * 4
+        // (Linux says the same with `port.regshift = 2` in
+        // drivers/tty/serial/8250/8250_lpss.c). Addressing them byte by
+        // byte lands every write in the wrong place — most importantly
+        // it never sets DLAB, so the divisor latch stays at its reset
+        // value of 0, which stops the baud clock: LSR then reads 0x00
+        // forever and nothing is sent or received.
         sleep(Duration::from_millis(1000)).await;
         let base_addr = 0xfe032000_usize; // chromebook boten/bookem
-        let reg_rx_data = base_addr as *mut u8;
-        let reg_line_status = (base_addr + 0b101) as *mut u8;
+        let reg = |n: usize| (base_addr + n * 4) as *mut u8;
+        let reg_rx_data = reg(0); // RBR (DLL while DLAB is set)
+        let reg_line_status = reg(5); // LSR
+
+        // The LPSS fractional divider feeds this port 1.8432MHz, so a
+        // divisor of 1 gives 1843200 / 16 = 115200 baud, which is what
+        // the GSC expects on the AP console.
         unsafe {
-            write_volatile((base_addr + 1) as *mut u8, 0x00);
-            write_volatile((base_addr + 3) as *mut u8, 0x80);
-            write_volatile((base_addr) as *mut u8, 1);
-            write_volatile((base_addr + 1) as *mut u8, 0);
-            write_volatile((base_addr + 3) as *mut u8, 0x03);
-            write_volatile((base_addr + 2) as *mut u8, 0xC7);
-            write_volatile((base_addr + 4) as *mut u8, 0x0B);
+            write_volatile(reg(3), 0x83); // LCR: DLAB, 8N1
+            write_volatile(reg(0), 0x01); // DLL
+            write_volatile(reg(1), 0x00); // DLH
+            write_volatile(reg(3), 0x03); // LCR: 8N1, DLAB off
+            write_volatile(reg(1), 0x00); // IER: polled, no interrupts
+            write_volatile(reg(2), 0xC7); // FCR: enable and clear FIFOs
+            write_volatile(reg(4), 0x0B); // MCR: DTR, RTS, OUT2
         }
         loop {
-            sleep(Duration::from_millis(1000)).await;
-            let data = unsafe { read_volatile(reg_rx_data) };
-            if data != 0 {
-                info!("DATA:      {data:#010X}");
+            // 64-byte rx FIFO, so drain everything that is ready rather
+            // than one byte per tick.
+            loop {
+                let status = unsafe { read_volatile(reg_line_status) };
+                // LSR bit 0: receive data ready.
+                if status & 0x01 == 0 {
+                    break;
+                }
+                let data = unsafe { read_volatile(reg_rx_data) };
+                info!("UART RX: {data:#04X}");
             }
-            let status = unsafe { read_volatile(reg_line_status) };
-            if status != 0 {
-                info!("STATUS:    {status:#010b}");
-            }
+            sleep(Duration::from_millis(20)).await;
         }
     };
     spawn_global(abp_uart_task);
