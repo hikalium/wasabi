@@ -15,6 +15,8 @@ use crate::init::init_paging;
 use crate::init::init_pci;
 use crate::input::input_task;
 use crate::keyboard::KeyEvent;
+use crate::lpss_uart::init_lpss_uart;
+use crate::lpss_uart::lpss_uart;
 use crate::print::hexdump_struct;
 use crate::println;
 use crate::ps2kbd::ps2kbd_task;
@@ -27,8 +29,6 @@ use crate::warn;
 use crate::x86::init_exceptions;
 use crate::x86::GdtWrapper;
 use crate::x86::Idt;
-use core::ptr::read_volatile;
-use core::ptr::write_volatile;
 use core::time::Duration;
 
 /// Initialize every subsystem and spawn the default OS tasks, but do *not*
@@ -103,52 +103,37 @@ pub fn setup_system(
     spawn_global(serial_task);
     spawn_global(input_task());
     spawn_global(ps2kbd_task());
-    let abp_uart_task = async {
-        // https://caro.su/msx/ocm_de1/16550.pdf
-        //
-        // This is a DW_apb_uart (Synopsys DesignWare) behind Intel's
-        // LPSS, not a plain 16550: the registers keep the 16550 layout
-        // but sit on a 32-bit grid, so register n is at base + n * 4
-        // (Linux says the same with `port.regshift = 2` in
-        // drivers/tty/serial/8250/8250_lpss.c). Addressing them byte by
-        // byte lands every write in the wrong place — most importantly
-        // it never sets DLAB, so the divisor latch stays at its reset
-        // value of 0, which stops the baud clock: LSR then reads 0x00
-        // forever and nothing is sent or received.
-        sleep(Duration::from_millis(1000)).await;
-        let base_addr = 0xfe032000_usize; // chromebook boten/bookem
-        let reg = |n: usize| (base_addr + n * 4) as *mut u8;
-        let reg_rx_data = reg(0); // RBR (DLL while DLAB is set)
-        let reg_line_status = reg(5); // LSR
-
-        // The LPSS fractional divider feeds this port 1.8432MHz, so a
-        // divisor of 1 gives 1843200 / 16 = 115200 baud, which is what
-        // the GSC expects on the AP console.
-        unsafe {
-            write_volatile(reg(3), 0x83); // LCR: DLAB, 8N1
-            write_volatile(reg(0), 0x01); // DLL
-            write_volatile(reg(1), 0x00); // DLH
-            write_volatile(reg(3), 0x03); // LCR: 8N1, DLAB off
-            write_volatile(reg(1), 0x00); // IER: polled, no interrupts
-            write_volatile(reg(2), 0xC7); // FCR: enable and clear FIFOs
-            write_volatile(reg(4), 0x0B); // MCR: DTR, RTS, OUT2
-        }
-        loop {
-            // 64-byte rx FIFO, so drain everything that is ready rather
-            // than one byte per tick.
+    // The LPSS UART carries the AP console that the GSC exposes over
+    // Closed Case Debugging, which makes it a way into the shell that
+    // needs neither USB nor the network. The base address is the one
+    // this board puts the port at; `init_lpss_uart` checks that a
+    // DesignWare UART really answers there before adopting it, so a
+    // machine (or an emulator) without one just carries on.
+    const LPSS_UART_BASE: usize = 0xfe032000; // chromebook boten/bookem
+    if init_lpss_uart(LPSS_UART_BASE) {
+        info!("LPSS UART at {LPSS_UART_BASE:#x}: console attached");
+        let lpss_uart_task = async {
+            let uart = lpss_uart().ok_or("lpss uart went away")?;
+            // Its own Console, like the serial and remote terminals: the
+            // line being edited belongs to whoever is typing it.
+            let mut console = Console::default();
             loop {
-                let status = unsafe { read_volatile(reg_line_status) };
-                // LSR bit 0: receive data ready.
-                if status & 0x01 == 0 {
-                    break;
+                // The rx fifo holds 64 bytes, so take everything that is
+                // ready before sleeping again.
+                while let Some(v) = uart.try_read() {
+                    if let Some(c) = char::from_u32(v as u32) {
+                        console.handle_key_down(KeyEvent::Char(c));
+                    } else {
+                        warn!("lpss uart: not a char: {v:#04X}");
+                    }
                 }
-                let data = unsafe { read_volatile(reg_rx_data) };
-                info!("UART RX: {data:#04X}");
+                sleep(Duration::from_millis(20)).await;
             }
-            sleep(Duration::from_millis(20)).await;
-        }
-    };
-    spawn_global(abp_uart_task);
+        };
+        spawn_global(lpss_uart_task);
+    } else {
+        info!("LPSS UART at {LPSS_UART_BASE:#x}: not present");
+    }
 
     descriptor_tables
 }
