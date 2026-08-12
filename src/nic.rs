@@ -319,9 +319,8 @@ impl UsbNcmDriver {
         our_mac: EthernetAddr,
     ) -> Result<()> {
         info!("NCM: poll_bulk_in loop starting");
-        let mut timeout_count: u32 = 0;
-        // Cumulative byte counter since task start. Logged on every
-        // long-wait warning so we can spot "stalls every N MB" patterns
+        // Cumulative byte counter since task start. Reported when a
+        // transfer fails so we can spot "stalls every N MB" patterns
         // tied to a specific buffer size.
         let mut bytes_rx: u64 = 0;
         loop {
@@ -337,41 +336,28 @@ impl UsbNcmDriver {
 
             xhc.notify_ep(slot, bulk_in_desc.dci())?;
 
-            // Bound the wait *only* for periodic diagnostic logging.
-            // We do NOT recycle the buffer or push a duplicate TRB
-            // here: the ring has 15 usable slots, and an orphan TRB
-            // permanently occupies its slot until the controller
-            // generates a completion event for it. Once the producer
-            // wraps to that slot the cycle-state check refuses to
-            // overwrite, `push` returns "Command Ring is Full", and
-            // the whole task dies — exactly the symptom we used to
-            // ship. Instead we keep waiting on the same TRB; the
-            // most common cause of a long wait is just "the device
-            // hasn't started delivering NTBs yet" (idle period or
-            // pre-link-up), which resolves itself once traffic
-            // arrives.
-            let event = loop {
-                let fut = EventFuture::new_for_trb(
-                    &xhc.primary_event_ring,
-                    trb_ptr_waiting,
-                );
-                match with_timeout(Duration::from_secs(2), fut).await {
-                    Ok(ev) => break ev,
-                    Err(_) => {
-                        // An idle link looks exactly like this, so a
-                        // line every two seconds says nothing and
-                        // drowns out the console. Just count the wait
-                        // and keep going; the count is reported below
-                        // if the transfer ever does fail.
-                        timeout_count = timeout_count.wrapping_add(1);
-                    }
-                }
-            };
+            // Wait for this TRB and nothing else. We must NOT recycle
+            // the buffer or push a duplicate TRB here: the ring has 15
+            // usable slots, and an orphan TRB permanently occupies its
+            // slot until the controller generates a completion event
+            // for it. Once the producer wraps to that slot the
+            // cycle-state check refuses to overwrite, `push` returns
+            // "Command Ring is Full", and the whole task dies —
+            // exactly the symptom we used to ship. The wait is
+            // therefore unbounded: waiting was already the only
+            // response to a slow device, and the most common cause of
+            // a long one is just an idle link, which resolves itself
+            // when traffic arrives.
+            let event = EventFuture::new_for_trb(
+                &xhc.primary_event_ring,
+                trb_ptr_waiting,
+            )
+            .await?;
             if let Err(e) = event.transfer_result_ok() {
                 warn!(
                     "NCM bulk-in: transfer error {e:?} on TRB \
-                     {trb_ptr_waiting:#x} after {timeout_count} idle \
-                     wait(s), bytes_rx={bytes_rx}; dropping NTB"
+                     {trb_ptr_waiting:#x}, bytes_rx={bytes_rx}; \
+                     dropping NTB"
                 );
                 continue;
             }
