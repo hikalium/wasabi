@@ -539,9 +539,10 @@ async fn dns_query(
     let mut sent = 0usize;
     let mut replies = 0usize;
     let mut printed_addrs = false;
-    // Only starts once the last query is queued: with a burst larger
-    // than the link can carry at once, sending is not instant and a
-    // deadline measured from the start would expire mid-send.
+    // Only starts once the last query has actually left the tx queue.
+    // Queuing a burst is instant; draining it is not, and a deadline
+    // measured from either the start or the last enqueue would expire
+    // while frames were still going out.
     let mut deadline = None;
     loop {
         // Fill the tx queue to its free space and no further. Handing
@@ -563,7 +564,7 @@ async fn dns_query(
             nic::enqueue_tx_frame(query);
             sent += 1;
         }
-        if sent == count && deadline.is_none() {
+        if sent == count && nic::tx_queue_len() == 0 && deadline.is_none() {
             deadline = Some(global_timestamp() + DNS_REPLY_TIMEOUT);
         }
 
