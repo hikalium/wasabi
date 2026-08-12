@@ -608,17 +608,16 @@ impl UsbNcmDriver {
     }
     /// Broadcast DHCP DISCOVERs until we are granted an address. Once
     /// `handle_dhcp_rx` records a lease we stop asking. Kept deliberately
-    /// small: like upstream wasabi we accept the first BOOTREPLY's
-    /// `yiaddr` instead of running the full
-    /// DISCOVER/OFFER/REQUEST/ACK handshake, which slirp accepts.
+    /// small: we accept the first BOOTREPLY's `yiaddr` instead of running
+    /// the full DISCOVER/OFFER/REQUEST/ACK handshake.
     async fn poll_dhcp(our_mac: EthernetAddr) -> Result<()> {
         loop {
             if has_ip() {
                 return Ok(());
             }
-            match DhcpPacket::request(our_mac) {
+            match DhcpPacket::discover(our_mac) {
                 Ok(req) => {
-                    enqueue_tx_frame(req.as_slice().to_vec());
+                    enqueue_tx_frame(req);
                     info!("DHCP: sent DISCOVER (no lease yet)");
                 }
                 Err(e) => warn!("DHCP: failed to build DISCOVER: {e:?}"),
