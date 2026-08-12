@@ -42,9 +42,11 @@ unsafe impl Sliceable for DnsHeader {}
 // queries can be outstanding at once, and their replies would otherwise
 // overwrite each other before anyone looked.
 static DNS_RX: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
-// Enough for the largest burst `dns` will send. Beyond that the oldest
-// reply is the least interesting one to keep.
-const DNS_RX_MAX: usize = 64;
+// A burst is not bounded any more, so this is the one place replies can
+// still be lost: it has to hold whatever arrives between two passes of
+// the waiting command. Matched to the tx queue depth, since that is
+// what bounds how many can be in flight.
+const DNS_RX_MAX: usize = 256;
 
 /// Called from the NCM rx path for any UDP frame whose source port is
 /// 53. Stores the raw frame so a pending query can parse it.
