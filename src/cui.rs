@@ -423,10 +423,11 @@ pub fn run_cmd_ping(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-// Default DNS resolver. 8.8.8.8 is deliberately off our slirp subnet, so
-// the query has to be routed through the DHCP-learned gateway — which
-// also makes `dns` a handy end-to-end test of that routing.
-const DNS_DEFAULT_SERVER: IpV4Addr = IpV4Addr::new([8, 8, 8, 8]);
+// Fallback DNS resolver, used when the lease carried no server of its
+// own. 8.8.8.8 is deliberately off our slirp subnet, so the query has to
+// be routed through the DHCP-learned gateway — which also makes `dns` a
+// handy end-to-end test of that routing.
+const DNS_FALLBACK_SERVER: IpV4Addr = IpV4Addr::new([8, 8, 8, 8]);
 const DNS_REPLY_TIMEOUT: Duration = Duration::from_millis(2000);
 const DNS_ARP_WAIT: Duration = Duration::from_millis(200);
 
@@ -500,7 +501,7 @@ pub fn run_cmd_dns(args: &[&str]) -> Result<()> {
     };
     let server = match args.get(2) {
         Some(s) if !s.is_empty() => parse_ipv4(s)?,
-        _ => DNS_DEFAULT_SERVER,
+        _ => nic::dns_server().unwrap_or(DNS_FALLBACK_SERVER),
     };
     spawn_global(dns_query(hostname, server));
     Ok(())
