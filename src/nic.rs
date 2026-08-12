@@ -165,6 +165,13 @@ static NET_TX_QUEUE: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
 // retries.
 const MAX_TX_QUEUE_DEPTH: usize = 256;
 
+/// Room left in the tx queue. A producer with more to send than the
+/// link can carry can pace itself against this instead of handing over
+/// frames that `enqueue_tx_frame` would have to drop.
+pub fn tx_queue_free() -> usize {
+    MAX_TX_QUEUE_DEPTH.saturating_sub(NET_TX_QUEUE.lock().len())
+}
+
 pub fn enqueue_tx_frame(frame: Vec<u8>) {
     let mut q = NET_TX_QUEUE.lock();
     if q.len() >= MAX_TX_QUEUE_DEPTH {
