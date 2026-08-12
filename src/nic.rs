@@ -358,22 +358,20 @@ impl UsbNcmDriver {
                 match with_timeout(Duration::from_secs(2), fut).await {
                     Ok(ev) => break ev,
                     Err(_) => {
+                        // An idle link looks exactly like this, so a
+                        // line every two seconds says nothing and
+                        // drowns out the console. Just count the wait
+                        // and keep going; the count is reported below
+                        // if the transfer ever does fail.
                         timeout_count = timeout_count.wrapping_add(1);
-                        let dbg = TCP_SOCKET.debug_summary();
-                        let queued = NET_TX_QUEUE.lock().len();
-                        warn!(
-                            "NCM bulk-in: TRB {trb_ptr_waiting:#x} \
-                             still waiting (#{timeout_count}); \
-                             bytes_rx={bytes_rx}, tcp={dbg:?}, \
-                             net_tx_queue={queued}"
-                        );
                     }
                 }
             };
             if let Err(e) = event.transfer_result_ok() {
                 warn!(
                     "NCM bulk-in: transfer error {e:?} on TRB \
-                     {trb_ptr_waiting:#x}; dropping NTB"
+                     {trb_ptr_waiting:#x} after {timeout_count} idle \
+                     wait(s), bytes_rx={bytes_rx}; dropping NTB"
                 );
                 continue;
             }
