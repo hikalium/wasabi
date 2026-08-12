@@ -22,14 +22,19 @@ pub const DHCP_OPT_NETMASK: u8 = 1;
 pub const DHCP_OPT_ROUTER: u8 = 3;
 // 3.8. Domain Name Server Option (len = 4 * n where n >= 1)
 pub const DHCP_OPT_DNS: u8 = 6;
+// 9.1. Requested IP Address (len = 4)
+pub const DHCP_OPT_REQUESTED_IP: u8 = 50;
 // 9.6. DHCP Message Type (len = 1)
 pub const DHCP_OPT_MESSAGE_TYPE: u8 = 53;
+// 9.7. Server Identifier (len = 4)
+pub const DHCP_OPT_SERVER_ID: u8 = 54;
 // Fixed length (1-byte) options
 pub const DHCP_OPT_MESSAGE_TYPE_PADDING: u8 = 0;
 pub const DHCP_OPT_MESSAGE_TYPE_END: u8 = 255;
 // Variable length ((2 + len) bytes) options
 pub const DHCP_OPT_MESSAGE_TYPE_DISCOVER: u8 = 1;
 pub const DHCP_OPT_MESSAGE_TYPE_OFFER: u8 = 2;
+pub const DHCP_OPT_MESSAGE_TYPE_REQUEST: u8 = 3;
 pub const DHCP_OPT_MESSAGE_TYPE_ACK: u8 = 5;
 
 // https://datatracker.ietf.org/doc/html/rfc2131#section-2
@@ -130,6 +135,38 @@ impl DhcpPacket {
                 DHCP_OPT_MESSAGE_TYPE,
                 1,
                 DHCP_OPT_MESSAGE_TYPE_DISCOVER,
+                DHCP_OPT_MESSAGE_TYPE_END,
+            ],
+        )
+    }
+    /// DHCPREQUEST: ask `server_id` to commit `requested_ip`, the address
+    /// it put in the yiaddr of its OFFER. An offer is not a lease until
+    /// the server acks this.
+    pub fn request(
+        src_eth_addr: EthernetAddr,
+        requested_ip: IpV4Addr,
+        server_id: IpV4Addr,
+    ) -> Result<Vec<u8>> {
+        let ip = requested_ip.bytes();
+        let sid = server_id.bytes();
+        Self::build(
+            src_eth_addr,
+            &[
+                DHCP_OPT_MESSAGE_TYPE,
+                1,
+                DHCP_OPT_MESSAGE_TYPE_REQUEST,
+                DHCP_OPT_REQUESTED_IP,
+                4,
+                ip[0],
+                ip[1],
+                ip[2],
+                ip[3],
+                DHCP_OPT_SERVER_ID,
+                4,
+                sid[0],
+                sid[1],
+                sid[2],
+                sid[3],
                 DHCP_OPT_MESSAGE_TYPE_END,
             ],
         )
