@@ -3,6 +3,7 @@ extern crate alloc;
 use crate::arp::ArpPacket;
 use crate::cui::Console;
 use crate::dhcp::DhcpPacket;
+use crate::dhcp::DHCP_OPT_DNS;
 use crate::dhcp::DHCP_OPT_MESSAGE_TYPE;
 use crate::dhcp::DHCP_OPT_MESSAGE_TYPE_ACK;
 use crate::dhcp::DHCP_OPT_MESSAGE_TYPE_END;
@@ -63,6 +64,9 @@ pub static OUR_IP: Mutex<IpV4Addr> = Mutex::new(IpV4Addr::new([0, 0, 0, 0]));
 // recorded so the `ip` command and future routing can use them.
 pub static NETMASK: Mutex<Option<IpV4Addr>> = Mutex::new(None);
 pub static ROUTER: Mutex<Option<IpV4Addr>> = Mutex::new(None);
+// First DNS server from the same option field, used as the default for
+// the `dns` command.
+pub static DNS_SERVER: Mutex<Option<IpV4Addr>> = Mutex::new(None);
 
 pub fn our_ip() -> IpV4Addr {
     *OUR_IP.lock()
@@ -83,6 +87,10 @@ pub fn netmask() -> Option<IpV4Addr> {
 
 pub fn router() -> Option<IpV4Addr> {
     *ROUTER.lock()
+}
+
+pub fn dns_server() -> Option<IpV4Addr> {
+    *DNS_SERVER.lock()
 }
 
 /// Pick the link-layer next hop for a destination IP: the destination
@@ -657,6 +665,7 @@ impl UsbNcmDriver {
         let mut server_id = None;
         let mut netmask = None;
         let mut router = None;
+        let mut dns = None;
         let mut i = 0;
         while i < opts.len() {
             let op = opts[i];
@@ -687,6 +696,13 @@ impl UsbNcmDriver {
                 }
                 DHCP_OPT_ROUTER if len >= 4 => {
                     router = Some(IpV4Addr::new([
+                        data[0], data[1], data[2], data[3],
+                    ]))
+                }
+                // The option can list several servers; we only ever
+                // query one, so keep the first.
+                DHCP_OPT_DNS if len >= 4 => {
+                    dns = Some(IpV4Addr::new([
                         data[0], data[1], data[2], data[3],
                     ]))
                 }
@@ -724,6 +740,10 @@ impl UsbNcmDriver {
                 if let Some(r) = router {
                     info!("DHCP: router {r}");
                     *ROUTER.lock() = Some(r);
+                }
+                if let Some(d) = dns {
+                    info!("DHCP: dns {d}");
+                    *DNS_SERVER.lock() = Some(d);
                 }
                 if is_new {
                     Some(
