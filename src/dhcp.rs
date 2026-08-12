@@ -1,3 +1,5 @@
+extern crate alloc;
+
 use crate::eth::EthernetAddr;
 use crate::eth::EthernetHeader;
 use crate::eth::EthernetType;
@@ -9,6 +11,7 @@ use crate::slice::Sliceable;
 use crate::udp::UdpPacket;
 use crate::udp::UDP_PORT_DHCP_CLIENT;
 use crate::udp::UDP_PORT_DHCP_SERVER;
+use alloc::vec::Vec;
 use core::mem::size_of;
 use core::mem::MaybeUninit;
 
@@ -72,7 +75,10 @@ impl DhcpPacket {
     pub fn chaddr(&self) -> EthernetAddr {
         self.chaddr
     }
-    pub fn request(src_eth_addr: EthernetAddr) -> Result<Self> {
+    /// Serialise a broadcast BOOTREQUEST carrying `options` as one
+    /// complete Ethernet frame. `options` is the option field that
+    /// follows the magic cookie, so it has to end with an END (255).
+    fn build(src_eth_addr: EthernetAddr, options: &[u8]) -> Result<Vec<u8>> {
         let mut this = Self::default();
         // eth
         let eth = EthernetHeader::new(
@@ -81,7 +87,8 @@ impl DhcpPacket {
             EthernetType::ip_v4(),
         );
         // ip
-        let data_length = size_of::<Self>() - size_of::<IpV4Packet>();
+        let data_length =
+            size_of::<Self>() - size_of::<IpV4Packet>() + options.len();
         let ip = IpV4Packet::new(
             eth,
             IpV4Addr::broadcast(),
@@ -93,8 +100,7 @@ impl DhcpPacket {
         this.udp.ip = ip;
         this.udp.set_src_port(UDP_PORT_DHCP_CLIENT);
         this.udp.set_dst_port(UDP_PORT_DHCP_SERVER);
-        this.udp
-            .set_data_size(size_of::<Self>() - size_of::<IpV4Packet>())?;
+        this.udp.set_data_size(data_length)?;
         // udp checksum is omitted (set to zero) since it is optional
         // dhcp
         this.op = DHCP_OP_BOOTREQUEST;
@@ -108,7 +114,25 @@ impl DhcpPacket {
         // dotted decimal 99.130.83.99 ... in network byte order.
         this.cookie = [99, 130, 83, 99];
         this.udp.ip.recompute_checksum();
-        Ok(this)
+        let mut frame = Vec::with_capacity(size_of::<Self>() + options.len());
+        frame.extend_from_slice(this.as_slice());
+        frame.extend_from_slice(options);
+        Ok(frame)
+    }
+    /// DHCPDISCOVER: ask every server on the link for an address. The
+    /// message type option is what makes this a DHCP message; without it
+    /// servers read the packet as a plain BOOTP request and answer only
+    /// from a static table, if at all.
+    pub fn discover(src_eth_addr: EthernetAddr) -> Result<Vec<u8>> {
+        Self::build(
+            src_eth_addr,
+            &[
+                DHCP_OPT_MESSAGE_TYPE,
+                1,
+                DHCP_OPT_MESSAGE_TYPE_DISCOVER,
+                DHCP_OPT_MESSAGE_TYPE_END,
+            ],
+        )
     }
 }
 impl Default for DhcpPacket {
