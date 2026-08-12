@@ -37,6 +37,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::swap;
+use core::ptr::read_volatile;
 use core::ptr::write_volatile;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
@@ -264,6 +265,71 @@ pub fn run_cmd_show(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn parse_hex(s: &str) -> Result<u64> {
+    let s = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .unwrap_or(s);
+    u64::from_str_radix(s, 16).map_err(|_| "not a hex number")
+}
+
+/// Raw MMIO peek/poke, for bringing up a device register by register from
+/// the shell. Deliberately unguarded apart from alignment: a wrong
+/// address here can hang the machine, which is the price of being able
+/// to try one before rebuilding.
+pub fn run_cmd_md(args: &[&str]) -> Result<()> {
+    let (Some(addr), width) =
+        (args.get(1), args.first().copied().unwrap_or(""))
+    else {
+        info!("Usage: md <hex-addr> [count]   (mdb for bytes)");
+        return Ok(());
+    };
+    let addr = parse_hex(addr)?;
+    let count = match args.get(2) {
+        Some(s) => parse_hex(s)? as usize,
+        None => 4,
+    };
+    if width == "mdb" {
+        for i in 0..count {
+            let p = (addr as usize + i) as *const u8;
+            let v = unsafe { read_volatile(p) };
+            println!("{:#018X}: {v:#04X}", p as usize);
+        }
+        return Ok(());
+    }
+    if addr % 4 != 0 {
+        return Err("md: address must be 4-byte aligned");
+    }
+    for i in 0..count {
+        let p = (addr as usize + i * 4) as *const u32;
+        let v = unsafe { read_volatile(p) };
+        println!("{:#018X}: {v:#010X}", p as usize);
+    }
+    Ok(())
+}
+
+pub fn run_cmd_mw(args: &[&str]) -> Result<()> {
+    let (Some(addr), Some(value)) = (args.get(1), args.get(2)) else {
+        info!("Usage: mw <hex-addr> <hex-value>   (mwb for bytes)");
+        return Ok(());
+    };
+    let addr = parse_hex(addr)?;
+    let value = parse_hex(value)?;
+    if args.first().copied().unwrap_or("") == "mwb" {
+        let p = addr as usize as *mut u8;
+        unsafe { write_volatile(p, value as u8) };
+        println!("{:#018X} <- {:#04X}", p as usize, value as u8);
+        return Ok(());
+    }
+    if addr % 4 != 0 {
+        return Err("mw: address must be 4-byte aligned");
+    }
+    let p = addr as usize as *mut u32;
+    unsafe { write_volatile(p, value as u32) };
+    println!("{:#018X} <- {:#010X}", p as usize, value as u32);
+    Ok(())
+}
+
 // Cfg-selected at the consumer's compile time — proc-macros don't
 // see the consumer's target_arch in their environment, but `cfg`
 // attributes do.
@@ -347,6 +413,8 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             "dns" | "nslookup" => run_cmd_dns(&args),
             "reboot" | "r" => run_cmd_reboot(&args),
             "uname" => run_cmd_uname(&args),
+            "md" | "mdb" => run_cmd_md(&args),
+            "mw" | "mwb" => run_cmd_mw(&args),
             "demo" => run_cmd_demo(&args),
             "hello" => {
                 println!("こんにちは");
