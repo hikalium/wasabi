@@ -31,6 +31,7 @@ pub mod init;
 pub mod input;
 pub mod ip;
 pub mod keyboard;
+pub mod lpss_uart;
 pub mod mmio;
 pub mod mutex;
 pub mod ncm;
