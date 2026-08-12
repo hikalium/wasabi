@@ -34,7 +34,6 @@ use crate::slice::Sliceable;
 use crate::tablet::set_debug_mouse;
 use crate::warn;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::swap;
 use core::ptr::read_volatile;
@@ -500,11 +499,6 @@ const DNS_FALLBACK_SERVER: IpV4Addr = IpV4Addr::new([8, 8, 8, 8]);
 const DNS_REPLY_TIMEOUT: Duration = Duration::from_millis(2000);
 const DNS_ARP_WAIT: Duration = Duration::from_millis(200);
 
-/// Upper bound on a burst, matching the reply queue in `dns`. Each query
-/// is its own Ethernet frame, so a burst is also a way to push several
-/// frames into the tx path at once.
-const DNS_MAX_QUERIES: usize = 64;
-
 async fn dns_query(
     hostname: String,
     server: IpV4Addr,
@@ -532,7 +526,8 @@ async fn dns_query(
         }
     };
 
-    // One txid per query, so a reply can be told from its siblings.
+    // One txid per query, so replies can be told apart — up to the 65536
+    // a txid can hold, after which they necessarily repeat.
     let txid_base: u16 = 0x4321;
     dns::clear_response();
     if count > 1 {
@@ -540,36 +535,45 @@ async fn dns_query(
     } else {
         println!("Querying {server} for {hostname} ...");
     }
-    // Build and hand off every query before looking at any reply — the
-    // point of a burst is to have them all in flight at once.
-    for i in 0..count {
-        let query = dns::build_query(
-            our_mac,
-            nic::our_ip(),
-            next_hop_mac,
-            server,
-            &hostname,
-            txid_base.wrapping_add(i as u16),
-        )?;
-        nic::enqueue_tx_frame(query);
-    }
 
-    let mut answered = vec![false; count];
+    let mut sent = 0usize;
     let mut replies = 0usize;
     let mut printed_addrs = false;
-    let deadline = global_timestamp() + DNS_REPLY_TIMEOUT;
+    // Only starts once the last query is queued: with a burst larger
+    // than the link can carry at once, sending is not instant and a
+    // deadline measured from the start would expire mid-send.
+    let mut deadline = None;
     loop {
+        // Fill the tx queue to its free space and no further. Handing
+        // over more than that would make `enqueue_tx_frame` drop the
+        // oldest pending frame, so a big burst would push out its own
+        // earlier queries.
+        for _ in 0..nic::tx_queue_free() {
+            if sent == count {
+                break;
+            }
+            let query = dns::build_query(
+                our_mac,
+                nic::our_ip(),
+                next_hop_mac,
+                server,
+                &hostname,
+                txid_base.wrapping_add(sent as u16),
+            )?;
+            nic::enqueue_tx_frame(query);
+            sent += 1;
+        }
+        if sent == count && deadline.is_none() {
+            deadline = Some(global_timestamp() + DNS_REPLY_TIMEOUT);
+        }
+
+        // Drain replies as they land, not just at the end: the mailbox
+        // is bounded, so leaving them there while still sending would
+        // lose the early ones.
         while let Some(frame) = dns::take_response() {
-            let Some((rxid, addrs)) = dns::parse_response(&frame) else {
+            let Some((_, addrs)) = dns::parse_response(&frame) else {
                 continue;
             };
-            let i = rxid.wrapping_sub(txid_base) as usize;
-            // Ignore anything we did not ask for, and count a repeated
-            // txid once — a duplicated reply is not a second answer.
-            if i >= count || answered[i] {
-                continue;
-            }
-            answered[i] = true;
             replies += 1;
             // The answers are identical across the burst, so print the
             // first one and let the tally speak for the rest.
@@ -584,13 +588,14 @@ async fn dns_query(
                 }
             }
         }
-        if replies == count {
+
+        if replies >= count {
             if count > 1 {
                 println!("dns: {replies}/{count} replies");
             }
             return Ok(());
         }
-        if global_timestamp() >= deadline {
+        if deadline.is_some_and(|d| global_timestamp() >= d) {
             if count > 1 {
                 println!("dns: {replies}/{count} replies (timed out)");
             } else {
@@ -614,13 +619,13 @@ pub fn run_cmd_dns(args: &[&str]) -> Result<()> {
         Some(s) if !s.is_empty() => parse_ipv4(s)?,
         _ => nic::dns_server().unwrap_or(DNS_FALLBACK_SERVER),
     };
-    // How many copies of the query to put in flight before waiting for
-    // any of them.
+    // How many copies of the query to send. They leave as fast as the
+    // tx queue drains, so a large count just takes a while.
     let count = match args.get(3) {
         Some(s) if !s.is_empty() => match s.parse::<usize>() {
-            Ok(n) if (1..=DNS_MAX_QUERIES).contains(&n) => n,
+            Ok(n) if n >= 1 => n,
             _ => {
-                info!("dns: count must be 1..={DNS_MAX_QUERIES}");
+                info!("dns: count must be a positive integer");
                 return Ok(());
             }
         },
