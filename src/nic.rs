@@ -172,6 +172,13 @@ pub fn tx_queue_free() -> usize {
     MAX_TX_QUEUE_DEPTH.saturating_sub(NET_TX_QUEUE.lock().len())
 }
 
+/// Frames still waiting to be transmitted. Zero means the last one has
+/// been handed to the controller, which is the point from which a
+/// caller can start timing a reply.
+pub fn tx_queue_len() -> usize {
+    NET_TX_QUEUE.lock().len()
+}
+
 pub fn enqueue_tx_frame(frame: Vec<u8>) {
     let mut q = NET_TX_QUEUE.lock();
     if q.len() >= MAX_TX_QUEUE_DEPTH {
