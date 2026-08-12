@@ -1,5 +1,6 @@
 use crate::graphics::BitmapTextWriter;
 use crate::gui::GLOBAL_VRAM;
+use crate::lpss_uart::lpss_uart;
 use crate::mutex::Mutex;
 use crate::serial::SerialPort;
 use crate::tcp::TCP_SOCKET;
@@ -27,6 +28,11 @@ pub fn global_print(args: fmt::Arguments) {
     fmt::write(&mut writer, args).unwrap();
     let _ = fmt::write(&mut *GLOBAL_PRINTER.lock(), args);
     let _ = fmt::write(&mut TcpMirror, args);
+    // Copied out rather than written under its lock: this is reached
+    // from everywhere, including the task reading that same port.
+    if let Some(mut uart) = lpss_uart() {
+        let _ = fmt::write(&mut uart, args);
+    }
 }
 
 /// Print path used from the `#[panic_handler]`. Always reaches the
