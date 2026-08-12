@@ -34,6 +34,7 @@ use crate::slice::Sliceable;
 use crate::tablet::set_debug_mouse;
 use crate::warn;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::swap;
 use core::ptr::write_volatile;
@@ -431,7 +432,16 @@ const DNS_FALLBACK_SERVER: IpV4Addr = IpV4Addr::new([8, 8, 8, 8]);
 const DNS_REPLY_TIMEOUT: Duration = Duration::from_millis(2000);
 const DNS_ARP_WAIT: Duration = Duration::from_millis(200);
 
-async fn dns_query(hostname: String, server: IpV4Addr) -> Result<()> {
+/// Upper bound on a burst, matching the reply queue in `dns`. Each query
+/// is its own Ethernet frame, so a burst is also a way to push several
+/// frames into the tx path at once.
+const DNS_MAX_QUERIES: usize = 64;
+
+async fn dns_query(
+    hostname: String,
+    server: IpV4Addr,
+    count: usize,
+) -> Result<()> {
     let our_mac = nic::our_mac().ok_or("NCM not ready (no MAC)")?;
     if !nic::has_ip() {
         println!("dns: no IP yet (waiting for DHCP)");
@@ -454,37 +464,70 @@ async fn dns_query(hostname: String, server: IpV4Addr) -> Result<()> {
         }
     };
 
-    let txid: u16 = 0x4321;
-    let query = dns::build_query(
-        our_mac,
-        nic::our_ip(),
-        next_hop_mac,
-        server,
-        &hostname,
-        txid,
-    )?;
+    // One txid per query, so a reply can be told from its siblings.
+    let txid_base: u16 = 0x4321;
     dns::clear_response();
-    nic::enqueue_tx_frame(query);
-    println!("Querying {server} for {hostname} ...");
+    if count > 1 {
+        println!("Querying {server} for {hostname} ({count} queries) ...");
+    } else {
+        println!("Querying {server} for {hostname} ...");
+    }
+    // Build and hand off every query before looking at any reply — the
+    // point of a burst is to have them all in flight at once.
+    for i in 0..count {
+        let query = dns::build_query(
+            our_mac,
+            nic::our_ip(),
+            next_hop_mac,
+            server,
+            &hostname,
+            txid_base.wrapping_add(i as u16),
+        )?;
+        nic::enqueue_tx_frame(query);
+    }
 
+    let mut answered = vec![false; count];
+    let mut replies = 0usize;
+    let mut printed_addrs = false;
     let deadline = global_timestamp() + DNS_REPLY_TIMEOUT;
     loop {
-        if let Some(frame) = dns::take_response() {
-            if let Some((rxid, addrs)) = dns::parse_response(&frame) {
-                if rxid == txid {
-                    if addrs.is_empty() {
-                        println!("dns: no A records for {hostname}");
-                    } else {
-                        for a in addrs {
-                            println!("{hostname} has address {a}");
-                        }
+        while let Some(frame) = dns::take_response() {
+            let Some((rxid, addrs)) = dns::parse_response(&frame) else {
+                continue;
+            };
+            let i = rxid.wrapping_sub(txid_base) as usize;
+            // Ignore anything we did not ask for, and count a repeated
+            // txid once — a duplicated reply is not a second answer.
+            if i >= count || answered[i] {
+                continue;
+            }
+            answered[i] = true;
+            replies += 1;
+            // The answers are identical across the burst, so print the
+            // first one and let the tally speak for the rest.
+            if !printed_addrs {
+                printed_addrs = true;
+                if addrs.is_empty() {
+                    println!("dns: no A records for {hostname}");
+                } else {
+                    for a in addrs {
+                        println!("{hostname} has address {a}");
                     }
-                    return Ok(());
                 }
             }
         }
+        if replies == count {
+            if count > 1 {
+                println!("dns: {replies}/{count} replies");
+            }
+            return Ok(());
+        }
         if global_timestamp() >= deadline {
-            println!("dns: timeout resolving {hostname}");
+            if count > 1 {
+                println!("dns: {replies}/{count} replies (timed out)");
+            } else {
+                println!("dns: timeout resolving {hostname}");
+            }
             return Ok(());
         }
         sleep(Duration::from_millis(10)).await;
@@ -495,7 +538,7 @@ pub fn run_cmd_dns(args: &[&str]) -> Result<()> {
     let hostname = match args.get(1) {
         Some(s) if !s.is_empty() => String::from(*s),
         _ => {
-            info!("Usage: dns <hostname> [server-ipv4]");
+            info!("Usage: dns <hostname> [server-ipv4] [count]");
             return Ok(());
         }
     };
@@ -503,7 +546,19 @@ pub fn run_cmd_dns(args: &[&str]) -> Result<()> {
         Some(s) if !s.is_empty() => parse_ipv4(s)?,
         _ => nic::dns_server().unwrap_or(DNS_FALLBACK_SERVER),
     };
-    spawn_global(dns_query(hostname, server));
+    // How many copies of the query to put in flight before waiting for
+    // any of them.
+    let count = match args.get(3) {
+        Some(s) if !s.is_empty() => match s.parse::<usize>() {
+            Ok(n) if (1..=DNS_MAX_QUERIES).contains(&n) => n,
+            _ => {
+                info!("dns: count must be 1..={DNS_MAX_QUERIES}");
+                return Ok(());
+            }
+        },
+        _ => 1,
+    };
+    spawn_global(dns_query(hostname, server, count));
     Ok(())
 }
 

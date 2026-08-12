@@ -10,6 +10,7 @@ use crate::mutex::Mutex;
 use crate::result::Result;
 use crate::slice::Sliceable;
 use crate::udp::UdpPacket;
+use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
@@ -36,24 +37,33 @@ struct DnsHeader {
 const _: () = assert!(size_of::<DnsHeader>() - size_of::<UdpPacket>() == 12);
 unsafe impl Sliceable for DnsHeader {}
 
-// Most recent DNS reply frame, stashed by the NCM rx path for the
-// waiting `dns` command to pick up.
-static DNS_RX: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+// DNS reply frames stashed by the NCM rx path for the waiting `dns`
+// command to pick up. A queue rather than a single slot because several
+// queries can be outstanding at once, and their replies would otherwise
+// overwrite each other before anyone looked.
+static DNS_RX: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
+// Enough for the largest burst `dns` will send. Beyond that the oldest
+// reply is the least interesting one to keep.
+const DNS_RX_MAX: usize = 64;
 
 /// Called from the NCM rx path for any UDP frame whose source port is
 /// 53. Stores the raw frame so a pending query can parse it.
 pub fn deliver_response(frame: &[u8]) {
-    *DNS_RX.lock() = Some(frame.to_vec());
+    let mut rx = DNS_RX.lock();
+    if rx.len() >= DNS_RX_MAX {
+        rx.pop_front();
+    }
+    rx.push_back(frame.to_vec());
 }
 
-/// Clear any stale reply before sending a new query.
+/// Drop any stale replies before sending a new query.
 pub fn clear_response() {
-    *DNS_RX.lock() = None;
+    DNS_RX.lock().clear();
 }
 
-/// Take a stored reply frame, if one has arrived.
+/// Take the oldest stored reply frame, if one has arrived.
 pub fn take_response() -> Option<Vec<u8>> {
-    DNS_RX.lock().take()
+    DNS_RX.lock().pop_front()
 }
 
 /// Build a DNS A-record query for `hostname` as a complete Ethernet
