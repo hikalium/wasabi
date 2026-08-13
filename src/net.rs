@@ -14,7 +14,18 @@ pub const PING_PAYLOAD_LEN: usize = 32;
 const PING_REPLY_TIMEOUT: Duration = Duration::from_millis(1000);
 const PING_ARP_WAIT: Duration = Duration::from_millis(200);
 
-/// Send one ICMP echo request to `target` and wait for the matching reply.
+/// The echo payload ("padding") for one ping: 0xa5 fill with `pad`'s
+/// bytes overlaid at the front, truncated to [`PING_PAYLOAD_LEN`].
+pub fn ping_payload(pad: &str) -> [u8; PING_PAYLOAD_LEN] {
+    let mut payload = [0xa5u8; PING_PAYLOAD_LEN];
+    for (d, s) in payload.iter_mut().zip(pad.bytes()) {
+        *d = s;
+    }
+    payload
+}
+
+/// Send one ICMP echo request carrying `payload` to `target` and wait
+/// for the matching reply.
 ///
 /// Returns `Ok(Some((rtt, src)))` when a reply arrives within the timeout,
 /// `Ok(None)` on timeout. An `Err` is only produced for setup failures
@@ -24,6 +35,7 @@ const PING_ARP_WAIT: Duration = Duration::from_millis(200);
 pub async fn ping_once_result(
     target: IpV4Addr,
     seq: u16,
+    payload: &[u8; PING_PAYLOAD_LEN],
 ) -> Result<Option<(Duration, IpV4Addr)>> {
     let our_mac = nic::our_mac().ok_or("NCM not ready (no MAC)")?;
 
@@ -47,7 +59,6 @@ pub async fn ping_once_result(
     };
 
     let id: u16 = 0x1d10;
-    let payload = [0xa5u8; PING_PAYLOAD_LEN];
     let frame = icmp::echo_request_frame(
         our_mac,
         nic::our_ip(),
@@ -55,7 +66,7 @@ pub async fn ping_once_result(
         target,
         id,
         seq,
-        &payload,
+        payload,
     );
     let sent_at = global_timestamp();
     *nic::PING_PENDING.lock() = Some(PingPending {
