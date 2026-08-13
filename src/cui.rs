@@ -443,8 +443,12 @@ fn parse_ipv4(s: &str) -> Result<IpV4Addr> {
     Ok(IpV4Addr::new(octets))
 }
 
-async fn ping_once(target: IpV4Addr, seq: u16) -> Result<()> {
-    match net::ping_once_result(target, seq).await? {
+async fn ping_once(
+    target: IpV4Addr,
+    seq: u16,
+    payload: &[u8; net::PING_PAYLOAD_LEN],
+) -> Result<()> {
+    match net::ping_once_result(target, seq, payload).await? {
         Some((rtt, src)) => {
             let us = rtt.as_micros();
             println!(
@@ -461,10 +465,14 @@ async fn ping_once(target: IpV4Addr, seq: u16) -> Result<()> {
     Ok(())
 }
 
-async fn ping_task(target: IpV4Addr, count: u16) -> Result<()> {
+async fn ping_task(
+    target: IpV4Addr,
+    count: u16,
+    payload: [u8; net::PING_PAYLOAD_LEN],
+) -> Result<()> {
     println!("PING {target}: {} data bytes", net::PING_PAYLOAD_LEN);
     for seq in 1..=count {
-        if let Err(e) = ping_once(target, seq).await {
+        if let Err(e) = ping_once(target, seq, &payload).await {
             error!("ping: {e}");
             return Ok(());
         }
@@ -479,7 +487,7 @@ pub fn run_cmd_ping(args: &[&str]) -> Result<()> {
     let target = match args.get(1) {
         Some(s) if !s.is_empty() => parse_ipv4(s)?,
         _ => {
-            info!("Usage: ping <ipv4> [count]");
+            info!("Usage: ping <ipv4> [count] [padding]");
             return Ok(());
         }
     };
@@ -487,7 +495,14 @@ pub fn run_cmd_ping(args: &[&str]) -> Result<()> {
         Some(s) if !s.is_empty() => s.parse().map_err(|_| "ping: bad count")?,
         _ => 4,
     };
-    spawn_global(ping_task(target, count));
+    // Everything after the count rides in the echo padding; rejoining
+    // on ' ' keeps a multi-word message intact.
+    let pad = if args.len() > 3 {
+        args[3..].join(" ")
+    } else {
+        String::new()
+    };
+    spawn_global(ping_task(target, count, net::ping_payload(&pad)));
     Ok(())
 }
 
