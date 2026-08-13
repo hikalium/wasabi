@@ -70,7 +70,7 @@ async fn ping_gateway_test() -> Result<()> {
     let gw = nic::router().expect("router is set");
     println!("ping_to_gateway: pinging default gateway {gw}");
     for seq in 1..=PING_COUNT {
-        match net::ping_once_result(gw, seq).await {
+        match net::ping_once_result(gw, seq, &net::ping_payload("")).await {
             Ok(Some((rtt, src))) => {
                 println!(
                     "ping_to_gateway: PASS (reply from {src}, {} us)",
