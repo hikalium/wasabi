@@ -30,6 +30,7 @@ use crate::print::hexdump_bytes;
 use crate::result::Result;
 use crate::slice::Sliceable;
 use crate::tcp::TcpSocket;
+use crate::tcp::TcpSocketState;
 use crate::tcp::TCP_SOCKETS;
 use crate::udp::UdpPacket;
 use crate::usb;
@@ -811,14 +812,25 @@ impl UsbNcmDriver {
 
         let mut console = Console::default();
         let mut ansi = Ansi::Normal;
+        let mut was_connected = false;
         loop {
             let b = match sock.pop_rx_byte() {
                 Some(b) => b,
                 None => {
+                    // When the connection drops, abandon any half-typed
+                    // line and escape-decoder state so the next client
+                    // starts from a clean console.
+                    let connected = sock.state() == TcpSocketState::Established;
+                    if was_connected && !connected {
+                        console = Console::default();
+                        ansi = Ansi::Normal;
+                    }
+                    was_connected = connected;
                     yield_execution().await;
                     continue;
                 }
             };
+            was_connected = true;
             ansi = match ansi {
                 Ansi::Normal => {
                     if b == 0x1B {
