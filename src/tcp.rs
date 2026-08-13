@@ -28,6 +28,15 @@ const TCP_RTO: Duration = Duration::from_millis(500);
 // host stays out of autosuspend (default ~2s on Linux).
 const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_millis(1000);
 
+// How long we keep a connection without hearing anything from the
+// peer. A live peer answers each keepalive probe within roughly
+// TCP_KEEPALIVE_INTERVAL, so this many silent probes in a row mean
+// the peer is gone: a crashed client in Established, a handshake
+// that never completed in SynReceived, or a final ACK that never
+// arrived in LastAck. Without this, such sockets would hold their
+// slot forever and eventually exhaust the listener pool.
+const TCP_IDLE_TIMEOUT: Duration = Duration::from_millis(5000);
+
 // Conservative MSS for an Ethernet/IPv4 link without IP options:
 // 1500 (MTU) - 20 (IP) - 20 (TCP) = 1460. We don't do IP fragmentation,
 // so segments larger than this would be dropped at the NIC anyway.
@@ -170,6 +179,8 @@ struct TcpSocketInner {
     last_tx_at: Option<Duration>,
     // Updated on every rx and every tx; drives the keepalive timer.
     last_active_at: Option<Duration>,
+    // Updated on rx only; drives the dead-peer cleanup in poll_tx.
+    last_rx_at: Option<Duration>,
 }
 
 impl TcpSocketInner {
@@ -185,6 +196,8 @@ impl TcpSocketInner {
         self.send_buffer.clear();
         self.unacked_len = 0;
         self.last_tx_at = None;
+        self.last_active_at = None;
+        self.last_rx_at = None;
     }
 }
 
@@ -276,6 +289,7 @@ impl TcpSocket {
                 unacked_len: 0,
                 last_tx_at: None,
                 last_active_at: None,
+                last_rx_at: None,
             }),
         }
     }
@@ -392,6 +406,7 @@ impl TcpSocket {
 
         let mut inner = self.inner.lock();
         inner.last_active_at = Some(now);
+        inner.last_rx_at = Some(now);
 
         // RST teardown: if the peer reset us at any point, drop straight
         // back to the initial state (Listen so the next SYN can be
@@ -406,7 +421,7 @@ impl TcpSocket {
 
         let prev_state = inner.state;
         let mut seq_to_ack = in_tcp.seq_num();
-        let seq = inner.my_next_seq;
+        let mut seq = inner.my_next_seq;
         let mut send_syn = false;
         let mut send_fin = false;
 
@@ -441,12 +456,22 @@ impl TcpSocket {
                 inner.last_tx_at = None;
             }
             TcpSocketState::SynReceived => {
-                if !in_tcp.is_ack() || in_tcp.ack_num() != inner.my_next_seq {
+                if in_tcp.is_syn() {
+                    // Our SYN+ACK was lost and the client retransmitted
+                    // its SYN: send the same SYN+ACK again (its seq
+                    // slot was already consumed).
+                    seq = inner.my_next_seq.wrapping_sub(1);
+                    seq_to_ack = inner.last_seq_to_ack;
+                    send_syn = true;
+                } else if in_tcp.is_ack()
+                    && in_tcp.ack_num() == inner.my_next_seq
+                {
+                    inner.state = TcpSocketState::Established;
+                    inner.last_seq_to_ack = in_tcp.seq_num();
+                    return None;
+                } else {
                     return None;
                 }
-                inner.state = TcpSocketState::Established;
-                inner.last_seq_to_ack = in_tcp.seq_num();
-                return None;
             }
             TcpSocketState::Established => {
                 // Free any of our previously-sent bytes the peer has
@@ -485,10 +510,23 @@ impl TcpSocket {
                 }
             }
             TcpSocketState::LastAck => {
-                if in_tcp.is_ack() {
+                // Only the ACK of our FIN completes the close; an ACK
+                // covering just earlier data (e.g. one that crossed our
+                // FIN+ACK on the wire) must not tear the socket down
+                // while the peer still waits for the FIN.
+                if in_tcp.is_ack() && in_tcp.ack_num() == inner.my_next_seq {
                     inner.reset_connection(self.initial_state);
+                    return None;
                 }
-                return None;
+                if !in_tcp.is_fin() {
+                    return None;
+                }
+                // Our FIN+ACK was lost and the peer retransmitted its
+                // FIN: send the same FIN+ACK again (its seq slot was
+                // already consumed).
+                seq = inner.my_next_seq.wrapping_sub(1);
+                seq_to_ack = inner.last_seq_to_ack;
+                send_fin = true;
             }
         }
 
@@ -555,6 +593,22 @@ impl TcpSocket {
                 false,
                 &[],
             ));
+        }
+        if inner.state == TcpSocketState::Listen
+            || inner.state == TcpSocketState::Closed
+        {
+            return None;
+        }
+
+        // Dead-peer cleanup: a live peer ACKs each keepalive probe, so
+        // TCP_IDLE_TIMEOUT of rx silence means nobody is answering.
+        // Reclaim the socket so its slot can serve a new client. This
+        // also frees a SynReceived socket whose handshake never
+        // completed and a LastAck socket whose final ACK never came.
+        let last_rx = inner.last_rx_at.unwrap_or(Duration::ZERO);
+        if now.saturating_sub(last_rx) >= TCP_IDLE_TIMEOUT {
+            inner.reset_connection(self.initial_state);
+            return None;
         }
         if inner.state != TcpSocketState::Established {
             return None;
@@ -1176,6 +1230,181 @@ mod tests {
         );
         sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::ZERO);
         assert_eq!(sock.state(), TcpSocketState::Listen);
+    }
+
+    #[test_case]
+    fn handle_rx_synreceived_resends_synack_on_syn_retransmit() {
+        let sock = TcpSocket::new_server(23);
+        let syn = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5000,
+            None,
+            true,
+            false,
+            &[],
+        );
+        let synack1 = sock
+            .handle_rx(&syn, OUR_MAC, OUR_IP, Duration::ZERO)
+            .unwrap();
+        // The client did not get our SYN+ACK and retransmits its SYN:
+        // we must answer with the identical SYN+ACK, not silence.
+        let synack2 = sock
+            .handle_rx(&syn, OUR_MAC, OUR_IP, Duration::from_millis(100))
+            .unwrap();
+        let r1 = parse_reply(&synack1);
+        let r2 = parse_reply(&synack2);
+        assert!(r2.is_syn() && r2.is_ack());
+        assert_eq!(r2.seq_num(), r1.seq_num());
+        assert_eq!(r2.ack_num(), r1.ack_num());
+        assert_eq!(sock.state(), TcpSocketState::SynReceived);
+    }
+
+    #[test_case]
+    fn handle_rx_lastack_handles_lost_finack() {
+        let (sock, client_seq) = established_socket();
+        let fin = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            client_seq,
+            Some(0),
+            false,
+            true,
+            &[],
+        );
+        let finack1 = sock
+            .handle_rx(&fin, OUR_MAC, OUR_IP, Duration::ZERO)
+            .unwrap();
+        let r1 = parse_reply(&finack1);
+        assert_eq!(sock.state(), TcpSocketState::LastAck);
+
+        // An ACK that does not cover our FIN (e.g. a data ACK that
+        // crossed our FIN+ACK on the wire) must not close the socket.
+        let stale_ack = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            client_seq.wrapping_add(1),
+            Some(r1.seq_num()), // acks everything before the FIN only
+            false,
+            false,
+            &[],
+        );
+        sock.handle_rx(&stale_ack, OUR_MAC, OUR_IP, Duration::ZERO);
+        assert_eq!(sock.state(), TcpSocketState::LastAck);
+
+        // Our FIN+ACK was lost and the peer retransmits its FIN: we
+        // must answer with the identical FIN+ACK.
+        let finack2 = sock
+            .handle_rx(&fin, OUR_MAC, OUR_IP, Duration::from_millis(100))
+            .unwrap();
+        let r2 = parse_reply(&finack2);
+        assert!(r2.is_fin() && r2.is_ack());
+        assert_eq!(r2.seq_num(), r1.seq_num());
+        assert_eq!(r2.ack_num(), r1.ack_num());
+        assert_eq!(sock.state(), TcpSocketState::LastAck);
+
+        // The real ACK of our FIN completes the close.
+        let ack = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            client_seq.wrapping_add(1),
+            Some(r1.seq_num().wrapping_add(1)),
+            false,
+            false,
+            &[],
+        );
+        sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::ZERO);
+        assert_eq!(sock.state(), TcpSocketState::Listen);
+    }
+
+    #[test_case]
+    fn poll_tx_resets_established_after_idle_timeout() {
+        let (sock, _) = established_socket();
+        // The peer answered nothing since the handshake at t=0, but
+        // within TCP_IDLE_TIMEOUT we only probe with keepalives.
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(1500))
+            .is_some());
+        assert_eq!(sock.state(), TcpSocketState::Established);
+        // Once nothing has been received for TCP_IDLE_TIMEOUT, the
+        // peer is assumed dead and the socket returns to Listen.
+        assert!(sock.poll_tx(OUR_MAC, OUR_IP, TCP_IDLE_TIMEOUT).is_none());
+        assert_eq!(sock.state(), TcpSocketState::Listen);
+    }
+
+    #[test_case]
+    fn poll_tx_rx_activity_defers_idle_timeout() {
+        let (sock, client_seq) = established_socket();
+        // A segment from the peer at t=4s refreshes the rx clock…
+        let seg = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            client_seq,
+            Some(0),
+            false,
+            false,
+            b"x",
+        );
+        sock.handle_rx(&seg, OUR_MAC, OUR_IP, Duration::from_millis(4000));
+        // …so at t=8s (4s of silence) the connection is still alive…
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(8000))
+            .is_some());
+        assert_eq!(sock.state(), TcpSocketState::Established);
+        // …and only at t=9s (5s of silence) it is reclaimed.
+        assert!(sock
+            .poll_tx(OUR_MAC, OUR_IP, Duration::from_millis(9000))
+            .is_none());
+        assert_eq!(sock.state(), TcpSocketState::Listen);
+    }
+
+    #[test_case]
+    fn poll_tx_resets_stuck_synreceived() {
+        let sock = TcpSocket::new_server(23);
+        let syn = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5000,
+            None,
+            true,
+            false,
+            &[],
+        );
+        sock.handle_rx(&syn, OUR_MAC, OUR_IP, Duration::ZERO);
+        assert_eq!(sock.state(), TcpSocketState::SynReceived);
+        // The final ACK of the handshake never arrives (e.g. a SYN
+        // scan): the socket must not hold its slot forever.
+        assert!(sock.poll_tx(OUR_MAC, OUR_IP, TCP_IDLE_TIMEOUT).is_none());
+        assert_eq!(sock.state(), TcpSocketState::Listen);
+        // The freed socket accepts a new connection.
+        let reply = sock
+            .handle_rx(&syn, OUR_MAC, OUR_IP, TCP_IDLE_TIMEOUT)
+            .unwrap();
+        assert!(parse_reply(&reply).is_syn());
     }
 
     // Complete the three-way handshake for `client_port` against
