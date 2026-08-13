@@ -471,6 +471,18 @@ impl UsbNcmDriver {
                                 &frame[..core::mem::size_of::<IcmpPacket>()],
                             )
                             .ok();
+                            if icmp.is_some() {
+                                // The echo data ("padding") follows the
+                                // 8-byte ICMP header.
+                                let padding = &frame
+                                    [core::mem::size_of::<IcmpPacket>()..];
+                                info!(
+                                    "ICMP: rx from {}, padding {} bytes",
+                                    ip.src(),
+                                    padding.len(),
+                                );
+                                hexdump_bytes(padding);
+                            }
                             if icmp
                                 .map(|p| p.is_echo_request())
                                 .unwrap_or(false)
