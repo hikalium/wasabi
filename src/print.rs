@@ -3,7 +3,7 @@ use crate::gui::GLOBAL_VRAM;
 use crate::lpss_uart::lpss_uart;
 use crate::mutex::Mutex;
 use crate::serial::SerialPort;
-use crate::tcp::TCP_SOCKET;
+use crate::tcp::TCP_SOCKETS;
 use crate::uefi::VramBufferInfo;
 use core::fmt;
 use core::mem::size_of;
@@ -12,13 +12,15 @@ use core::slice;
 static GLOBAL_PRINTER: Mutex<BitmapTextWriter<VramBufferInfo>> =
     Mutex::new(BitmapTextWriter::new(&GLOBAL_VRAM));
 
-// Mirrors `print!`/`println!` output into the TCP socket's tx queue
-// when a connection is Established. `push_tx_bytes` is itself a no-op
-// in any other state, so this is safe to call unconditionally.
+// Mirrors `print!`/`println!` output into every TCP socket's tx queue.
+// `push_tx_bytes` is a no-op on sockets without an Established
+// connection, so this is safe to call unconditionally.
 struct TcpMirror;
 impl fmt::Write for TcpMirror {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        TCP_SOCKET.push_tx_bytes(s.as_bytes());
+        for sock in TCP_SOCKETS.iter() {
+            sock.push_tx_bytes(s.as_bytes());
+        }
         Ok(())
     }
 }
