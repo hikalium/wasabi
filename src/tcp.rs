@@ -173,9 +173,61 @@ pub struct TcpSocket {
     inner: Mutex<TcpSocketInner>,
 }
 
-/// Global TCP listener used by the NCM driver for the remote terminal.
-/// One connection at a time on port 23.
-pub static TCP_SOCKET: TcpSocket = TcpSocket::new_server(23);
+/// How many remote-terminal connections can be open at once. A SYN
+/// arriving while every slot is bound gets no reply; the client keeps
+/// retrying until a slot frees up or it gives up.
+pub const TCP_MAX_CONNECTIONS: usize = 4;
+
+/// Global TCP listener pool used by the NCM driver for the remote
+/// terminal: up to TCP_MAX_CONNECTIONS connections on port 23 at once.
+pub static TCP_SOCKETS: [TcpSocket; TCP_MAX_CONNECTIONS] = [
+    TcpSocket::new_server(23),
+    TcpSocket::new_server(23),
+    TcpSocket::new_server(23),
+    TcpSocket::new_server(23),
+];
+
+/// Deliver one received TCP frame to the socket in `TCP_SOCKETS` that
+/// owns it: a segment whose source (IP, port) matches an already-bound
+/// socket goes to that socket, and a SYN from a new peer claims a
+/// socket still in Listen. Everything else is dropped.
+pub fn handle_frame(
+    frame: &[u8],
+    our_mac: EthernetAddr,
+    our_ip: IpV4Addr,
+    now: Duration,
+) -> Option<Vec<u8>> {
+    handle_frame_on(&TCP_SOCKETS, frame, our_mac, our_ip, now)
+}
+
+fn handle_frame_on(
+    sockets: &[TcpSocket],
+    frame: &[u8],
+    our_mac: EthernetAddr,
+    our_ip: IpV4Addr,
+    now: Duration,
+) -> Option<Vec<u8>> {
+    if frame.len() < size_of::<TcpPacket>() {
+        return None;
+    }
+    let in_tcp =
+        TcpPacket::copy_from_slice(&frame[..size_of::<TcpPacket>()]).ok()?;
+    let peer_ip = in_tcp.ip.src();
+    let peer_port = in_tcp.src_port();
+    for sock in sockets.iter() {
+        if sock.is_bound_to(peer_ip, peer_port) {
+            return sock.handle_rx(frame, our_mac, our_ip, now);
+        }
+    }
+    if in_tcp.is_syn() {
+        for sock in sockets.iter() {
+            if sock.state() == TcpSocketState::Listen {
+                return sock.handle_rx(frame, our_mac, our_ip, now);
+            }
+        }
+    }
+    None
+}
 
 impl TcpSocket {
     pub const fn new_server(listen_port: u16) -> Self {
@@ -200,6 +252,14 @@ impl TcpSocket {
     }
     pub fn state(&self) -> TcpSocketState {
         self.inner.lock().state
+    }
+    /// Whether this socket is past Listen and tracking `(ip, port)` as
+    /// its peer. Used by `handle_frame` to demux incoming segments.
+    fn is_bound_to(&self, ip: IpV4Addr, port: u16) -> bool {
+        let inner = self.inner.lock();
+        inner.state != TcpSocketState::Listen
+            && inner.peer_ip == ip
+            && inner.peer_port == port
     }
     /// Snapshot of socket state for diagnostics. Uses `try_lock` so
     /// this can be called from log / panic paths without risking the
@@ -1014,6 +1074,96 @@ mod tests {
         );
         sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::ZERO);
         assert_eq!(sock.state(), TcpSocketState::Listen);
+    }
+
+    // Complete the three-way handshake for `client_port` against
+    // whichever socket in `socks` picks the SYN up.
+    fn connect_client(socks: &[TcpSocket], client_port: u16) {
+        let syn = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            client_port,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5000,
+            None,
+            true,
+            false,
+            &[],
+        );
+        let synack =
+            handle_frame_on(socks, &syn, OUR_MAC, OUR_IP, Duration::ZERO)
+                .unwrap();
+        let our_seq_plus_1 = parse_reply(&synack).seq_num().wrapping_add(1);
+        let ack = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            client_port,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            5001,
+            Some(our_seq_plus_1),
+            false,
+            false,
+            &[],
+        );
+        handle_frame_on(socks, &ack, OUR_MAC, OUR_IP, Duration::ZERO);
+    }
+
+    #[test_case]
+    fn handle_frame_demuxes_two_clients() {
+        let socks = [TcpSocket::new_server(23), TcpSocket::new_server(23)];
+        connect_client(&socks, 1000);
+        connect_client(&socks, 2000);
+        assert_eq!(socks[0].state(), TcpSocketState::Established);
+        assert_eq!(socks[1].state(), TcpSocketState::Established);
+
+        // Data from each client lands in its own socket's rx queue.
+        for (client_port, data) in [(1000, b"aa"), (2000, b"bb")] {
+            let seg = build_client_segment(
+                PEER_MAC,
+                PEER_IP,
+                client_port,
+                OUR_MAC,
+                OUR_IP,
+                23,
+                5001,
+                Some(0),
+                false,
+                false,
+                data,
+            );
+            handle_frame_on(&socks, &seg, OUR_MAC, OUR_IP, Duration::ZERO);
+        }
+        assert_eq!(socks[0].pop_rx_byte(), Some(b'a'));
+        assert_eq!(socks[1].pop_rx_byte(), Some(b'b'));
+    }
+
+    #[test_case]
+    fn handle_frame_ignores_syn_when_all_sockets_bound() {
+        let socks = [TcpSocket::new_server(23)];
+        connect_client(&socks, 1000);
+        // Every slot is bound now; a SYN from a new peer gets no reply
+        // and leaves the existing connection untouched.
+        let syn = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            2000,
+            OUR_MAC,
+            OUR_IP,
+            23,
+            7000,
+            None,
+            true,
+            false,
+            &[],
+        );
+        let reply =
+            handle_frame_on(&socks, &syn, OUR_MAC, OUR_IP, Duration::ZERO);
+        assert!(reply.is_none());
+        assert_eq!(socks[0].state(), TcpSocketState::Established);
     }
 
     #[test_case]
