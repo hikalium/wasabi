@@ -29,7 +29,8 @@ use crate::ncm;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
 use crate::slice::Sliceable;
-use crate::tcp::TCP_SOCKET;
+use crate::tcp::TcpSocket;
+use crate::tcp::TCP_SOCKETS;
 use crate::udp::UdpPacket;
 use crate::usb;
 use crate::usb::descriptors_under_config;
@@ -509,7 +510,7 @@ impl UsbNcmDriver {
                             }
                         } else if ip.protocol() == IpV4Protocol::tcp() {
                             let now = crate::hpet::global_timestamp();
-                            if let Some(reply) = TCP_SOCKET.handle_rx(
+                            if let Some(reply) = crate::tcp::handle_frame(
                                 frame,
                                 our_mac,
                                 our_ip(),
@@ -759,17 +760,20 @@ impl UsbNcmDriver {
     async fn poll_tcp_tx(our_mac: EthernetAddr) -> Result<()> {
         loop {
             let now = crate::hpet::global_timestamp();
-            if let Some(frame) = TCP_SOCKET.poll_tx(our_mac, our_ip(), now) {
-                enqueue_tx_frame(frame);
+            for sock in TCP_SOCKETS.iter() {
+                if let Some(frame) = sock.poll_tx(our_mac, our_ip(), now) {
+                    enqueue_tx_frame(frame);
+                }
             }
             sleep(Duration::from_millis(20)).await;
         }
     }
-    /// Drive a Console from bytes the TCP peer types. The Console's
-    /// `print!` calls are picked up by the TcpMirror tee in print.rs,
-    /// so output reaches the remote without any explicit forwarding
-    /// here.
-    async fn drive_remote_console() -> Result<()> {
+    /// Drive a Console from bytes the peer on `sock` types; one of
+    /// these tasks runs per socket in TCP_SOCKETS, so each client gets
+    /// its own Console. The Console's `print!` calls are picked up by
+    /// the TcpMirror tee in print.rs, so output reaches the remotes
+    /// without any explicit forwarding here.
+    async fn drive_remote_console(sock: &'static TcpSocket) -> Result<()> {
         // Three-state ANSI escape decoder for the cursor keys: a
         // terminal emits `ESC [ A` for Up, `ESC [ B` for Down, etc.
         // Without this the literal 'A' would slip through as input
@@ -796,7 +800,7 @@ impl UsbNcmDriver {
         let mut console = Console::default();
         let mut ansi = Ansi::Normal;
         loop {
-            let b = match TCP_SOCKET.pop_rx_byte() {
+            let b = match sock.pop_rx_byte() {
                 Some(b) => b,
                 None => {
                     yield_execution().await;
@@ -1097,7 +1101,9 @@ impl UsbNcmDriver {
         ));
         spawn_global(Self::poll_dhcp(our_mac));
         spawn_global(Self::poll_tcp_tx(our_mac));
-        spawn_global(Self::drive_remote_console());
+        for sock in TCP_SOCKETS.iter() {
+            spawn_global(Self::drive_remote_console(sock));
+        }
         Ok(())
     }
 }
