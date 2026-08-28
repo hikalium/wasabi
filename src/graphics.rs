@@ -273,3 +273,99 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod font_drawing_tests {
+    use super::*;
+    use crate::bitmap::BitmapBuffer;
+
+    const FG: u32 = 0xffffff;
+
+    fn new_bitmap(width: i64) -> BitmapBuffer {
+        BitmapBuffer::new(width, 16, width)
+    }
+
+    fn count_fg_pixels(buf: &mut BitmapBuffer, x0: i64, x1: i64) -> usize {
+        let mut n = 0;
+        for y in 0..buf.height() {
+            for x in x0..x1 {
+                if matches!(buf.pixel_at_mut(x, y), Some(&mut c) if c == FG) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    #[test_case]
+    fn draw_font_fg_returns_8_for_an_ascii_glyph() {
+        let mut buf = new_bitmap(32);
+        assert_eq!(draw_font_fg(&mut buf, 0, 0, FG, 'A'), 8);
+        assert!(count_fg_pixels(&mut buf, 0, 8) > 0);
+        assert_eq!(count_fg_pixels(&mut buf, 8, 32), 0);
+    }
+
+    #[test_case]
+    fn draw_font_fg_returns_16_for_a_wide_glyph() {
+        let mut buf = new_bitmap(32);
+        assert_eq!(draw_font_fg(&mut buf, 0, 0, FG, '日'), 16);
+        assert!(count_fg_pixels(&mut buf, 8, 16) > 0);
+        assert_eq!(count_fg_pixels(&mut buf, 16, 32), 0);
+    }
+
+    #[test_case]
+    fn draw_font_fg_returns_0_for_a_glyph_not_in_the_font() {
+        // U+FFFF is a noncharacter: it is permanently unassigned, so no
+        // font will ever have a glyph for it.
+        const NO_GLYPH: char = '\u{FFFF}';
+        let mut buf = new_bitmap(32);
+        assert_eq!(draw_font_fg(&mut buf, 0, 0, FG, NO_GLYPH), 0);
+        assert_eq!(count_fg_pixels(&mut buf, 0, 32), 0);
+    }
+
+    // Asserts that draw_str_fg puts each glyph of s exactly where drawing
+    // it alone at the given x would: same pixels, nothing else.
+    fn assert_glyph_layout(s: &str, offsets: &[i64]) {
+        let mut drawn = new_bitmap(64);
+        draw_str_fg(&mut drawn, 0, 0, FG, s);
+        let mut expected = new_bitmap(64);
+        for (c, &x) in s.chars().zip(offsets) {
+            draw_font_fg(&mut expected, x, 0, FG, c);
+        }
+        assert_eq!(drawn, expected);
+    }
+
+    #[test_case]
+    fn draw_str_fg_lays_out_glyphs_left_to_right() {
+        assert_glyph_layout("", &[]);
+        assert_glyph_layout("A", &[0]);
+        assert_glyph_layout("日", &[0]);
+        assert_glyph_layout("AA", &[0, 8]);
+        assert_glyph_layout("A日", &[0, 8]);
+        assert_glyph_layout("日A", &[0, 16]);
+        assert_glyph_layout("日日", &[0, 16]);
+        assert_glyph_layout("AAA", &[0, 8, 16]);
+        assert_glyph_layout("AA日", &[0, 8, 16]);
+        assert_glyph_layout("A日A", &[0, 8, 24]);
+        assert_glyph_layout("A日日", &[0, 8, 24]);
+        assert_glyph_layout("日AA", &[0, 16, 24]);
+        assert_glyph_layout("日A日", &[0, 16, 24]);
+        assert_glyph_layout("日日A", &[0, 16, 32]);
+        assert_glyph_layout("日日日", &[0, 16, 32]);
+    }
+
+    #[test_case]
+    fn draw_str_fg_clips_glyphs_at_the_right_edge() {
+        // A glyph that starts past the right edge draws nothing at all.
+        let mut two = new_bitmap(16);
+        draw_str_fg(&mut two, 0, 0, FG, "日日");
+        let mut one = new_bitmap(16);
+        draw_str_fg(&mut one, 0, 0, FG, "日");
+        assert_eq!(two, one);
+
+        // A glyph that straddles the edge draws the part that fits.
+        let mut half = new_bitmap(24);
+        draw_str_fg(&mut half, 0, 0, FG, "日日");
+        assert!(count_fg_pixels(&mut half, 16, 24) > 0);
+    }
+}
