@@ -273,3 +273,58 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod font_drawing_tests {
+    use super::*;
+    use crate::bitmap::BitmapBuffer;
+
+    const FG: u32 = 0xffffff;
+
+    fn new_bitmap() -> BitmapBuffer {
+        BitmapBuffer::new(32, 16, 32)
+    }
+
+    fn count_fg_pixels(buf: &mut BitmapBuffer, x0: i64, x1: i64) -> usize {
+        let mut n = 0;
+        for y in 0..buf.height() {
+            for x in x0..x1 {
+                if matches!(buf.pixel_at_mut(x, y), Some(&mut c) if c == FG) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    #[test_case]
+    fn draw_font_fg_returns_8_for_an_ascii_glyph() {
+        let mut buf = new_bitmap();
+        assert_eq!(draw_font_fg(&mut buf, 0, 0, FG, 'A'), 8);
+        assert!(count_fg_pixels(&mut buf, 0, 8) > 0);
+        assert_eq!(count_fg_pixels(&mut buf, 8, 32), 0);
+    }
+
+    #[test_case]
+    fn draw_font_fg_returns_16_for_a_wide_glyph() {
+        let mut buf = new_bitmap();
+        assert_eq!(draw_font_fg(&mut buf, 0, 0, FG, '日'), 16);
+        assert!(count_fg_pixels(&mut buf, 8, 16) > 0);
+        assert_eq!(count_fg_pixels(&mut buf, 16, 32), 0);
+    }
+
+    #[test_case]
+    fn draw_font_fg_returns_0_for_a_glyph_not_in_the_font() {
+        let mut buf = new_bitmap();
+        assert_eq!(draw_font_fg(&mut buf, 0, 0, FG, 'ア'), 0);
+        assert_eq!(count_fg_pixels(&mut buf, 0, 32), 0);
+    }
+
+    #[test_case]
+    fn draw_str_fg_advances_by_the_width_of_each_glyph() {
+        let mut buf = new_bitmap();
+        draw_str_fg(&mut buf, 0, 0, FG, "日A");
+        assert!(count_fg_pixels(&mut buf, 16, 24) > 0);
+        assert_eq!(count_fg_pixels(&mut buf, 24, 32), 0);
+    }
+}
