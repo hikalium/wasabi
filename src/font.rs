@@ -100,7 +100,7 @@ pub fn lookup_font_8x16(c: char) -> Option<[[char; 8]; 16]> {
 
 #[test_case]
 fn conversion_glyphs_are_available() {
-    for c in "今日天気雨飴".chars() {
+    for c in "今日天気雨飴私名前中野貴社記者汽車帰".chars() {
         assert_eq!(get_glyph_width(c), 16, "{c}");
     }
 }
