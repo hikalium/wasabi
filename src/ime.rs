@@ -47,15 +47,12 @@ pub struct InputMethodEditor {
 }
 
 impl InputMethodEditor {
+    // Loads the dictionary table, which the imedict tool in the book
+    // repository generates from the manuscript.
     pub fn init_dict(&mut self) {
-        self.dict.insert("きょう", &["今日"]);
-        self.dict.insert("てんき", &["天気"]);
-        self.dict.insert("あめ", &["雨", "飴"]);
-        self.dict.insert("わたし", &["私"]);
-        self.dict.insert("なまえ", &["名前"]);
-        self.dict.insert("なかの", &["中野"]);
-        self.dict
-            .insert("きしゃ", &["貴社", "記者", "汽車", "帰社"]);
+        for &(reading, candidates) in crate::ime_dict::DICT {
+            self.dict.insert(reading, candidates);
+        }
     }
     pub fn boin_index(e: char) -> Option<usize> {
         match e {
