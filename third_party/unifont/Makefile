@@ -1,10 +1,10 @@
 GLYPHS_TO_INCLUDE=$(shell cat chars_to_include.txt | \
 				 iconv -f utf-8 -t utf16be | xxd -p | grep -o '....' | \
-				 sort | tr '[:lower:]' '[:upper:]' | grep -v 000A | \
+				 sort -u | tr '[:lower:]' '[:upper:]' | grep -v 000A | \
 				 sed -E -e 's/^/glyph_/' -e 's/$$/.txt/')
 
-glyphs.txt: $(GLYPHS_TO_INCLUDE) Makefile
-	grep '$$' glyph_*.txt | tee glyphs.txt
+glyphs.txt: $(GLYPHS_TO_INCLUDE) chars_to_include.txt Makefile
+	grep -H '^' $(GLYPHS_TO_INCLUDE) | tee glyphs.txt
 
 unifont_jp-16.0.04.bdf :
 	wget https://unifoundry.com/pub/unifont/unifont-16.0.04/font-builds/unifont_jp-16.0.04.bdf.gz
