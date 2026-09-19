@@ -1,7 +1,6 @@
 extern crate alloc;
 
 use crate::keyboard::KeyEvent;
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -15,6 +14,10 @@ pub enum InputEditResult {
 
 // The kanji candidates for one reading, most likely first.
 pub type Candidates = &'static [&'static str];
+
+// Readings (in kana) and their candidates. Readings and candidate
+// lists must be non-empty.
+pub type Dictionary = &'static [(&'static str, Candidates)];
 
 // A dictionary word found at the start of a reading, and the rest of
 // the reading (e.g. a particle) that follows it.
@@ -48,18 +51,16 @@ fn to_katakana(s: &str) -> String {
 pub struct InputMethodEditor {
     pending_string: String,
     conversion: Option<Conversion>,
-    // Reading (in kana) to its candidates. Keys and candidate lists
-    // must be non-empty.
-    dict: BTreeMap<&'static str, Candidates>,
+    dict: Dictionary,
 }
 
 impl InputMethodEditor {
-    // Loads the dictionary table, which the imedict tool
-    // (tools/imedict) generates from the manuscript.
+    // Points at the dictionary table, which the imedict tool
+    // (tools/imedict) generates from the manuscript. The table is used
+    // in place: with thousands of words, copying it into a map would
+    // make every Console take a second to create.
     pub fn init_dict(&mut self) {
-        for &(reading, candidates) in crate::ime_dict::DICT {
-            self.dict.insert(reading, candidates);
-        }
+        self.dict = crate::ime_dict::DICT;
     }
     pub fn boin_index(e: char) -> Option<usize> {
         match e {
@@ -107,21 +108,25 @@ impl InputMethodEditor {
     }
     // Finds the longest dictionary word that the reading begins with.
     // A phrase is a word plus whatever attaches to it, so the reading
-    // after the word is kept as the suffix.
+    // after the word is kept as the suffix. The table is sorted by
+    // reading, so each prefix of the reading, longest first, is looked
+    // up by binary search.
     fn longest_match<'a>(
         &self,
         reading: &'a str,
     ) -> Option<DictionaryMatch<'a>> {
-        self.dict
-            .iter()
-            .filter(|(word, _)| reading.starts_with(**word))
-            .max_by_key(|(word, _)| word.len())
-            .map(|(word, &candidates)| DictionaryMatch {
-                candidates,
-                // word.len() is a char boundary in reading, since
-                // reading starts with word.
-                suffix: &reading[word.len()..],
+        let ends = reading.char_indices().map(|(i, c)| i + c.len_utf8());
+        ends.rev().find_map(|end| {
+            let (word, suffix) = reading.split_at(end);
+            let i = self
+                .dict
+                .binary_search_by(|(w, _)| str::cmp(w, word))
+                .ok()?;
+            Some(DictionaryMatch {
+                candidates: self.dict[i].1,
+                suffix,
             })
+        })
     }
     // The kana row (a, i, u, e, o) that a consonant spells. An empty
     // string means the row has no kana for that vowel.
@@ -543,7 +548,8 @@ fn weather_conversion() {
 
 #[test_case]
 fn unmatched_space_is_consumed_without_insertion() {
-    let mut ime = new_test_ime();
+    // Without a dictionary nothing can match.
+    let mut ime = InputMethodEditor::default();
     assert_eq!(
         type_text(&mut ime, "sora "),
         InputEditResult::UpdatePendingString("そら".to_string())
@@ -579,7 +585,8 @@ fn phrase_conversion_preserves_suffix() {
 fn longest_dictionary_prefix_wins() {
     let mut ime = new_test_ime();
     // A shorter word that is also a prefix of the reading must lose.
-    ime.dict.insert("きょ", &["短"]);
+    let dict: Dictionary = &[("きょ", &["短"]), ("きょう", &["今日"])];
+    ime.dict = dict;
     assert_eq!(
         type_text(&mut ime, "kyouno "),
         InputEditResult::UpdatePendingString("今日の".to_string())
@@ -588,9 +595,12 @@ fn longest_dictionary_prefix_wins() {
 
 #[test_case]
 fn longest_prefix_is_not_grammatical_analysis() {
-    // The suffix is not checked to be a particle or ending: あめりか
-    // becomes 雨りか. This pins down the extent of the method.
+    // The suffix is not checked to be a particle or ending: with a
+    // dictionary that knows あめ but not あめりか, あめりか becomes
+    // 雨りか. This pins down the extent of the method.
     let mut ime = new_test_ime();
+    let dict: Dictionary = &[("あめ", &["雨"])];
+    ime.dict = dict;
     assert_eq!(
         type_text(&mut ime, "amerika "),
         InputEditResult::UpdatePendingString("雨りか".to_string())
@@ -734,4 +744,11 @@ fn stepping_candidates_wraps_both_ways() {
         ime.step_candidate(2),
         Some(InputEditResult::UpdatePendingString("記者".to_string()))
     );
+}
+
+#[test_case]
+fn dictionary_table_is_sorted_for_binary_search() {
+    let dict = crate::ime_dict::DICT;
+    assert!(dict.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    assert!(dict.iter().all(|(r, c)| !r.is_empty() && !c.is_empty()));
 }
