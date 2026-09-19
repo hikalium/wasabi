@@ -34,6 +34,14 @@ pub fn global_print(args: fmt::Arguments) {
     }
 }
 
+/// Where on the screen the next printed char will go, in pixels.
+pub fn cursor_position() -> (i64, i64) {
+    (GLOBAL_VRAM_WRITER.lock())
+        .as_ref()
+        .map(|w| w.cursor())
+        .unwrap_or((0, 0))
+}
+
 #[macro_export]
 macro_rules! print {
         ($($arg:tt)*) => ($crate::print::global_print(format_args!($($arg)*)));
