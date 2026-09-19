@@ -48,6 +48,12 @@ pub fn set_ime_enabled(choice: bool) {
     });
 }
 
+// How many 8-pixel cells c takes on screen, by the same rule as
+// BitmapTextWriter (a char missing from the font takes none).
+fn glyph_cells(c: char) -> usize {
+    (get_glyph_width(c) / 8) as usize
+}
+
 pub struct Console {
     prev_cmd: Option<String>,
     input_buf: String,
@@ -91,10 +97,7 @@ impl Console {
     fn input_plain(&mut self, c: char) {
         if c == '\x08' {
             if let Some(prev_char) = self.input_buf.pop() {
-                if get_glyph_width(prev_char) == 16 {
-                    print!("\x08");
-                    print!("\x08");
-                } else {
+                for _ in 0..glyph_cells(prev_char) {
                     print!("\x08");
                 }
             }
@@ -108,10 +111,7 @@ impl Console {
     // draw the new tail (a wide glyph is two cells).
     fn render_ime_line(&mut self, old: &str, new: &str) {
         let cols = |s: &str, skip: usize| -> usize {
-            s.chars()
-                .skip(skip)
-                .map(|ch| if get_glyph_width(ch) == 16 { 2 } else { 1 })
-                .sum()
+            s.chars().skip(skip).map(glyph_cells).sum()
         };
         let common = old
             .chars()
@@ -486,5 +486,15 @@ mod line_edit_tests {
         assert_eq!(con.input_buf, "A");
         assert_eq!(con.ime.pending(), "あ");
         set_ime_enabled(false);
+    }
+
+    #[test_case]
+    fn cell_width_matches_bitmap_writer() {
+        assert_eq!(glyph_cells('A'), 1);
+        assert_eq!(glyph_cells('日'), 2);
+        assert_eq!(glyph_cells('\u{3000}'), 2);
+        assert_eq!(glyph_cells('ぃ'), 2);
+        // U+FFFF is a noncharacter, so no font has a glyph for it.
+        assert_eq!(glyph_cells('\u{FFFF}'), 0);
     }
 }
