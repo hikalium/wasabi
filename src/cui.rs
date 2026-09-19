@@ -923,6 +923,18 @@ mod line_edit_tests {
     }
 
     #[test_case]
+    fn sentence_is_built_from_committed_phrases() {
+        let mut con = console_with_ime();
+        for phrase in ["kyouno ", "tennkiha ", "amedesu "] {
+            type_str(&mut con, phrase);
+            con.handle_key_down(KeyEvent::Enter);
+        }
+        assert_eq!(con.input_buf, "今日の天気は雨です");
+        assert_eq!(con.ime.pending(), "");
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
     fn unchanged_line_produces_no_output() {
         let line = styled_line("A", "あ");
         assert_eq!(encode_line_diff(&line, &line), "");
