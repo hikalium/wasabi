@@ -129,8 +129,10 @@ impl InputMethodEditor {
             'v' => Some(["ゔぁ", "ゔぃ", "ゔ", "ゔぇ", "ゔぉ"]),
             'c' => Some(["か", "し", "く", "せ", "こ"]),
             'q' => Some(["くぁ", "くぃ", "く", "くぇ", "くぉ"]),
-            // x + vowel is the small vowel; xtu is っ, xya/xyu/xyo are ゃゅょ.
+            // x or l + vowel is the small vowel; xtu/ltu are っ, and
+            // xya/xyu/xyo (lya/lyu/lyo) are ゃゅょ.
             'x' => Some(["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"]),
+            'l' => Some(["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"]),
             _ => None,
         }
     }
@@ -162,6 +164,8 @@ impl InputMethodEditor {
             ('g', 'w') => Some(["ぐぁ", "ぐぃ", "ぐぅ", "ぐぇ", "ぐぉ"]),
             ('x', 'y') => Some(["ゃ", "ぃ", "ゅ", "ぇ", "ょ"]),
             ('x', 't') => Some(["", "", "っ", "", ""]),
+            ('l', 'y') => Some(["ゃ", "ぃ", "ゅ", "ぇ", "ょ"]),
+            ('l', 't') => Some(["", "", "っ", "", ""]),
             _ => None,
         }
     }
@@ -610,6 +614,9 @@ fn extended_romaji_rows() {
         ("xa", "ぁ"),
         ("xtu", "っ"),
         ("xyo", "ょ"),
+        ("la", "ぁ"),
+        ("ltu", "っ"),
+        ("lyu", "ゅ"),
     ] {
         let mut ime = new_test_ime();
         assert_eq!(
