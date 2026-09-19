@@ -205,6 +205,10 @@ impl InputMethodEditor {
                     };
                     if '-' == prev1 {
                         String::from('ー')
+                    } else if ',' == prev1 {
+                        String::from('、')
+                    } else if '.' == prev1 {
+                        String::from('。')
                     } else if let (Some('n'), 'n') = (prev2, prev1) {
                         self.pending_string.pop();
                         String::from('ん')
@@ -531,4 +535,16 @@ fn homophone_candidates_cycle_in_dictionary_order() {
             InputEditResult::UpdatePendingString(expected.to_string())
         );
     }
+}
+
+#[test_case]
+fn comma_and_period_become_japanese_punctuation() {
+    use crate::font::get_glyph_width;
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "hai,sou."),
+        InputEditResult::UpdatePendingString("はい、そう。".to_string())
+    );
+    assert_eq!(get_glyph_width('、'), 16);
+    assert_eq!(get_glyph_width('。'), 16);
 }
