@@ -4,12 +4,18 @@
 //! that contain kanji, and katakana words, are picked out with a
 //! morphological analyzer (lindera with the embedded IPADIC), keyed by
 //! their reading in hiragana, and ordered by how often they appear.
-//! Runs of nouns are also added as compound words.
+//! Runs of nouns are also added as compound words. The `SEED` entries
+//! always come first in their reading's candidate list.
 //!
-//! For now, the words are printed with their counts, most frequent
-//! first.
+//! Writes `src/ime_dict.rs` in the wasabi repository and appends every
+//! kanji and katakana seen to `third_party/unifont/chars_to_include.txt`
+//! there; run `make -C third_party/unifont glyphs.txt` afterwards to
+//! regenerate the glyphs. With no inputs, the dictionary holds just the
+//! `SEED` entries.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -26,10 +32,26 @@ use lindera::segmenter::Segmenter;
 /// from the words used in the manuscript.
 #[derive(FromArgs)]
 struct Args {
+    /// path to the wasabi (code) repository to write into
+    #[argh(option)]
+    repo: PathBuf,
     /// manuscript files or directories (*.md and *.typ are read)
     #[argh(positional)]
     inputs: Vec<PathBuf>,
 }
+
+/// Hand-picked entries; their order of candidates is kept as is.
+const SEED: &[(&str, &[&str])] = &[
+    ("きょう", &["今日"]),
+    ("てんき", &["天気"]),
+    ("あめ", &["雨", "飴"]),
+    ("わたし", &["私"]),
+    ("なまえ", &["名前"]),
+    ("なかの", &["中野"]),
+    ("きしゃ", &["貴社", "記者", "汽車", "帰社"]),
+];
+
+const GLYPH_CHARS_PER_LINE: usize = 32;
 
 // IPADIC token details:
 // 品詞,細分類1,細分類2,細分類3,活用型,活用形,原形,読み,発音
@@ -160,15 +182,90 @@ fn count_words(texts: &[String]) -> Result<Counts> {
     Ok(counts)
 }
 
+fn build_dict(counts: &Counts) -> BTreeMap<String, Vec<String>> {
+    let mut dict: BTreeMap<String, Vec<String>> = SEED
+        .iter()
+        .map(|(r, c)| {
+            (r.to_string(), c.iter().map(|s| s.to_string()).collect())
+        })
+        .collect();
+    let mut ordered: Vec<_> = counts.iter().collect();
+    ordered.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+    for ((reading, surface), _) in ordered {
+        if surface.contains(['"', '\\']) {
+            continue;
+        }
+        let candidates = dict.entry(reading.clone()).or_default();
+        if !candidates.contains(surface) {
+            candidates.push(surface.clone());
+        }
+    }
+    dict
+}
+
+fn render_dict(dict: &BTreeMap<String, Vec<String>>) -> String {
+    let mut out = String::from(
+        "// The IME dictionary: readings in hiragana and their candidates,\n\
+         // most frequent first, sorted by reading.\n\
+         // Generated from the manuscript by imedict\n\
+         // (tools/imedict); do not edit by hand.\n\
+         #[rustfmt::skip]\n\
+         pub const DICT: &[(&str, &[&str])] = &[\n",
+    );
+    for (reading, candidates) in dict {
+        let candidates: Vec<String> =
+            candidates.iter().map(|c| format!("\"{c}\"")).collect();
+        out += &format!("    (\"{reading}\", &[{}]),\n", candidates.join(", "));
+    }
+    out += "];\n";
+    out
+}
+
+// Appends the kanji and katakana not yet in the glyph list.
+fn extend_glyph_list(
+    path: &Path,
+    texts: &[String],
+    dict: &BTreeMap<String, Vec<String>>,
+) -> Result<usize> {
+    let have: BTreeSet<char> = fs::read_to_string(path)
+        .with_context(|| format!("reading {}", path.display()))?
+        .chars()
+        .collect();
+    let seen: BTreeSet<char> = texts
+        .iter()
+        .flat_map(|t| t.chars())
+        .chain(dict.values().flatten().flat_map(|s| s.chars()))
+        .filter(|&c| (is_kanji(c) || is_katakana(c)) && !have.contains(&c))
+        .collect();
+    let need: Vec<char> = seen.into_iter().collect();
+    let mut appended = String::new();
+    for line in need.chunks(GLYPH_CHARS_PER_LINE) {
+        appended.extend(line);
+        appended.push('\n');
+    }
+    let mut content = fs::read_to_string(path)?;
+    content += &appended;
+    fs::write(path, content)
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(need.len())
+}
+
 fn main() -> Result<()> {
     let args: Args = argh::from_env();
     let texts = read_texts(&args.inputs)?;
-    let counts = count_words(&texts)?;
-    let mut ordered: Vec<_> = counts.iter().collect();
-    ordered.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-    for ((reading, surface), count) in ordered {
-        println!("{count} {reading} {surface}");
-    }
+    let counts = if texts.is_empty() {
+        Counts::new()
+    } else {
+        count_words(&texts)?
+    };
+    let dict = build_dict(&counts);
+    let dict_rs = args.repo.join("src/ime_dict.rs");
+    fs::write(&dict_rs, render_dict(&dict))
+        .with_context(|| format!("writing {}", dict_rs.display()))?;
+    let chars_txt = args.repo.join("third_party/unifont/chars_to_include.txt");
+    let added = extend_glyph_list(&chars_txt, &texts, &dict)?;
+    println!("{} readings written to {}", dict.len(), dict_rs.display());
+    println!("{added} glyphs added to {}", chars_txt.display());
     Ok(())
 }
 
@@ -189,6 +286,17 @@ mod tests {
         assert!(!is_word("ア"));
         assert!(!is_word("うごかす"));
         assert!(!is_word("USB"));
+    }
+
+    #[test]
+    fn seed_candidates_come_first_then_by_frequency() {
+        let mut counts = Counts::new();
+        counts.insert(("あめ".into(), "編め".into()), 3);
+        counts.insert(("きおく".into(), "記憶".into()), 2);
+        counts.insert(("きおく".into(), "紀憶".into()), 5);
+        let dict = build_dict(&counts);
+        assert_eq!(dict["あめ"], ["雨", "飴", "編め"]);
+        assert_eq!(dict["きおく"], ["紀憶", "記憶"]);
     }
 
     #[test]
