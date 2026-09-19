@@ -19,6 +19,7 @@ pub mod font;
 pub mod graphics;
 pub mod hpet;
 pub mod ime;
+pub mod ime_dict;
 pub mod init;
 pub mod keyboard;
 pub mod mmio;
