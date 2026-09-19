@@ -105,13 +105,25 @@ fn encode_line_diff(old: &[StyledChar], new: &[StyledChar]) -> String {
     out
 }
 
-#[derive(Default)]
 pub struct Console {
     prev_cmd: Option<String>,
     input_buf: String,
     prev_input_was_cr: bool,
     ctrl_is_pressed: bool,
     ime: InputMethodEditor,
+}
+impl Default for Console {
+    fn default() -> Self {
+        let mut ime = InputMethodEditor::default();
+        ime.init_dict();
+        Self {
+            prev_cmd: None,
+            input_buf: String::new(),
+            prev_input_was_cr: false,
+            ctrl_is_pressed: false,
+            ime,
+        }
+    }
 }
 impl Console {
     /// Maps raw newline characters onto [`KeyEvent::Enter`] so that CR,
