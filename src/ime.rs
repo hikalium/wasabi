@@ -184,6 +184,19 @@ impl InputMethodEditor {
             .as_ref()
             .map(|c| (c.candidates.as_slice(), c.index))
     }
+    /// While a conversion is in progress, shows the candidate `steps`
+    /// further on (or back, for a negative count), wrapping around at
+    /// either end. `None` when nothing is being converted.
+    pub fn step_candidate(&mut self, steps: isize) -> Option<InputEditResult> {
+        let conversion = self.conversion.as_mut()?;
+        let len = conversion.candidates.len() as isize;
+        conversion.index =
+            (conversion.index as isize + steps).rem_euclid(len) as usize;
+        self.pending_string = conversion.candidates[conversion.index].clone();
+        Some(InputEditResult::UpdatePendingString(
+            self.pending_string.clone(),
+        ))
+    }
     // Finds the longest dictionary word that the reading begins with.
     // A phrase is a word plus whatever attaches to it, so the reading
     // after the word is kept as the suffix. The table is sorted by
@@ -255,12 +268,10 @@ impl InputMethodEditor {
                 // and its katakana close the candidate list, so a reading
                 // without a dictionary word still has those two. Once
                 // converted, each further Space shows the next candidate.
-                if let Some(conversion) = self.conversion.as_mut() {
-                    conversion.index =
-                        (conversion.index + 1) % conversion.candidates.len();
-                    self.pending_string =
-                        conversion.candidates[conversion.index].clone();
-                } else if self.pending_string.is_empty() {
+                if let Some(result) = self.step_candidate(1) {
+                    return result;
+                }
+                if self.pending_string.is_empty() {
                     self.pending_string.push('　');
                 } else {
                     let reading = self.pending_string.clone();
@@ -815,4 +826,22 @@ fn short_words_after_the_first_stay_as_typed() {
             "{typed}"
         );
     }
+}
+
+#[test_case]
+fn stepping_candidates_wraps_both_ways() {
+    let mut ime = new_test_ime();
+    assert_eq!(ime.step_candidate(1), None);
+    type_text(&mut ime, "kisya ");
+    let candidates = candidates_of(&ime);
+    assert_eq!(
+        ime.step_candidate(-1),
+        Some(InputEditResult::UpdatePendingString(
+            candidates[candidates.len() - 1].clone()
+        ))
+    );
+    assert_eq!(
+        ime.step_candidate(2),
+        Some(InputEditResult::UpdatePendingString("記者".to_string()))
+    );
 }
