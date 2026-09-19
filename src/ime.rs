@@ -84,8 +84,10 @@ impl InputMethodEditor {
         self.romaji_map2.insert('c', ["か", "し", "く", "せ", "こ"]);
         self.romaji_map2
             .insert('q', ["くぁ", "くぃ", "く", "くぇ", "くぉ"]);
-        // x + vowel is the small vowel; xtu is っ, xya/xyu/xyo are ゃゅょ.
+        // x or l + vowel is the small vowel; xtu/ltu are っ, and
+        // xya/xyu/xyo (lya/lyu/lyo) are ゃゅょ.
         self.romaji_map2.insert('x', ["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"]);
+        self.romaji_map2.insert('l', ["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"]);
 
         self.romaji_map3
             .insert(('k', 'y'), ["きゃ", "きぃ", "きゅ", "きぇ", "きょ"]);
@@ -136,6 +138,9 @@ impl InputMethodEditor {
         self.romaji_map3
             .insert(('x', 'y'), ["ゃ", "ぃ", "ゅ", "ぇ", "ょ"]);
         self.romaji_map3.insert(('x', 't'), ["", "", "っ", "", ""]);
+        self.romaji_map3
+            .insert(('l', 'y'), ["ゃ", "ぃ", "ゅ", "ぇ", "ょ"]);
+        self.romaji_map3.insert(('l', 't'), ["", "", "っ", "", ""]);
     }
     pub fn boin_index(e: char) -> Option<usize> {
         match e {
@@ -639,6 +644,9 @@ fn extended_romaji_rows() {
         ("xa", "ぁ"),
         ("xtu", "っ"),
         ("xyo", "ょ"),
+        ("la", "ぁ"),
+        ("ltu", "っ"),
+        ("lyu", "ゅ"),
     ] {
         let mut ime = new_test_ime();
         assert_eq!(
