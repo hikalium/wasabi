@@ -463,6 +463,14 @@ fn new_test_ime() -> InputMethodEditor {
     ime
 }
 
+#[cfg(test)]
+fn candidates_of(ime: &InputMethodEditor) -> Vec<String> {
+    ime.candidates()
+        .expect("no conversion in progress")
+        .0
+        .to_vec()
+}
+
 // Types s one key at a time and returns the result of the last key.
 #[cfg(test)]
 fn type_text(ime: &mut InputMethodEditor, s: &str) -> InputEditResult {
@@ -557,9 +565,12 @@ fn longest_dictionary_prefix_wins() {
 
 #[test_case]
 fn longest_prefix_is_not_grammatical_analysis() {
-    // The suffix is not checked to be a particle or ending: あめりか
-    // becomes 雨りか. This pins down the extent of the method.
+    // The suffix is not checked to be a particle or ending: with a
+    // dictionary that knows あめ but not あめりか, あめりか becomes
+    // 雨りか. This pins down the extent of the method.
     let mut ime = new_test_ime();
+    let dict: Dictionary = &[("あめ", &["雨"])];
+    ime.dict = dict;
     assert_eq!(
         type_text(&mut ime, "amerika "),
         InputEditResult::UpdatePendingString("雨りか".to_string())
@@ -573,14 +584,22 @@ fn rain_candidates_cycle() {
         type_text(&mut ime, "ame "),
         InputEditResult::UpdatePendingString("雨".to_string())
     );
+    assert_eq!(
+        type_text(&mut ime, " "),
+        InputEditResult::UpdatePendingString("飴".to_string())
+    );
     // After the dictionary candidates come the reading and its
     // katakana; past the last one, Space wraps around to the first.
-    for expected in ["飴", "あめ", "アメ", "雨"] {
-        assert_eq!(
-            type_text(&mut ime, " "),
-            InputEditResult::UpdatePendingString(expected.to_string())
-        );
+    let candidates = candidates_of(&ime);
+    assert_eq!(candidates[..2], ["雨", "飴"]);
+    assert_eq!(candidates[candidates.len() - 2..], ["あめ", "アメ"]);
+    for _ in 1..candidates.len() {
+        type_text(&mut ime, " ");
     }
+    assert_eq!(
+        type_text(&mut ime, " "),
+        InputEditResult::UpdatePendingString("飴".to_string())
+    );
 }
 
 #[test_case]
@@ -636,13 +655,16 @@ fn homophone_candidates_cycle_in_dictionary_order() {
         type_text(&mut ime, "kisya "),
         InputEditResult::UpdatePendingString("貴社".to_string())
     );
-    for expected in ["記者", "汽車", "帰社", "きしゃ", "キシャ", "貴社"]
-    {
+    for expected in ["記者", "汽車", "帰社"] {
         assert_eq!(
             type_text(&mut ime, " "),
             InputEditResult::UpdatePendingString(expected.to_string())
         );
     }
+    // Whatever else the dictionary knows for きしゃ follows, and the
+    // reading and its katakana close the list.
+    let candidates = candidates_of(&ime);
+    assert_eq!(candidates[candidates.len() - 2..], ["きしゃ", "キシャ"]);
 }
 
 #[test_case]
@@ -746,34 +768,38 @@ fn reading_and_katakana_close_the_candidates() {
     // With one, they follow the dictionary candidates, and the katakana
     // covers the whole pending text.
     let mut ime = new_test_ime();
-    for (typed, expected) in [
-        ("kyouno ", "今日の"),
-        (" ", "きょうの"),
-        (" ", "キョウノ"),
-        (" ", "今日の"),
-    ] {
-        assert_eq!(
-            type_text(&mut ime, typed),
-            InputEditResult::UpdatePendingString(expected.to_string())
-        );
+    assert_eq!(
+        type_text(&mut ime, "kyouno "),
+        InputEditResult::UpdatePendingString("今日の".to_string())
+    );
+    let candidates = candidates_of(&ime);
+    assert_eq!(candidates[candidates.len() - 2..], ["きょうの", "キョウノ"]);
+    for _ in 1..candidates.len() {
+        type_text(&mut ime, " ");
     }
+    assert_eq!(ime.pending(), "キョウノ");
+    assert_eq!(
+        type_text(&mut ime, " "),
+        InputEditResult::UpdatePendingString("今日の".to_string())
+    );
 }
 
 #[test_case]
 fn rest_of_the_reading_is_converted_too() {
     let mut ime = new_test_ime();
-    for (typed, expected) in [
-        ("iikanji ", "良い感じ"),
-        (" ", "言い感じ"),
-        (" ", "いいかんじ"),
-        (" ", "イイカンジ"),
-    ] {
+    for (typed, expected) in [("iikanji ", "良い感じ"), (" ", "言い感じ")]
+    {
         assert_eq!(
             type_text(&mut ime, typed),
             InputEditResult::UpdatePendingString(expected.to_string()),
             "{typed}"
         );
     }
+    let candidates = candidates_of(&ime);
+    assert_eq!(
+        candidates[candidates.len() - 2..],
+        ["いいかんじ", "イイカンジ"]
+    );
 }
 
 #[test_case]
