@@ -1,0 +1,4 @@
+# Build for the host, not for the x86_64-unknown-uefi target that the
+# repository's .cargo/config.toml sets for the OS.
+[build]
+target = "host-tuple"

@@ -1,0 +1,4 @@
+# imedict runs on the host, and lindera needs a newer Rust than the
+# nightly the OS is pinned to.
+[toolchain]
+channel = "stable"

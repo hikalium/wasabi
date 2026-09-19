@@ -1,0 +1,13 @@
+[package]
+name = "imedict"
+version = "0.1.0"
+edition = "2021"
+description = "Generates the WasabiOS IME dictionary and glyph list from the manuscript"
+
+[dependencies]
+anyhow = "1.0"
+argh = "0.1"
+lindera = { version = "6.0", features = ["embed-ipadic"] }
+
+# A tool run on the host, not a part of the OS's workspace.
+[workspace]
