@@ -77,6 +77,15 @@ impl InputMethodEditor {
         self.romaji_map2
             .insert('j', ["じゃ", "じ", "じゅ", "じぇ", "じょ"]);
         self.romaji_map2.insert('d', ["だ", "ぢ", "づ", "で", "ど"]);
+        self.romaji_map2
+            .insert('f', ["ふぁ", "ふぃ", "ふ", "ふぇ", "ふぉ"]);
+        self.romaji_map2
+            .insert('v', ["ゔぁ", "ゔぃ", "ゔ", "ゔぇ", "ゔぉ"]);
+        self.romaji_map2.insert('c', ["か", "し", "く", "せ", "こ"]);
+        self.romaji_map2
+            .insert('q', ["くぁ", "くぃ", "く", "くぇ", "くぉ"]);
+        // x + vowel is the small vowel; xtu is っ, xya/xyu/xyo are ゃゅょ.
+        self.romaji_map2.insert('x', ["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"]);
 
         self.romaji_map3
             .insert(('k', 'y'), ["きゃ", "きぃ", "きゅ", "きぇ", "きょ"]);
@@ -106,6 +115,27 @@ impl InputMethodEditor {
             .insert(('p', 'y'), ["ぴゃ", "ぴぃ", "ぴゅ", "ぴぇ", "ぴょ"]);
         self.romaji_map3
             .insert(('j', 'y'), ["じゃ", "じぃ", "じゅ", "じぇ", "じょ"]);
+        self.romaji_map3
+            .insert(('z', 'y'), ["じゃ", "じぃ", "じゅ", "じぇ", "じょ"]);
+        self.romaji_map3
+            .insert(('t', 's'), ["つぁ", "つぃ", "つ", "つぇ", "つぉ"]);
+        self.romaji_map3
+            .insert(('t', 'h'), ["てゃ", "てぃ", "てゅ", "てぇ", "てょ"]);
+        self.romaji_map3
+            .insert(('d', 'h'), ["でゃ", "でぃ", "でゅ", "でぇ", "でょ"]);
+        self.romaji_map3
+            .insert(('w', 'h'), ["うぁ", "うぃ", "う", "うぇ", "うぉ"]);
+        self.romaji_map3
+            .insert(('f', 'y'), ["ふゃ", "ふぃ", "ふゅ", "ふぇ", "ふょ"]);
+        self.romaji_map3
+            .insert(('v', 'y'), ["ゔゃ", "ゔぃ", "ゔゅ", "ゔぇ", "ゔょ"]);
+        self.romaji_map3
+            .insert(('k', 'w'), ["くぁ", "くぃ", "くぅ", "くぇ", "くぉ"]);
+        self.romaji_map3
+            .insert(('g', 'w'), ["ぐぁ", "ぐぃ", "ぐぅ", "ぐぇ", "ぐぉ"]);
+        self.romaji_map3
+            .insert(('x', 'y'), ["ゃ", "ぃ", "ゅ", "ぇ", "ょ"]);
+        self.romaji_map3.insert(('x', 't'), ["", "", "っ", "", ""]);
     }
     pub fn boin_index(e: char) -> Option<usize> {
         match e {
@@ -222,6 +252,14 @@ impl InputMethodEditor {
                     } else if let (Some('n'), 'n') = (prev2, prev1) {
                         self.pending_string.pop();
                         String::from('ん')
+                    } else if prev2 == Some('n')
+                        && Self::is_consonant(prev1)
+                        && prev1 != 'y'
+                    {
+                        // n before another consonant is ん (before y it
+                        // is the start of にゃ/にゅ/にょ).
+                        self.pending_string.pop();
+                        String::from('ん') + &String::from(prev1)
                     } else if prev2
                         .map(|prev2| {
                             prev2 == prev1 && Self::is_consonant(prev1)
@@ -580,4 +618,54 @@ fn jy_spells_the_ja_row() {
         type_text(&mut ime, "jya"),
         InputEditResult::UpdatePendingString("じゅうじゃ".to_string())
     );
+}
+
+#[test_case]
+fn extended_romaji_rows() {
+    use crate::font::get_glyph_width;
+    for (typed, expected) in [
+        ("fu", "ふ"),
+        ("fa", "ふぁ"),
+        ("fyu", "ふゅ"),
+        ("va", "ゔぁ"),
+        ("tsu", "つ"),
+        ("thi", "てぃ"),
+        ("dhi", "でぃ"),
+        ("whi", "うぃ"),
+        ("zyu", "じゅ"),
+        ("ca", "か"),
+        ("qa", "くぁ"),
+        ("kwa", "くぁ"),
+        ("xa", "ぁ"),
+        ("xtu", "っ"),
+        ("xyo", "ょ"),
+    ] {
+        let mut ime = new_test_ime();
+        assert_eq!(
+            type_text(&mut ime, typed),
+            InputEditResult::UpdatePendingString(expected.to_string()),
+            "{typed}"
+        );
+    }
+    for c in "ぁぅぉゔ".chars() {
+        assert_eq!(get_glyph_width(c), 16, "{c}");
+    }
+}
+
+#[test_case]
+fn n_before_a_consonant_is_nn() {
+    for (typed, expected) in [
+        ("tenki", "てんき"),
+        ("kanji", "かんじ"),
+        ("nya", "にゃ"),
+        ("nn", "ん"),
+        ("na", "な"),
+    ] {
+        let mut ime = new_test_ime();
+        assert_eq!(
+            type_text(&mut ime, typed),
+            InputEditResult::UpdatePendingString(expected.to_string()),
+            "{typed}"
+        );
+    }
 }
