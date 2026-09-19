@@ -22,9 +22,25 @@ struct DictionaryMatch<'a> {
     suffix: &'a str,
 }
 
+// A phrase whose candidates are being chosen from. While this exists,
+// the pending text shows candidates[index] followed by suffix.
+struct Conversion {
+    // The pending text as it was before converting, to go back to.
+    reading: String,
+    suffix: String,
+    candidates: Candidates,
+    index: usize,
+}
+impl Conversion {
+    fn text(&self) -> String {
+        [self.candidates[self.index], &self.suffix].concat()
+    }
+}
+
 #[derive(Default)]
 pub struct InputMethodEditor {
     pending_string: String,
+    conversion: Option<Conversion>,
     romaji_map2: BTreeMap<char, [&'static str; 5]>,
     romaji_map3: BTreeMap<(char, char), [&'static str; 5]>,
     // Reading (in kana) to its candidates. Keys and candidate lists
@@ -36,7 +52,7 @@ impl InputMethodEditor {
     pub fn init_dict(&mut self) {
         self.dict.insert("きょう", &["今日"]);
         self.dict.insert("てんき", &["天気"]);
-        self.dict.insert("あめ", &["雨"]);
+        self.dict.insert("あめ", &["雨", "飴"]);
     }
     pub fn init_romaji_map(&mut self) {
         self.romaji_map2.insert('k', ["か", "き", "く", "け", "こ"]);
@@ -106,6 +122,7 @@ impl InputMethodEditor {
     /// Hands the pending text over to the caller for committing,
     /// leaving the IME empty.
     pub fn take_pending(&mut self) -> String {
+        self.conversion = None;
         core::mem::take(&mut self.pending_string)
     }
     // Finds the longest dictionary word that the reading begins with.
@@ -129,8 +146,14 @@ impl InputMethodEditor {
     pub fn send_key_down(&mut self, e: KeyEvent) -> InputEditResult {
         match e {
             KeyEvent::Char('\x08') => {
-                // Backspace
-                if self.pending_string.pop().is_some() {
+                // Backspace. While choosing candidates it only cancels
+                // the conversion, bringing the reading back untouched.
+                if let Some(conversion) = self.conversion.take() {
+                    self.pending_string = conversion.reading;
+                    InputEditResult::UpdatePendingString(
+                        self.pending_string.clone(),
+                    )
+                } else if self.pending_string.pop().is_some() {
                     InputEditResult::UpdatePendingString(
                         self.pending_string.clone(),
                     )
@@ -142,18 +165,32 @@ impl InputMethodEditor {
                 // Space converts the word at the start of the pending
                 // text and keeps the rest, or inserts a full-width space
                 // when there is nothing to convert. A reading that does
-                // not start with a dictionary word stays as is.
-                if self.pending_string.is_empty() {
+                // not start with a dictionary word stays as is. Once
+                // converted, each further Space shows the next candidate.
+                if let Some(conversion) = self.conversion.as_mut() {
+                    conversion.index =
+                        (conversion.index + 1) % conversion.candidates.len();
+                    self.pending_string = conversion.text();
+                } else if self.pending_string.is_empty() {
                     self.pending_string.push('　');
                 } else if let Some(m) = self.longest_match(&self.pending_string)
                 {
-                    self.pending_string = [m.candidates[0], m.suffix].concat();
+                    let conversion = Conversion {
+                        reading: self.pending_string.clone(),
+                        suffix: m.suffix.to_string(),
+                        candidates: m.candidates,
+                        index: 0,
+                    };
+                    self.pending_string = conversion.text();
+                    self.conversion = Some(conversion);
                 }
                 InputEditResult::UpdatePendingString(
                     self.pending_string.clone(),
                 )
             }
             KeyEvent::Char(prev1) => {
+                // Typing on keeps the candidate shown and appends to it.
+                self.conversion = None;
                 let s = {
                     let (prev3, prev2) = {
                         let mut it = self.pending_string.chars().rev();
@@ -410,4 +447,68 @@ fn longest_prefix_is_not_grammatical_analysis() {
         type_text(&mut ime, "amerika "),
         InputEditResult::UpdatePendingString("雨りか".to_string())
     );
+}
+
+#[test_case]
+fn rain_candidates_cycle() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "ame "),
+        InputEditResult::UpdatePendingString("雨".to_string())
+    );
+    assert_eq!(
+        type_text(&mut ime, " "),
+        InputEditResult::UpdatePendingString("飴".to_string())
+    );
+    // Past the last candidate, Space wraps around to the first.
+    assert_eq!(
+        type_text(&mut ime, " "),
+        InputEditResult::UpdatePendingString("雨".to_string())
+    );
+}
+
+#[test_case]
+fn candidate_cycle_preserves_suffix() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "amedesu  "),
+        InputEditResult::UpdatePendingString("飴です".to_string())
+    );
+}
+
+#[test_case]
+fn backspace_cancels_conversion_before_deleting_reading() {
+    let mut ime = new_test_ime();
+    type_text(&mut ime, "amedesu ");
+    assert_eq!(
+        type_text(&mut ime, "\x08"),
+        InputEditResult::UpdatePendingString("あめです".to_string())
+    );
+    assert_eq!(
+        type_text(&mut ime, "\x08"),
+        InputEditResult::UpdatePendingString("あめで".to_string())
+    );
+}
+
+#[test_case]
+fn commit_clears_conversion_state() {
+    let mut ime = new_test_ime();
+    type_text(&mut ime, "ame ");
+    assert_eq!(ime.take_pending(), "雨");
+    assert!(ime.conversion.is_none());
+    // Space after the commit starts afresh instead of cycling.
+    assert_eq!(
+        type_text(&mut ime, " "),
+        InputEditResult::UpdatePendingString("　".to_string())
+    );
+}
+
+#[test_case]
+fn typing_after_conversion_keeps_candidate_and_appends() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "ame ga"),
+        InputEditResult::UpdatePendingString("雨が".to_string())
+    );
+    assert!(ime.conversion.is_none());
 }
