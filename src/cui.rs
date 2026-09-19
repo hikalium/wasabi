@@ -6,7 +6,6 @@ use crate::font::get_glyph_width;
 use crate::graphics::draw_str_fg;
 use crate::graphics::fill_rect;
 use crate::hpet::global_timestamp;
-use crate::ime::Candidates;
 use crate::ime::InputEditResult;
 use crate::ime::InputMethodEditor;
 use crate::info;
@@ -112,7 +111,7 @@ const CANDIDATE_WINDOW_SLOTS: usize = 3;
 
 // The page of candidates that the selected one is on, and where the
 // selected one is within that page.
-fn candidate_page(candidates: Candidates, index: usize) -> (Candidates, usize) {
+fn candidate_page(candidates: &[String], index: usize) -> (&[String], usize) {
     let start = index / CANDIDATE_WINDOW_SLOTS * CANDIDATE_WINDOW_SLOTS;
     let end = (start + CANDIDATE_WINDOW_SLOTS).min(candidates.len());
     (&candidates[start..end], index - start)
@@ -635,10 +634,13 @@ mod line_edit_tests {
 
     #[test_case]
     fn candidate_page_holds_three_and_follows_the_selection() {
-        let all: Candidates = &["a", "b", "c", "d"];
-        assert_eq!(candidate_page(all, 0), (&all[..3], 0));
-        assert_eq!(candidate_page(all, 2), (&all[..3], 2));
-        assert_eq!(candidate_page(all, 3), (&all[3..], 0));
+        let all: Vec<String> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|s| String::from(*s))
+            .collect();
+        assert_eq!(candidate_page(&all, 0), (&all[..3], 0));
+        assert_eq!(candidate_page(&all, 2), (&all[..3], 2));
+        assert_eq!(candidate_page(&all, 3), (&all[3..], 0));
     }
 
     #[test_case]
