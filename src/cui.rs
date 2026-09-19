@@ -103,52 +103,59 @@ impl Console {
             print!("{c}");
         }
     }
-    // Redraw after the IME rewrote the line: back over the changed tail
-    // of the old text, draw the new tail, then blank any leftover cells
-    // when the new tail is shorter (a wide glyph is two cells).
-    fn render_ime_line(&mut self, new: &str) {
+    // Redraw after the IME rewrote its pending text, which sits at the
+    // end of the line: back over the changed tail of the old text and
+    // draw the new tail (a wide glyph is two cells).
+    fn render_ime_line(&mut self, old: &str, new: &str) {
         let cols = |s: &str, skip: usize| -> usize {
             s.chars()
                 .skip(skip)
                 .map(|ch| if get_glyph_width(ch) == 16 { 2 } else { 1 })
                 .sum()
         };
-        let common = self
-            .input_buf
+        let common = old
             .chars()
             .zip(new.chars())
             .take_while(|(a, b)| a == b)
             .count();
-        let old_cols = cols(&self.input_buf, common);
+        let old_cols = cols(old, common);
         for _ in 0..old_cols {
             print!("\x08");
         }
         for ch in new.chars().skip(common) {
             print!("{ch}");
         }
-        self.input_buf = new.into();
+    }
+    // Moves the IME's pending text onto the end of the committed line.
+    fn commit_pending(&mut self) {
+        let pending = self.ime.take_pending();
+        self.input_buf.push_str(&pending);
     }
     pub fn handle_key_down(&mut self, e: KeyEvent) {
         let e = match self.normalize_newline(e) {
             Some(e) => e,
             None => return,
         };
+        // The `ime off` command can disable the IME while text is still
+        // pending; nothing else will ever confirm it, so commit it here.
+        if !is_ime_enabled() {
+            self.commit_pending();
+        }
         match e {
             KeyEvent::Char(c) => {
                 if c == ' ' && self.ctrl_is_pressed {
                     let enable = !is_ime_enabled();
                     set_ime_enabled(enable);
-                    // Align the IME's pending text with the line already
-                    // on screen so the next keystroke redraws correctly.
-                    if enable {
-                        self.ime.set_pending(self.input_buf.clone());
+                    if !enable {
+                        self.commit_pending();
                     }
                     return;
                 }
                 if is_ime_enabled() {
+                    let old = String::from(self.ime.pending());
                     match self.ime.send_key_down(KeyEvent::Char(c)) {
                         InputEditResult::UpdatePendingString(s) => {
-                            self.render_ime_line(&s)
+                            self.render_ime_line(&old, &s)
                         }
                         InputEditResult::PassThrough => self.input_plain(c),
                     }
@@ -157,14 +164,22 @@ impl Console {
                 }
             }
             KeyEvent::CursorUp => {
-                if let Some(prev_cmd) = self.prev_cmd.as_mut() {
-                    swap(prev_cmd, &mut self.input_buf);
+                if let Some(mut prev_cmd) = self.prev_cmd.take() {
+                    // The recalled line replaces the whole line, so
+                    // settle the pending text into it first.
+                    self.commit_pending();
+                    swap(&mut prev_cmd, &mut self.input_buf);
+                    self.prev_cmd = Some(prev_cmd);
                     print!("\n{}", self.input_buf);
                 }
-                // Recalled line replaces the buffer; resync the IME.
-                self.ime.set_pending(self.input_buf.clone());
             }
             KeyEvent::Enter => {
+                // Enter confirms pending text first; only a second Enter
+                // with nothing pending runs the line as a command.
+                if !self.ime.pending().is_empty() {
+                    self.commit_pending();
+                    return;
+                }
                 println!();
                 if let Err(e) = run_cmd(&self.input_buf) {
                     error!("{e}: {}", self.input_buf)
@@ -172,7 +187,6 @@ impl Console {
                 let mut prev_cmd = String::new();
                 swap(&mut prev_cmd, &mut self.input_buf);
                 self.prev_cmd = Some(prev_cmd);
-                self.ime.set_pending(String::new());
                 print!("> ");
             }
             KeyEvent::CtrlLeft => {
@@ -366,4 +380,111 @@ fn cr_lf_and_crlf_trigger_enter_exactly_once() {
         con.normalize_newline(KeyEvent::Char('\n')),
         Some(KeyEvent::Enter)
     ));
+}
+
+#[cfg(test)]
+mod line_edit_tests {
+    use super::*;
+
+    fn console_with_ime() -> Console {
+        set_ime_enabled(true);
+        Console::default()
+    }
+
+    fn type_str(con: &mut Console, s: &str) {
+        for c in s.chars() {
+            con.handle_key_down(KeyEvent::Char(c));
+        }
+    }
+
+    fn toggle_ime_with_ctrl_space(con: &mut Console) {
+        con.handle_key_down(KeyEvent::CtrlLeft);
+        con.handle_key_down(KeyEvent::Char(' '));
+        con.handle_key_up(KeyEvent::CtrlLeft);
+    }
+
+    #[test_case]
+    fn enter_commits_pending_before_running_command() {
+        let mut con = console_with_ime();
+        type_str(&mut con, "a");
+        assert_eq!(con.input_buf, "");
+        assert_eq!(con.ime.pending(), "あ");
+        con.handle_key_down(KeyEvent::Enter);
+        assert_eq!(con.input_buf, "あ");
+        assert_eq!(con.ime.pending(), "");
+        // Nothing pending: this Enter runs the line as a command.
+        con.handle_key_down(KeyEvent::Enter);
+        assert_eq!(con.input_buf, "");
+        assert_eq!(con.prev_cmd.as_deref(), Some("あ"));
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
+    fn deleting_last_pending_char_keeps_committed_text() {
+        let mut con = console_with_ime();
+        con.input_buf = String::from("A");
+        type_str(&mut con, "a");
+        type_str(&mut con, "\x08");
+        assert_eq!(con.input_buf, "A");
+        assert_eq!(con.ime.pending(), "");
+        type_str(&mut con, "\x08");
+        assert_eq!(con.input_buf, "");
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
+    fn cursor_up_without_history_preserves_pending() {
+        let mut con = console_with_ime();
+        type_str(&mut con, "a");
+        con.handle_key_down(KeyEvent::CursorUp);
+        assert_eq!(con.input_buf, "");
+        assert_eq!(con.ime.pending(), "あ");
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
+    fn cursor_up_commits_pending_then_recalls() {
+        let mut con = console_with_ime();
+        con.prev_cmd = Some(String::from("time"));
+        con.input_buf = String::from("A");
+        type_str(&mut con, "a");
+        con.handle_key_down(KeyEvent::CursorUp);
+        assert_eq!(con.input_buf, "time");
+        assert_eq!(con.prev_cmd.as_deref(), Some("Aあ"));
+        assert_eq!(con.ime.pending(), "");
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
+    fn disabling_ime_commits_pending() {
+        // Via Ctrl+Space, which the Console handles itself.
+        let mut con = console_with_ime();
+        type_str(&mut con, "a");
+        toggle_ime_with_ctrl_space(&mut con);
+        assert!(!is_ime_enabled());
+        assert_eq!(con.input_buf, "あ");
+        assert_eq!(con.ime.pending(), "");
+        // Via the `ime off` command, which the Console only notices on
+        // the next key.
+        set_ime_enabled(true);
+        type_str(&mut con, "i");
+        run_cmd("ime off").unwrap();
+        type_str(&mut con, "B");
+        assert_eq!(con.input_buf, "あいB");
+        assert_eq!(con.ime.pending(), "");
+    }
+
+    #[test_case]
+    fn enabling_ime_does_not_import_committed_text() {
+        set_ime_enabled(false);
+        let mut con = Console::default();
+        type_str(&mut con, "A");
+        toggle_ime_with_ctrl_space(&mut con);
+        assert!(is_ime_enabled());
+        assert_eq!(con.ime.pending(), "");
+        type_str(&mut con, "a");
+        assert_eq!(con.input_buf, "A");
+        assert_eq!(con.ime.pending(), "あ");
+        set_ime_enabled(false);
+    }
 }
