@@ -104,6 +104,8 @@ impl InputMethodEditor {
             .insert(('b', 'y'), ["びゃ", "びぃ", "びゅ", "びぇ", "びょ"]);
         self.romaji_map3
             .insert(('p', 'y'), ["ぴゃ", "ぴぃ", "ぴゅ", "ぴぇ", "ぴょ"]);
+        self.romaji_map3
+            .insert(('j', 'y'), ["じゃ", "じぃ", "じゅ", "じぇ", "じょ"]);
     }
     pub fn boin_index(e: char) -> Option<usize> {
         match e {
@@ -565,4 +567,17 @@ fn dictionary_table_is_sorted_for_binary_search() {
     let dict = crate::ime_dict::DICT;
     assert!(dict.windows(2).all(|pair| pair[0].0 < pair[1].0));
     assert!(dict.iter().all(|(r, c)| !r.is_empty() && !c.is_empty()));
+}
+
+#[test_case]
+fn jy_spells_the_ja_row() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "jyuu"),
+        InputEditResult::UpdatePendingString("じゅう".to_string())
+    );
+    assert_eq!(
+        type_text(&mut ime, "jya"),
+        InputEditResult::UpdatePendingString("じゅうじゃ".to_string())
+    );
 }
