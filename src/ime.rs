@@ -15,6 +15,13 @@ pub enum InputEditResult {
 // The kanji candidates for one reading, most likely first.
 type Candidates = &'static [&'static str];
 
+// A dictionary word found at the start of a reading, and the rest of
+// the reading (e.g. a particle) that follows it.
+struct DictionaryMatch<'a> {
+    candidates: Candidates,
+    suffix: &'a str,
+}
+
 #[derive(Default)]
 pub struct InputMethodEditor {
     pending_string: String,
@@ -101,6 +108,24 @@ impl InputMethodEditor {
     pub fn take_pending(&mut self) -> String {
         core::mem::take(&mut self.pending_string)
     }
+    // Finds the longest dictionary word that the reading begins with.
+    // A phrase is a word plus whatever attaches to it, so the reading
+    // after the word is kept as the suffix.
+    fn longest_match<'a>(
+        &self,
+        reading: &'a str,
+    ) -> Option<DictionaryMatch<'a>> {
+        self.dict
+            .iter()
+            .filter(|(word, _)| reading.starts_with(**word))
+            .max_by_key(|(word, _)| word.len())
+            .map(|(word, &candidates)| DictionaryMatch {
+                candidates,
+                // word.len() is a char boundary in reading, since
+                // reading starts with word.
+                suffix: &reading[word.len()..],
+            })
+    }
     pub fn send_key_down(&mut self, e: KeyEvent) -> InputEditResult {
         match e {
             KeyEvent::Char('\x08') => {
@@ -114,17 +139,15 @@ impl InputMethodEditor {
                 }
             }
             KeyEvent::Char(' ') => {
-                // Space converts the pending text as a whole, or inserts
-                // a full-width space when there is nothing to convert.
-                // A reading that is not in the dictionary stays as is.
+                // Space converts the word at the start of the pending
+                // text and keeps the rest, or inserts a full-width space
+                // when there is nothing to convert. A reading that does
+                // not start with a dictionary word stays as is.
                 if self.pending_string.is_empty() {
                     self.pending_string.push('　');
-                } else if let Some(candidate) = self
-                    .dict
-                    .get(self.pending_string.as_str())
-                    .and_then(|candidates| candidates.first())
+                } else if let Some(m) = self.longest_match(&self.pending_string)
                 {
-                    self.pending_string = candidate.to_string();
+                    self.pending_string = [m.candidates[0], m.suffix].concat();
                 }
                 InputEditResult::UpdatePendingString(
                     self.pending_string.clone(),
@@ -348,5 +371,43 @@ fn empty_pending_space_inserts_fullwidth_space() {
     assert_eq!(
         type_text(&mut ime, " "),
         InputEditResult::UpdatePendingString("　".to_string())
+    );
+}
+
+#[test_case]
+fn phrase_conversion_preserves_suffix() {
+    for (typed, expected) in [
+        ("kyouno ", "今日の"),
+        ("tennkiha ", "天気は"),
+        ("amedesu ", "雨です"),
+    ] {
+        let mut ime = new_test_ime();
+        assert_eq!(
+            type_text(&mut ime, typed),
+            InputEditResult::UpdatePendingString(expected.to_string()),
+            "{typed}"
+        );
+    }
+}
+
+#[test_case]
+fn longest_dictionary_prefix_wins() {
+    let mut ime = new_test_ime();
+    // A shorter word that is also a prefix of the reading must lose.
+    ime.dict.insert("きょ", &["短"]);
+    assert_eq!(
+        type_text(&mut ime, "kyouno "),
+        InputEditResult::UpdatePendingString("今日の".to_string())
+    );
+}
+
+#[test_case]
+fn longest_prefix_is_not_grammatical_analysis() {
+    // The suffix is not checked to be a particle or ending: あめりか
+    // becomes 雨りか. This pins down the extent of the method.
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "amerika "),
+        InputEditResult::UpdatePendingString("雨りか".to_string())
     );
 }
