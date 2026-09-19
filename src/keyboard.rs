@@ -20,6 +20,7 @@ pub enum KeyEvent {
     CursorRight,
     CursorUp,
     CtrlLeft,
+    ShiftLeft,
     Enter,
 }
 impl KeyEvent {
@@ -102,14 +103,28 @@ pub async fn start_usb_keyboard(
     )
     .await?;
     let mut prev_pressed = BTreeSet::new();
+    let mut prev_shift = false;
     let mut console = Console::default();
     loop {
-        let pressed = {
+        let (shift, pressed) = {
             let report = request_hid_report(xhc, slot, ctrl_ep_ring).await?;
-            BTreeSet::from_iter(
-                report.into_iter().skip(2).filter(|id| *id != 0),
+            // Modifier bits of a boot-protocol report: 1 left Shift,
+            // 5 right Shift. Either Shift is reported as ShiftLeft.
+            const SHIFT: u8 = 1 << 1 | 1 << 5;
+            let modifier = report.first().copied().unwrap_or(0);
+            (
+                modifier & SHIFT != 0,
+                BTreeSet::from_iter(
+                    report.into_iter().skip(2).filter(|id| *id != 0),
+                ),
             )
         };
+        if shift && !prev_shift {
+            console.handle_key_down(KeyEvent::ShiftLeft);
+        } else if prev_shift && !shift {
+            console.handle_key_up(KeyEvent::ShiftLeft);
+        }
+        prev_shift = shift;
         let diff = pressed.symmetric_difference(&prev_pressed);
         for id in diff {
             let e = KeyEvent::from_usb_key_id(*id);
