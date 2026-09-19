@@ -74,6 +74,7 @@ impl InputMethodEditor {
             ('d', 'y') => Some(["ぢゃ", "ぢぃ", "ぢゅ", "ぢぇ", "ぢょ"]),
             ('b', 'y') => Some(["びゃ", "びぃ", "びゅ", "びぇ", "びょ"]),
             ('p', 'y') => Some(["ぴゃ", "ぴぃ", "ぴゅ", "ぴぇ", "ぴょ"]),
+            ('j', 'y') => Some(["じゃ", "じぃ", "じゅ", "じぇ", "じょ"]),
             _ => None,
         }
     }
@@ -233,5 +234,27 @@ fn basic_romaji_conversion() {
     assert_eq!(
         ime.send_key_down(KeyEvent::Char('n')),
         InputEditResult::UpdatePendingString("ちゃっとん".to_string())
+    );
+}
+
+// Types s one key at a time and returns the result of the last key.
+#[cfg(test)]
+fn type_text(ime: &mut InputMethodEditor, s: &str) -> InputEditResult {
+    s.chars()
+        .map(|c| ime.send_key_down(KeyEvent::Char(c)))
+        .last()
+        .unwrap_or_default()
+}
+
+#[test_case]
+fn jy_spells_the_ja_row() {
+    let mut ime = InputMethodEditor::default();
+    assert_eq!(
+        type_text(&mut ime, "jyuu"),
+        InputEditResult::UpdatePendingString("じゅう".to_string())
+    );
+    assert_eq!(
+        type_text(&mut ime, "jya"),
+        InputEditResult::UpdatePendingString("じゅうじゃ".to_string())
     );
 }
