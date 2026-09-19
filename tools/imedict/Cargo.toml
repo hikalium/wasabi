@@ -7,6 +7,7 @@ description = "Generates the WasabiOS IME dictionary and glyph list from the man
 [dependencies]
 anyhow = "1.0"
 argh = "0.1"
+bzip2 = "0.6"
 lindera = { version = "6.0", features = ["embed-ipadic"] }
 
 # A tool run on the host, not a part of the OS's workspace.

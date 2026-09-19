@@ -7,11 +7,18 @@
 //! Runs of nouns are also added as compound words. The `SEED` entries
 //! always come first in their reading's candidate list.
 //!
+//! With `--wiktionary <dump>`, the words of the Japanese Wiktionary
+//! (`jawiktionary-latest-pages-articles.xml.bz2`) are added as well;
+//! they come after the manuscript's words in each candidate list, since
+//! nothing is known about how often they are used. See `wiktionary.rs`.
+//!
 //! Writes `src/ime_dict.rs` in the wasabi repository and appends every
 //! kanji and katakana seen to `third_party/unifont/chars_to_include.txt`
 //! there; run `make -C third_party/unifont glyphs.txt` afterwards to
 //! regenerate the glyphs. With no inputs, the dictionary holds just the
 //! `SEED` entries.
+
+mod wiktionary;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -35,6 +42,10 @@ struct Args {
     /// path to the wasabi (code) repository to write into
     #[argh(option)]
     repo: PathBuf,
+    /// a jawiktionary pages-articles dump (.xml or .xml.bz2) to add
+    /// words from
+    #[argh(option)]
+    wiktionary: Option<PathBuf>,
     /// manuscript files or directories (*.md and *.typ are read)
     #[argh(positional)]
     inputs: Vec<PathBuf>,
@@ -254,11 +265,21 @@ fn extend_glyph_list(
 fn main() -> Result<()> {
     let args: Args = argh::from_env();
     let texts = read_texts(&args.inputs)?;
-    let counts = if texts.is_empty() {
+    let mut counts = if texts.is_empty() {
         Counts::new()
     } else {
         count_words(&texts)?
     };
+    if let Some(dump) = &args.wiktionary {
+        let words = wiktionary::words(dump)?;
+        println!("{} readings taken from {}", words.len(), dump.display());
+        // A count of zero puts them after every word of the manuscript.
+        for (reading, surface) in words {
+            if is_word(&surface) {
+                counts.entry((reading, surface)).or_insert(0);
+            }
+        }
+    }
     let dict = build_dict(&counts);
     let dict_rs = args.repo.join("src/ime_dict.rs");
     fs::write(&dict_rs, render_dict(&dict))
