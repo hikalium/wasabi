@@ -545,6 +545,32 @@ mod line_edit_tests {
     }
 
     #[test_case]
+    fn name_sentence_is_built_from_committed_phrases() {
+        let mut con = console_with_ime();
+        for phrase in ["watasino ", "namaeha ", "nakanodesu "] {
+            type_str(&mut con, phrase);
+            con.handle_key_down(KeyEvent::Enter);
+        }
+        assert_eq!(con.input_buf, "私の名前は中野です");
+        assert_eq!(con.ime.pending(), "");
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
+    fn homophone_sentence_is_built_by_choosing_candidates() {
+        // Each phrase reads きしゃ; the extra Spaces pick the 1st, 2nd,
+        // 3rd, and 4th candidate in turn.
+        let mut con = console_with_ime();
+        for phrase in ["kisyano ", "kisyaga  ", "kisyade   ", "kisyasita    "] {
+            type_str(&mut con, phrase);
+            con.handle_key_down(KeyEvent::Enter);
+        }
+        assert_eq!(con.input_buf, "貴社の記者が汽車で帰社した");
+        assert_eq!(con.ime.pending(), "");
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
     fn unchanged_line_produces_no_output() {
         let line = styled_line("A", "あ");
         assert_eq!(encode_line_diff(&line, &line), "");
