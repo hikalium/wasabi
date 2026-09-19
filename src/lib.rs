@@ -27,6 +27,7 @@ pub mod gui;
 pub mod hpet;
 pub mod icmp;
 pub mod ime;
+pub mod ime_dict;
 pub mod init;
 pub mod input;
 pub mod ip;
