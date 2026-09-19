@@ -19,11 +19,18 @@ if [ -x "${BUNDLED_QEMU}" ]; then
   echo "Using bundled QEMU: ${BUNDLED_QEMU}"
 fi
 
+# The gtk backend is not built into the macOS (cocoa) QEMU, so only ask
+# for it elsewhere and let macOS fall back to the default display.
+DISPLAY_OPTS=()
+if [ "$(uname)" != "Darwin" ]; then
+  DISPLAY_OPTS=(-display gtk,grab-on-hover=on)
+fi
+
 "${QEMU}" \
   -m 4G \
   -bios third_party/ovmf/RELEASEX64_OVMF.fd \
   -machine q35 \
-  -display gtk,grab-on-hover=on \
+  "${DISPLAY_OPTS[@]}" \
   -drive format=raw,file=fat:rw:mnt \
   -monitor telnet:0.0.0.0:2345,server,nowait,logfile=log/qemu_monitor.txt \
   -chardev stdio,id=char_com1,mux=on,logfile=log/com1.txt \
