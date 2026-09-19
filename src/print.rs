@@ -37,6 +37,11 @@ pub fn global_print(args: fmt::Arguments) {
     }
 }
 
+/// Where on the screen the next printed char will go, in pixels.
+pub fn cursor_position() -> (i64, i64) {
+    GLOBAL_PRINTER.lock().cursor()
+}
+
 /// Print path used from the `#[panic_handler]`. Always reaches the
 /// serial port (no Mutex), and uses `try_lock` for the lockable sinks
 /// — if a sink's lock is held by the very chain that's now panicking,
