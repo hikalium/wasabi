@@ -4,6 +4,7 @@ use crate::keyboard::KeyEvent;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 
 #[derive(Default, PartialEq, Eq, Debug)]
 pub enum InputEditResult {
@@ -23,18 +24,24 @@ struct DictionaryMatch<'a> {
 }
 
 // A phrase whose candidates are being chosen from. While this exists,
-// the pending text shows candidates[index] followed by suffix.
+// the pending text shows candidates[index].
 struct Conversion {
     // The pending text as it was before converting, to go back to.
     reading: String,
-    suffix: String,
-    candidates: Candidates,
+    // What the pending text becomes for each candidate: the dictionary
+    // candidates with the rest of the reading appended, then the
+    // reading itself, then the reading in katakana.
+    candidates: Vec<String>,
     index: usize,
 }
-impl Conversion {
-    fn text(&self) -> String {
-        [self.candidates[self.index], &self.suffix].concat()
-    }
+
+fn to_katakana(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'ぁ'..='ゖ' => char::from_u32(c as u32 + 0x60).unwrap_or(c),
+            _ => c,
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -83,8 +90,10 @@ impl InputMethodEditor {
     }
     /// While a conversion is in progress: its candidates and which one
     /// is currently shown.
-    pub fn candidates(&self) -> Option<(Candidates, usize)> {
-        self.conversion.as_ref().map(|c| (c.candidates, c.index))
+    pub fn candidates(&self) -> Option<(&[String], usize)> {
+        self.conversion
+            .as_ref()
+            .map(|c| (c.candidates.as_slice(), c.index))
     }
     // Finds the longest dictionary word that the reading begins with.
     // A phrase is a word plus whatever attaches to it, so the reading
@@ -188,25 +197,39 @@ impl InputMethodEditor {
             KeyEvent::Char(' ') => {
                 // Space converts the word at the start of the pending
                 // text and keeps the rest, or inserts a full-width space
-                // when there is nothing to convert. A reading that does
-                // not start with a dictionary word stays as is. Once
+                // when there is nothing to convert. The reading as typed
+                // and its katakana close the candidate list, so a reading
+                // without a dictionary word still has those two. Once
                 // converted, each further Space shows the next candidate.
                 if let Some(conversion) = self.conversion.as_mut() {
                     conversion.index =
                         (conversion.index + 1) % conversion.candidates.len();
-                    self.pending_string = conversion.text();
+                    self.pending_string =
+                        conversion.candidates[conversion.index].clone();
                 } else if self.pending_string.is_empty() {
                     self.pending_string.push('　');
-                } else if let Some(m) = self.longest_match(&self.pending_string)
-                {
-                    let conversion = Conversion {
-                        reading: self.pending_string.clone(),
-                        suffix: m.suffix.to_string(),
-                        candidates: m.candidates,
+                } else {
+                    let reading = self.pending_string.clone();
+                    let mut candidates: Vec<String> = self
+                        .longest_match(&reading)
+                        .map(|m| {
+                            m.candidates
+                                .iter()
+                                .map(|c| [c, m.suffix].concat())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    for extra in [reading.clone(), to_katakana(&reading)] {
+                        if !candidates.contains(&extra) {
+                            candidates.push(extra);
+                        }
+                    }
+                    self.pending_string = candidates[0].clone();
+                    self.conversion = Some(Conversion {
+                        reading,
+                        candidates,
                         index: 0,
-                    };
-                    self.pending_string = conversion.text();
-                    self.conversion = Some(conversion);
+                    });
                 }
                 InputEditResult::UpdatePendingString(
                     self.pending_string.clone(),
@@ -378,6 +401,14 @@ fn new_test_ime() -> InputMethodEditor {
     let mut ime = InputMethodEditor::default();
     ime.init_dict();
     ime
+}
+
+#[cfg(test)]
+fn candidates_of(ime: &InputMethodEditor) -> Vec<String> {
+    ime.candidates()
+        .expect("no conversion in progress")
+        .0
+        .to_vec()
 }
 
 // Types s one key at a time and returns the result of the last key.
@@ -569,10 +600,17 @@ fn rain_candidates_cycle() {
         type_text(&mut ime, " "),
         InputEditResult::UpdatePendingString("飴".to_string())
     );
-    // Past the last candidate, Space wraps around to the first.
+    // After the dictionary candidates come the reading and its
+    // katakana; past the last one, Space wraps around to the first.
+    let candidates = candidates_of(&ime);
+    assert_eq!(candidates[..2], ["雨", "飴"]);
+    assert_eq!(candidates[candidates.len() - 2..], ["あめ", "アメ"]);
+    for _ in 1..candidates.len() {
+        type_text(&mut ime, " ");
+    }
     assert_eq!(
         type_text(&mut ime, " "),
-        InputEditResult::UpdatePendingString("雨".to_string())
+        InputEditResult::UpdatePendingString("飴".to_string())
     );
 }
 
@@ -629,10 +667,45 @@ fn homophone_candidates_cycle_in_dictionary_order() {
         type_text(&mut ime, "kisya "),
         InputEditResult::UpdatePendingString("貴社".to_string())
     );
-    for expected in ["記者", "汽車", "帰社", "貴社"] {
+    for expected in ["記者", "汽車", "帰社"] {
         assert_eq!(
             type_text(&mut ime, " "),
             InputEditResult::UpdatePendingString(expected.to_string())
         );
     }
+    // Whatever else the dictionary knows for きしゃ follows, and the
+    // reading and its katakana close the list.
+    let candidates = candidates_of(&ime);
+    assert_eq!(candidates[candidates.len() - 2..], ["きしゃ", "キシャ"]);
+}
+
+#[test_case]
+fn reading_and_katakana_close_the_candidates() {
+    // Without a dictionary word the reading itself comes first, then
+    // its katakana.
+    let mut ime = InputMethodEditor::default();
+    for (typed, expected) in [("sora ", "そら"), (" ", "ソラ"), (" ", "そら")]
+    {
+        assert_eq!(
+            type_text(&mut ime, typed),
+            InputEditResult::UpdatePendingString(expected.to_string())
+        );
+    }
+    // With one, they follow the dictionary candidates, and the katakana
+    // covers the whole pending text.
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "kyouno "),
+        InputEditResult::UpdatePendingString("今日の".to_string())
+    );
+    let candidates = candidates_of(&ime);
+    assert_eq!(candidates[candidates.len() - 2..], ["きょうの", "キョウノ"]);
+    for _ in 1..candidates.len() {
+        type_text(&mut ime, " ");
+    }
+    assert_eq!(ime.pending(), "キョウノ");
+    assert_eq!(
+        type_text(&mut ime, " "),
+        InputEditResult::UpdatePendingString("今日の".to_string())
+    );
 }
