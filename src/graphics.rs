@@ -199,10 +199,24 @@ pub fn draw_test_pattern<T: Bitmap>(buf: &mut T) {
     draw_str_fg(buf, left, h * colors.len() as i64 + 16, 0x00ff00, "ABCDEF");
 }
 
+// Where the writer is within an ANSI escape sequence. Kept across
+// write_str calls, since fmt::write may hand over one sequence in
+// several pieces.
+#[derive(Clone, Copy)]
+enum EscapeState {
+    Ground,
+    // Just after ESC.
+    Escape,
+    // After ESC '[', accumulating a numeric parameter.
+    Csi { param: u32 },
+}
+
 pub struct BitmapTextWriter<T> {
     buf: T,
     cursor_x: i64,
     cursor_y: i64,
+    underline: bool,
+    esc: EscapeState,
 }
 impl<T: Bitmap> BitmapTextWriter<T> {
     pub fn new(buf: T) -> Self {
@@ -210,6 +224,65 @@ impl<T: Bitmap> BitmapTextWriter<T> {
             buf,
             cursor_x: 0,
             cursor_y: 0,
+            underline: false,
+            esc: EscapeState::Ground,
+        }
+    }
+    // Applies one SGR (Select Graphic Rendition) parameter. Only the
+    // underline switch is understood; everything else is ignored.
+    fn apply_sgr(&mut self, param: u32) {
+        match param {
+            0 | 24 => self.underline = false,
+            4 => self.underline = true,
+            _ => {}
+        }
+    }
+    // Feeds c to the escape sequence parser. Returns true when c was
+    // part of a sequence and must not be drawn.
+    fn consume_escape(&mut self, c: char) -> bool {
+        match self.esc {
+            EscapeState::Ground => {
+                if c == '\x1b' {
+                    self.esc = EscapeState::Escape;
+                }
+                c == '\x1b'
+            }
+            EscapeState::Escape => {
+                // Only CSI (ESC '[') sequences are understood.
+                self.esc = if c == '[' {
+                    EscapeState::Csi { param: 0 }
+                } else {
+                    EscapeState::Ground
+                };
+                true
+            }
+            // A newline or Backspace inside a sequence abandons it and
+            // is handled as usual.
+            EscapeState::Csi { .. } if c == '\n' || c == '\x08' => {
+                self.esc = EscapeState::Ground;
+                false
+            }
+            EscapeState::Csi { param } => {
+                self.esc = match c {
+                    '0'..='9' => EscapeState::Csi {
+                        param: param
+                            .saturating_mul(10)
+                            .saturating_add(c.to_digit(10).unwrap_or(0)),
+                    },
+                    ';' => {
+                        self.apply_sgr(param);
+                        EscapeState::Csi { param: 0 }
+                    }
+                    'm' => {
+                        self.apply_sgr(param);
+                        EscapeState::Ground
+                    }
+                    // Any other final byte ends a sequence we don't
+                    // support.
+                    _ => EscapeState::Ground,
+                };
+                true
+            }
         }
     }
     pub fn buf(&self) -> &T {
@@ -254,6 +327,12 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let w = self.buf.width();
         for c in s.chars() {
+            // Escape sequences change how later chars are drawn, so
+            // they must be taken out before c could be looked up as a
+            // glyph.
+            if self.consume_escape(c) {
+                continue;
+            }
             if c == '\n' {
                 self.cursor_y += 16;
                 self.cursor_x = 0;
@@ -288,6 +367,19 @@ impl<T: Bitmap> fmt::Write for BitmapTextWriter<T> {
                 0xffffff,
                 c,
             );
+            // The underline is the bottom pixel row of the glyph cell;
+            // Backspace's 8x16 erase wipes it along with the glyph.
+            if self.underline && dx > 0 {
+                fill_rect(
+                    &mut self.buf,
+                    0xffffff,
+                    self.cursor_x,
+                    self.cursor_y + 15,
+                    dx,
+                    1,
+                )
+                .or(Err(fmt::Error))?;
+            }
             self.cursor_x += dx;
             if self.adjust_cursor_pos() {
                 fill_rect(&mut self.buf, 0x000000, 0, self.cursor_y, w, 16)
@@ -432,5 +524,72 @@ mod bmp_text_writer_tests {
             assert_eq!(writer.cursor_x, *x, "input: {s:?}");
             assert_eq!(writer.cursor_y, *y, "input: {s:?}");
         }
+    }
+
+    // One text line, wide enough that nothing below wraps.
+    fn new_line_bmp() -> BitmapBuffer {
+        BitmapBuffer::new(64, 16, 64)
+    }
+
+    #[test_case]
+    fn sgr_survives_split_write_str_calls() {
+        let mut writer = BitmapTextWriter::new(new_line_bmp());
+        for piece in ["\x1b", "[4", "mA"] {
+            writer.write_str(piece).unwrap();
+        }
+        assert!(writer.underline);
+        assert_eq!(writer.cursor_x, 8);
+        for piece in ["\x1b[2", "4m"] {
+            writer.write_str(piece).unwrap();
+        }
+        assert!(!writer.underline);
+        assert_eq!(writer.cursor_x, 8);
+    }
+
+    #[test_case]
+    fn sgr_whole_and_split_input_produce_identical_pixels() {
+        let mut whole = BitmapTextWriter::new(new_line_bmp());
+        whole.write_str("\x1b[4m日\x1b[24mA").unwrap();
+        let mut split = BitmapTextWriter::new(new_line_bmp());
+        for piece in ["\x1b", "[", "4", "m日", "\x1b[2", "4", "mA"] {
+            split.write_str(piece).unwrap();
+        }
+        assert_eq!(whole.buf, split.buf);
+    }
+
+    #[test_case]
+    fn underline_spans_ascii_and_wide_glyphs() {
+        let mut drawn = BitmapTextWriter::new(new_line_bmp());
+        drawn.write_str("\x1b[4mA日").unwrap();
+        // Same as the plain text plus a line under its 8 + 16 pixels.
+        let mut expected = BitmapTextWriter::new(new_line_bmp());
+        expected.write_str("A日").unwrap();
+        fill_rect(&mut expected.buf, 0xffffff, 0, 15, 24, 1).unwrap();
+        assert_eq!(drawn.buf, expected.buf);
+    }
+
+    #[test_case]
+    fn two_backspaces_erase_wide_glyph_and_underline() {
+        let mut writer = BitmapTextWriter::new(new_line_bmp());
+        writer.write_str("\x1b[4m日\x08\x08").unwrap();
+        assert_eq!(writer.cursor_x, 0);
+        assert_eq!(writer.buf, new_line_bmp());
+    }
+
+    #[test_case]
+    fn unsupported_csi_does_not_draw_parameter_text() {
+        let mut writer = BitmapTextWriter::new(new_line_bmp());
+        writer.write_str("\x1b[2J").unwrap();
+        assert_eq!(writer.cursor_x, 0);
+        assert_eq!(writer.buf, new_line_bmp());
+    }
+
+    #[test_case]
+    fn sgr_does_not_advance_cursor() {
+        let mut writer = BitmapTextWriter::new(new_line_bmp());
+        writer.write_str("\x1b[4m\x1b[0;24m").unwrap();
+        assert_eq!(writer.cursor_x, 0);
+        assert_eq!(writer.cursor_y, 0);
+        assert_eq!(writer.buf, new_line_bmp());
     }
 }
