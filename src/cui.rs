@@ -48,10 +48,61 @@ pub fn set_ime_enabled(choice: bool) {
     });
 }
 
+// One char of the input line together with how it is drawn: pending
+// text is underlined, committed text is not.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct StyledChar {
+    ch: char,
+    underline: bool,
+}
+
+// The committed text followed by the pending text, underlined.
+fn styled_line(committed: &str, pending: &str) -> Vec<StyledChar> {
+    let committed = committed.chars().map(|ch| StyledChar {
+        ch,
+        underline: false,
+    });
+    let pending = pending.chars().map(|ch| StyledChar {
+        ch,
+        underline: true,
+    });
+    committed.chain(pending).collect()
+}
+
 // How many 8-pixel cells c takes on screen, by the same rule as
 // BitmapTextWriter (a char missing from the font takes none).
 fn glyph_cells(c: char) -> usize {
     (get_glyph_width(c) / 8) as usize
+}
+
+// Encodes the redraw from old to new as one string: erase the tail of
+// old that differs, then draw the tail of new, switching the underline
+// on and off as needed. Empty when nothing changed.
+fn encode_line_diff(old: &[StyledChar], new: &[StyledChar]) -> String {
+    let common = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+    if old.len() == common && new.len() == common {
+        return String::new();
+    }
+    let mut out = String::from("\x1b[24m");
+    // Terminals only move the cursor on Backspace, so erase the old
+    // tail by overwriting it with spaces, then back up over them.
+    let old_cells: usize =
+        old[common..].iter().map(|sc| glyph_cells(sc.ch)).sum();
+    out.push_str(&"\x08".repeat(old_cells));
+    out.push_str(&" ".repeat(old_cells));
+    out.push_str(&"\x08".repeat(old_cells));
+    let mut underline = false;
+    for sc in &new[common..] {
+        if sc.underline != underline {
+            out.push_str(if sc.underline { "\x1b[4m" } else { "\x1b[24m" });
+            underline = sc.underline;
+        }
+        out.push(sc.ch);
+    }
+    if underline {
+        out.push_str("\x1b[24m");
+    }
+    out
 }
 
 pub struct Console {
@@ -92,38 +143,23 @@ impl Console {
             e => Some(e),
         }
     }
-    // Echo a literal char (or apply a Backspace) with no IME, keeping
-    // input_buf and the on-screen line in step.
-    fn input_plain(&mut self, c: char) {
+    // The input line as it should look on screen right now.
+    fn line(&self) -> Vec<StyledChar> {
+        styled_line(&self.input_buf, self.ime.pending())
+    }
+    // Brings the screen from the old line to the current one in a
+    // single print, so erase, redraw, and underline changes are not
+    // interleaved with other output.
+    fn redraw(&self, old: &[StyledChar]) {
+        print!("{}", encode_line_diff(old, &self.line()));
+    }
+    // Edits the committed text directly: append c, or on Backspace
+    // remove the last char.
+    fn edit_committed(&mut self, c: char) {
         if c == '\x08' {
-            if let Some(prev_char) = self.input_buf.pop() {
-                for _ in 0..glyph_cells(prev_char) {
-                    print!("\x08");
-                }
-            }
+            self.input_buf.pop();
         } else {
             self.input_buf.push(c);
-            print!("{c}");
-        }
-    }
-    // Redraw after the IME rewrote its pending text, which sits at the
-    // end of the line: back over the changed tail of the old text and
-    // draw the new tail (a wide glyph is two cells).
-    fn render_ime_line(&mut self, old: &str, new: &str) {
-        let cols = |s: &str, skip: usize| -> usize {
-            s.chars().skip(skip).map(glyph_cells).sum()
-        };
-        let common = old
-            .chars()
-            .zip(new.chars())
-            .take_while(|(a, b)| a == b)
-            .count();
-        let old_cols = cols(old, common);
-        for _ in 0..old_cols {
-            print!("\x08");
-        }
-        for ch in new.chars().skip(common) {
-            print!("{ch}");
         }
     }
     // Moves the IME's pending text onto the end of the committed line.
@@ -138,9 +174,12 @@ impl Console {
         };
         // The `ime off` command can disable the IME while text is still
         // pending; nothing else will ever confirm it, so commit it here.
-        if !is_ime_enabled() {
+        if !is_ime_enabled() && !self.ime.pending().is_empty() {
+            let old = self.line();
             self.commit_pending();
+            self.redraw(&old);
         }
+        let old = self.line();
         match e {
             KeyEvent::Char(c) => {
                 if c == ' ' && self.ctrl_is_pressed {
@@ -149,18 +188,15 @@ impl Console {
                     if !enable {
                         self.commit_pending();
                     }
-                    return;
-                }
-                if is_ime_enabled() {
-                    let old = String::from(self.ime.pending());
-                    match self.ime.send_key_down(KeyEvent::Char(c)) {
-                        InputEditResult::UpdatePendingString(s) => {
-                            self.render_ime_line(&old, &s)
-                        }
-                        InputEditResult::PassThrough => self.input_plain(c),
+                } else if is_ime_enabled() {
+                    // On UpdatePendingString the IME already holds the
+                    // new pending text; the redraw below shows it.
+                    let result = self.ime.send_key_down(KeyEvent::Char(c));
+                    if result == InputEditResult::PassThrough {
+                        self.edit_committed(c);
                     }
                 } else {
-                    self.input_plain(c);
+                    self.edit_committed(c);
                 }
             }
             KeyEvent::CursorUp => {
@@ -168,9 +204,11 @@ impl Console {
                     // The recalled line replaces the whole line, so
                     // settle the pending text into it first.
                     self.commit_pending();
+                    self.redraw(&old);
                     swap(&mut prev_cmd, &mut self.input_buf);
                     self.prev_cmd = Some(prev_cmd);
                     print!("\n{}", self.input_buf);
+                    return;
                 }
             }
             KeyEvent::Enter => {
@@ -178,22 +216,24 @@ impl Console {
                 // with nothing pending runs the line as a command.
                 if !self.ime.pending().is_empty() {
                     self.commit_pending();
+                } else {
+                    println!();
+                    if let Err(e) = run_cmd(&self.input_buf) {
+                        error!("{e}: {}", self.input_buf)
+                    }
+                    let mut prev_cmd = String::new();
+                    swap(&mut prev_cmd, &mut self.input_buf);
+                    self.prev_cmd = Some(prev_cmd);
+                    print!("> ");
                     return;
                 }
-                println!();
-                if let Err(e) = run_cmd(&self.input_buf) {
-                    error!("{e}: {}", self.input_buf)
-                }
-                let mut prev_cmd = String::new();
-                swap(&mut prev_cmd, &mut self.input_buf);
-                self.prev_cmd = Some(prev_cmd);
-                print!("> ");
             }
             KeyEvent::CtrlLeft => {
                 self.ctrl_is_pressed = true;
             }
             e => warn!("Unhandled input: {e:?}"),
         }
+        self.redraw(&old);
     }
     pub fn handle_key_up(&mut self, e: KeyEvent) {
         if e == KeyEvent::CtrlLeft {
@@ -385,6 +425,9 @@ fn cr_lf_and_crlf_trigger_enter_exactly_once() {
 #[cfg(test)]
 mod line_edit_tests {
     use super::*;
+    use crate::bitmap::BitmapBuffer;
+    use crate::graphics::BitmapTextWriter;
+    use core::fmt::Write;
 
     fn console_with_ime() -> Console {
         set_ime_enabled(true);
@@ -489,6 +532,21 @@ mod line_edit_tests {
     }
 
     #[test_case]
+    fn unchanged_line_produces_no_output() {
+        let line = styled_line("A", "あ");
+        assert_eq!(encode_line_diff(&line, &line), "");
+        assert_eq!(encode_line_diff(&[], &[]), "");
+    }
+
+    #[test_case]
+    fn committing_same_text_requires_redraw() {
+        // Same chars, but the underline has to go: not a no-op.
+        let pending = styled_line("", "今日");
+        let committed = styled_line("今日", "");
+        assert_ne!(encode_line_diff(&pending, &committed), "");
+    }
+
+    #[test_case]
     fn cell_width_matches_bitmap_writer() {
         assert_eq!(glyph_cells('A'), 1);
         assert_eq!(glyph_cells('日'), 2);
@@ -496,5 +554,29 @@ mod line_edit_tests {
         assert_eq!(glyph_cells('ぃ'), 2);
         // U+FFFF is a noncharacter, so no font has a glyph for it.
         assert_eq!(glyph_cells('\u{FFFF}'), 0);
+    }
+
+    #[test_case]
+    fn shrinking_pending_clears_old_tail() {
+        // Two cells of い are backed over, blanked, and backed over
+        // again; nothing new is drawn.
+        assert_eq!(
+            encode_line_diff(&styled_line("", "あい"), &styled_line("", "あ")),
+            "\x1b[24m\x08\x08  \x08\x08"
+        );
+    }
+
+    #[test_case]
+    fn commit_redraw_matches_plain_text_pixels() {
+        let pending = styled_line("", "今日");
+        let committed = styled_line("今日", "");
+        let mut redrawn = BitmapTextWriter::new(BitmapBuffer::new(64, 16, 64));
+        redrawn.write_str(&encode_line_diff(&[], &pending)).unwrap();
+        redrawn
+            .write_str(&encode_line_diff(&pending, &committed))
+            .unwrap();
+        let mut plain = BitmapTextWriter::new(BitmapBuffer::new(64, 16, 64));
+        plain.write_str("今日").unwrap();
+        assert_eq!(redrawn.buf(), plain.buf());
     }
 }
