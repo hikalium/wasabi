@@ -14,10 +14,12 @@
 //!
 //! Writes `src/ime_dict.rs` in the wasabi repository and appends every
 //! kanji and katakana seen to `third_party/unifont/chars_to_include.txt`
-//! there; run `make -C third_party/unifont glyphs.txt` afterwards to
-//! regenerate the glyphs. With no inputs, the dictionary holds just the
-//! `SEED` entries.
+//! there. With `--bdf <unifont_jp.bdf>` it also regenerates
+//! `third_party/unifont/glyphs.txt` from that font (downloading it first
+//! if the file is missing); see `glyphs.rs`. With no inputs, the
+//! dictionary holds just the `SEED` entries.
 
+mod glyphs;
 mod wiktionary;
 
 use std::borrow::Cow;
@@ -46,6 +48,10 @@ struct Args {
     /// words from
     #[argh(option)]
     wiktionary: Option<PathBuf>,
+    /// the Unifont Japanese BDF (.bdf or .bdf.gz) to cut glyphs.txt
+    /// from; downloaded to this path if missing
+    #[argh(option)]
+    bdf: Option<PathBuf>,
     /// manuscript files or directories (*.md and *.typ are read)
     #[argh(positional)]
     inputs: Vec<PathBuf>,
@@ -288,6 +294,17 @@ fn main() -> Result<()> {
     let added = extend_glyph_list(&chars_txt, &texts, &dict)?;
     println!("{} readings written to {}", dict.len(), dict_rs.display());
     println!("{added} glyphs added to {}", chars_txt.display());
+    if let Some(bdf) = &args.bdf {
+        glyphs::check_bdf_name(bdf)?;
+        let glyphs_txt = args.repo.join("third_party/unifont/glyphs.txt");
+        let (written, missing) =
+            glyphs::write_glyphs(bdf, &chars_txt, &glyphs_txt)?;
+        println!("{written} glyphs written to {}", glyphs_txt.display());
+        if !missing.is_empty() {
+            let missing: String = missing.into_iter().collect();
+            println!("not in the font: {missing}");
+        }
+    }
     Ok(())
 }
 
