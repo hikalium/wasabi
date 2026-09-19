@@ -5,8 +5,11 @@
 //! page, straight from the compressed file. For every article whose
 //! title is a Japanese word containing kanji and that has a Japanese
 //! section (`=={{L|ja}}==`, `=={{ja}}==` or `==日本語==`), the readings
-//! are taken from `{{kana-DEFAULTSORT|よみ}}`. Only readings written
-//! entirely in hiragana are kept.
+//! are taken from `{{kana-DEFAULTSORT|よみ}}`, from the positional
+//! arguments of the headword templates in that section (`{{ja-noun|よみ}}`,
+//! `{{ja-verb|よみ}}`, `{{ja-pron|よみ|...}}`, `{{ja-wagokanji|よみ|よみ}}`,
+//! ...), and from the headword line `'''語'''（よみ）`. Only readings
+//! written entirely in hiragana are kept.
 
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -21,6 +24,23 @@ use bzip2::read::MultiBzDecoder;
 use crate::is_hiragana_reading;
 use crate::is_kanji;
 use crate::is_katakana;
+
+// Templates whose positional arguments are readings of the headword.
+const READING_TEMPLATES: &[&str] = &[
+    "kana-DEFAULTSORT",
+    "ja-noun",
+    "ja-verb",
+    "ja-adj",
+    "ja-adv",
+    "ja-pron",
+    "ja-wagokanji",
+    "ja-proper",
+    "ja-propn",
+    "ja-interj",
+    "ja-conj",
+    "ja-phrase",
+    "ja-pos",
+];
 
 const MAX_TITLE_CHARS: usize = 12;
 
@@ -107,9 +127,9 @@ fn unescape(s: &str) -> String {
 /// The hiragana readings given for the word in the page's wikitext.
 pub fn readings(text: &str) -> Vec<String> {
     let mut readings: Vec<String> = Vec::new();
-    if japanese_section(text).is_none() {
+    let Some(section) = japanese_section(text) else {
         return readings;
-    }
+    };
     let mut add = |candidate: &str| {
         let candidate = candidate.trim();
         if is_hiragana_reading(candidate)
@@ -120,6 +140,37 @@ pub fn readings(text: &str) -> Vec<String> {
     };
     for args in templates(text, "kana-DEFAULTSORT") {
         args.iter().for_each(|a| add(a));
+    }
+    for name in READING_TEMPLATES {
+        for args in templates(&section, name) {
+            for arg in args {
+                match arg.split_once('=') {
+                    None => add(&arg),
+                    Some(("hira" | "kana", value)) => add(value),
+                    Some(_) => {}
+                }
+            }
+        }
+    }
+    // '''語'''（よみ、よみ）: alternatives are separated by 、 or ・; a
+    // reading may be written in parts, "ちゅうおう あめりか" or
+    // "かん-じ", which are joined.
+    for line in section.lines().filter(|l| l.starts_with("'''")) {
+        if let Some((_, rest)) = line.split_once('（') {
+            if let Some((inner, _)) = rest.split_once('）') {
+                for alternative in
+                    strip_links(inner).split(['、', '・', '，', ','])
+                {
+                    let joined: String = alternative
+                        .chars()
+                        .filter(|c| {
+                            !c.is_whitespace() && *c != '-' && *c != '‐'
+                        })
+                        .collect();
+                    add(&joined);
+                }
+            }
+        }
     }
     readings
 }
@@ -185,6 +236,44 @@ fn strip_links(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readings_come_from_sort_key_templates_and_headword() {
+        let text = "{{kana-DEFAULTSORT|かんじ}}\n\
+                    =={{L|ja}}==\n\
+                    ==={{verb}}===\n\
+                    '''[[感]]じ'''（[[かんじ|カン-じ]]）\n\
+                    ==={{noun}}===\n\
+                    {{ja-noun|[[かんじ]]}}\n\
+                    ===={{pron}}====\n\
+                    {{ja-pron|かんじ|acc=0}}\n";
+        assert_eq!(readings(text), ["かんじ"]);
+    }
+
+    #[test]
+    fn headword_reading_parts_are_joined_and_alternatives_split() {
+        let text = "=={{ja}}==\n==={{name}}===\n\
+                    '''[[中央]][[アメリカ]]'''（ちゅうおう あめりか）\n";
+        assert_eq!(readings(text), ["ちゅうおうあめりか"]);
+        let text = "=={{ja}}==\n'''今日'''（きょう、こんにち・こんじつ）\n";
+        assert_eq!(readings(text), ["きょう", "こんにち", "こんじつ"]);
+    }
+
+    #[test]
+    fn wagokanji_gives_every_reading() {
+        let text = "{{kana-DEFAULTSORT|よい}}\n=={{L|ja}}==\n\
+                    ==={{wago}}===\n{{ja-wagokanji|よい|いい}}\n";
+        assert_eq!(readings(text), ["よい", "いい"]);
+    }
+
+    #[test]
+    fn only_the_japanese_section_counts() {
+        let text = "=={{L|zh}}==\n{{ja-noun|ほげ}}\n'''感じ'''（ふが）\n\
+                    =={{L|ja}}==\n{{ja-noun|かんじ}}\n\
+                    =={{L|ko}}==\n{{ja-noun|ぴよ}}\n";
+        assert_eq!(readings(text), ["かんじ"]);
+        assert!(readings("=={{L|en}}==\n{{en-noun}}\n").is_empty());
+    }
 
     #[test]
     fn the_sort_key_counts_only_with_a_japanese_section() {
