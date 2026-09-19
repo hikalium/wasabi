@@ -55,6 +55,12 @@ impl InputMethodEditor {
             'b' => Some(["ば", "び", "ぶ", "べ", "ぼ"]),
             'p' => Some(["ぱ", "ぴ", "ぷ", "ぺ", "ぽ"]),
             'j' => Some(["じゃ", "じ", "じゅ", "じぇ", "じょ"]),
+            'f' => Some(["ふぁ", "ふぃ", "ふ", "ふぇ", "ふぉ"]),
+            'v' => Some(["ゔぁ", "ゔぃ", "ゔ", "ゔぇ", "ゔぉ"]),
+            'c' => Some(["か", "し", "く", "せ", "こ"]),
+            'q' => Some(["くぁ", "くぃ", "く", "くぇ", "くぉ"]),
+            // x + vowel is the small vowel; xtu is っ, xya/xyu/xyo are ゃゅょ.
+            'x' => Some(["ぁ", "ぃ", "ぅ", "ぇ", "ぉ"]),
             _ => None,
         }
     }
@@ -75,6 +81,17 @@ impl InputMethodEditor {
             ('b', 'y') => Some(["びゃ", "びぃ", "びゅ", "びぇ", "びょ"]),
             ('p', 'y') => Some(["ぴゃ", "ぴぃ", "ぴゅ", "ぴぇ", "ぴょ"]),
             ('j', 'y') => Some(["じゃ", "じぃ", "じゅ", "じぇ", "じょ"]),
+            ('z', 'y') => Some(["じゃ", "じぃ", "じゅ", "じぇ", "じょ"]),
+            ('t', 's') => Some(["つぁ", "つぃ", "つ", "つぇ", "つぉ"]),
+            ('t', 'h') => Some(["てゃ", "てぃ", "てゅ", "てぇ", "てょ"]),
+            ('d', 'h') => Some(["でゃ", "でぃ", "でゅ", "でぇ", "でょ"]),
+            ('w', 'h') => Some(["うぁ", "うぃ", "う", "うぇ", "うぉ"]),
+            ('f', 'y') => Some(["ふゃ", "ふぃ", "ふゅ", "ふぇ", "ふょ"]),
+            ('v', 'y') => Some(["ゔゃ", "ゔぃ", "ゔゅ", "ゔぇ", "ゔょ"]),
+            ('k', 'w') => Some(["くぁ", "くぃ", "くぅ", "くぇ", "くぉ"]),
+            ('g', 'w') => Some(["ぐぁ", "ぐぃ", "ぐぅ", "ぐぇ", "ぐぉ"]),
+            ('x', 'y') => Some(["ゃ", "ぃ", "ゅ", "ぇ", "ょ"]),
+            ('x', 't') => Some(["", "", "っ", "", ""]),
             _ => None,
         }
     }
@@ -103,6 +120,14 @@ impl InputMethodEditor {
                     } else if let (Some('n'), 'n') = (prev2, prev1) {
                         self.pending_string.pop();
                         String::from('ん')
+                    } else if prev2 == Some('n')
+                        && Self::is_consonant(prev1)
+                        && prev1 != 'y'
+                    {
+                        // n before another consonant is ん (before y it
+                        // is the start of にゃ/にゅ/にょ).
+                        self.pending_string.pop();
+                        String::from('ん') + &String::from(prev1)
                     } else if prev2
                         .map(|prev2| {
                             prev2 == prev1 && Self::is_consonant(prev1)
@@ -257,4 +282,54 @@ fn jy_spells_the_ja_row() {
         type_text(&mut ime, "jya"),
         InputEditResult::UpdatePendingString("じゅうじゃ".to_string())
     );
+}
+
+#[test_case]
+fn extended_romaji_rows() {
+    use crate::font::get_glyph_width;
+    for (typed, expected) in [
+        ("fu", "ふ"),
+        ("fa", "ふぁ"),
+        ("fyu", "ふゅ"),
+        ("va", "ゔぁ"),
+        ("tsu", "つ"),
+        ("thi", "てぃ"),
+        ("dhi", "でぃ"),
+        ("whi", "うぃ"),
+        ("zyu", "じゅ"),
+        ("ca", "か"),
+        ("qa", "くぁ"),
+        ("kwa", "くぁ"),
+        ("xa", "ぁ"),
+        ("xtu", "っ"),
+        ("xyo", "ょ"),
+    ] {
+        let mut ime = InputMethodEditor::default();
+        assert_eq!(
+            type_text(&mut ime, typed),
+            InputEditResult::UpdatePendingString(expected.to_string()),
+            "{typed}"
+        );
+    }
+    for c in "ぁぅぉゔ".chars() {
+        assert_eq!(get_glyph_width(c), 16, "{c}");
+    }
+}
+
+#[test_case]
+fn n_before_a_consonant_is_nn() {
+    for (typed, expected) in [
+        ("tenki", "てんき"),
+        ("kanji", "かんじ"),
+        ("nya", "にゃ"),
+        ("nn", "ん"),
+        ("na", "な"),
+    ] {
+        let mut ime = InputMethodEditor::default();
+        assert_eq!(
+            type_text(&mut ime, typed),
+            InputEditResult::UpdatePendingString(expected.to_string()),
+            "{typed}"
+        );
+    }
 }
