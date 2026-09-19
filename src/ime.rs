@@ -53,6 +53,11 @@ impl InputMethodEditor {
         self.dict.insert("きょう", &["今日"]);
         self.dict.insert("てんき", &["天気"]);
         self.dict.insert("あめ", &["雨", "飴"]);
+        self.dict.insert("わたし", &["私"]);
+        self.dict.insert("なまえ", &["名前"]);
+        self.dict.insert("なかの", &["中野"]);
+        self.dict
+            .insert("きしゃ", &["貴社", "記者", "汽車", "帰社"]);
     }
     pub fn init_romaji_map(&mut self) {
         self.romaji_map2.insert('k', ["か", "き", "く", "け", "こ"]);
@@ -511,4 +516,19 @@ fn typing_after_conversion_keeps_candidate_and_appends() {
         InputEditResult::UpdatePendingString("雨が".to_string())
     );
     assert!(ime.conversion.is_none());
+}
+
+#[test_case]
+fn homophone_candidates_cycle_in_dictionary_order() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "kisya "),
+        InputEditResult::UpdatePendingString("貴社".to_string())
+    );
+    for expected in ["記者", "汽車", "帰社", "貴社"] {
+        assert_eq!(
+            type_text(&mut ime, " "),
+            InputEditResult::UpdatePendingString(expected.to_string())
+        );
+    }
 }
