@@ -19,10 +19,18 @@ if [ -x "${BUNDLED_QEMU}" ]; then
   echo "Using bundled QEMU: ${BUNDLED_QEMU}"
 fi
 
+# Open the gtk window only when there is a display to show it on, so
+# headless runs (CI, check.sh over ssh) keep QEMU's default display.
+DISPLAY_OPTS=()
+if [ -n "${DISPLAY}${WAYLAND_DISPLAY}" ]; then
+  DISPLAY_OPTS=(-display gtk,grab-on-hover=on)
+fi
+
 "${QEMU}" \
   -m 4G \
   -bios third_party/ovmf/RELEASEX64_OVMF.fd \
   -machine q35 \
+  "${DISPLAY_OPTS[@]}" \
   -drive format=raw,file=fat:rw:mnt \
   -monitor telnet:0.0.0.0:2345,server,nowait,logfile=log/qemu_monitor.txt \
   -chardev stdio,id=char_com1,mux=on,logfile=log/com1.txt \
