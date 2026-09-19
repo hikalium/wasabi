@@ -144,6 +144,7 @@ impl InputMethodEditor {
             ('d', 'y') => Some(["ぢゃ", "ぢぃ", "ぢゅ", "ぢぇ", "ぢょ"]),
             ('b', 'y') => Some(["びゃ", "びぃ", "びゅ", "びぇ", "びょ"]),
             ('p', 'y') => Some(["ぴゃ", "ぴぃ", "ぴゅ", "ぴぇ", "ぴょ"]),
+            ('j', 'y') => Some(["じゃ", "じぃ", "じゅ", "じぇ", "じょ"]),
             _ => None,
         }
     }
@@ -550,4 +551,17 @@ fn dictionary_table_is_sorted_for_binary_search() {
     let dict = crate::ime_dict::DICT;
     assert!(dict.windows(2).all(|pair| pair[0].0 < pair[1].0));
     assert!(dict.iter().all(|(r, c)| !r.is_empty() && !c.is_empty()));
+}
+
+#[test_case]
+fn jy_spells_the_ja_row() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "jyuu"),
+        InputEditResult::UpdatePendingString("じゅう".to_string())
+    );
+    assert_eq!(
+        type_text(&mut ime, "jya"),
+        InputEditResult::UpdatePendingString("じゅうじゃ".to_string())
+    );
 }
