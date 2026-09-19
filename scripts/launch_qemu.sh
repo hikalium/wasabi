@@ -23,6 +23,7 @@ fi
   -m 4G \
   -bios third_party/ovmf/RELEASEX64_OVMF.fd \
   -machine q35 \
+  -display gtk,grab-on-hover=on \
   -drive format=raw,file=fat:rw:mnt \
   -monitor telnet:0.0.0.0:2345,server,nowait,logfile=log/qemu_monitor.txt \
   -chardev stdio,id=char_com1,mux=on,logfile=log/com1.txt \
