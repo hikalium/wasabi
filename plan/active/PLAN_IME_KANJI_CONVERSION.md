@@ -317,7 +317,7 @@ impl InputMethodEditor {
 1文字ずつ `send_key_down` して最後の結果を返す）:
 
 - `weather_conversion`: `tennki ` → `天気`
-- `unmatched_space_is_consumed_without_insertion`: `sora ` → `そら`
+- `unmatched_space_is_consumed_without_insertion`: 辞書なしの IME で `sora ` → `そら`（原稿由来の辞書は 1 かな読みも含むため、辞書ありでは一致しない読みを選べない）
 - `empty_pending_space_inserts_fullwidth_space`
 - `conversion_glyphs_are_available`: `今日天気雨` の各文字が幅 16
 
