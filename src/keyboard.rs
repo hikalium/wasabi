@@ -33,6 +33,7 @@ pub enum KeyEvent {
     CursorRight,
     CursorUp,
     CtrlLeft,
+    ShiftLeft,
     Enter,
 }
 impl KeyEvent {
@@ -225,12 +226,20 @@ impl UsbKeyboardDriverState {
                     report.into_iter().skip(2).filter(|id| *id != 0),
                 )
             };
-            let modifier_changed_bits = modifier ^ prev_modifier;
-            if modifier_changed_bits & 1 != 0 {
-                if modifier & 1 != 0 {
-                    console.handle_key_down(KeyEvent::CtrlLeft);
-                } else {
-                    console.handle_key_up(KeyEvent::CtrlLeft);
+            // Modifier bits of a boot-protocol report: 0 left Ctrl,
+            // 1 left Shift, 4 right Ctrl, 5 right Shift. Either Shift
+            // is reported as ShiftLeft.
+            const CTRL: u8 = 1 << 0;
+            const SHIFT: u8 = 1 << 1 | 1 << 5;
+            for (bits, e) in
+                [(CTRL, KeyEvent::CtrlLeft), (SHIFT, KeyEvent::ShiftLeft)]
+            {
+                let was = prev_modifier & bits != 0;
+                let is = modifier & bits != 0;
+                if is && !was {
+                    console.handle_key_down(e);
+                } else if was && !is {
+                    console.handle_key_up(e);
                 }
             }
             prev_modifier = modifier;

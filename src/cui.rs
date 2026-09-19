@@ -142,6 +142,7 @@ pub struct Console {
     input_buf: String,
     prev_input_was_cr: bool,
     ctrl_is_pressed: bool,
+    shift_is_pressed: bool,
     ime: InputMethodEditor,
     // Where the candidate window is drawn, while it is shown.
     candidate_window: Option<Rect>,
@@ -156,6 +157,7 @@ impl Default for Console {
             input_buf: String::new(),
             prev_input_was_cr: false,
             ctrl_is_pressed: false,
+            shift_is_pressed: false,
             ime,
             candidate_window: None,
         }
@@ -260,6 +262,11 @@ impl Console {
                     if !enable {
                         self.commit_pending();
                     }
+                } else if c == ' '
+                    && self.shift_is_pressed
+                    && self.ime.step_candidate(-1).is_some()
+                {
+                    // Shift+Space goes back to the previous candidate.
                 } else if is_ime_enabled() {
                     // On UpdatePendingString the IME already holds the
                     // new pending text; the redraw below shows it.
@@ -270,6 +277,18 @@ impl Console {
                 } else {
                     self.edit_committed(c);
                 }
+            }
+            // While candidates are being chosen, the cursor keys move
+            // through them: right and down go on, left and up go back.
+            KeyEvent::CursorRight | KeyEvent::CursorDown
+                if self.ime.candidates().is_some() =>
+            {
+                self.ime.step_candidate(1);
+            }
+            KeyEvent::CursorLeft | KeyEvent::CursorUp
+                if self.ime.candidates().is_some() =>
+            {
+                self.ime.step_candidate(-1);
             }
             KeyEvent::CursorUp => {
                 if let Some(mut prev_cmd) = self.prev_cmd.take() {
@@ -304,14 +323,19 @@ impl Console {
             KeyEvent::CtrlLeft => {
                 self.ctrl_is_pressed = true;
             }
+            KeyEvent::ShiftLeft => {
+                self.shift_is_pressed = true;
+            }
             e => warn!("Unhandled input: {e:?}"),
         }
         self.redraw(&old);
         self.update_candidate_window();
     }
     pub fn handle_key_up(&mut self, e: KeyEvent) {
-        if e == KeyEvent::CtrlLeft {
-            self.ctrl_is_pressed = false;
+        match e {
+            KeyEvent::CtrlLeft => self.ctrl_is_pressed = false,
+            KeyEvent::ShiftLeft => self.shift_is_pressed = false,
+            _ => {}
         }
     }
 }
@@ -1014,6 +1038,35 @@ mod line_edit_tests {
         }
         assert_eq!(con.input_buf, "貴社の記者が汽車で帰社した");
         assert_eq!(con.ime.pending(), "");
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
+    fn shift_space_and_cursor_keys_move_between_candidates() {
+        let mut con = console_with_ime();
+        type_str(&mut con, "kisya ");
+        assert_eq!(con.ime.pending(), "貴社");
+        con.handle_key_down(KeyEvent::CursorRight);
+        assert_eq!(con.ime.pending(), "記者");
+        con.handle_key_down(KeyEvent::CursorDown);
+        assert_eq!(con.ime.pending(), "汽車");
+        con.handle_key_down(KeyEvent::CursorLeft);
+        assert_eq!(con.ime.pending(), "記者");
+        // Up moves back through the candidates rather than recalling
+        // history while a conversion is in progress.
+        con.prev_cmd = Some(String::from("time"));
+        con.handle_key_down(KeyEvent::CursorUp);
+        assert_eq!(con.ime.pending(), "貴社");
+        assert_eq!(con.input_buf, "");
+        // Shift+Space goes back too, wrapping around to the last
+        // candidate, the katakana.
+        con.handle_key_down(KeyEvent::ShiftLeft);
+        con.handle_key_down(KeyEvent::Char(' '));
+        con.handle_key_up(KeyEvent::ShiftLeft);
+        assert_eq!(con.ime.pending(), "キシャ");
+        // Plain Space still goes forward.
+        type_str(&mut con, " ");
+        assert_eq!(con.ime.pending(), "貴社");
         set_ime_enabled(false);
     }
 
