@@ -97,3 +97,10 @@ pub fn lookup_font_8x16(c: char) -> Option<[[char; 8]; 16]> {
         None
     }
 }
+
+#[test_case]
+fn conversion_glyphs_are_available() {
+    for c in "今日天気雨".chars() {
+        assert_eq!(get_glyph_width(c), 16, "{c}");
+    }
+}
