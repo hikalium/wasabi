@@ -31,10 +31,14 @@ impl InputMethodEditor {
     pub fn is_consonant(e: char) -> bool {
         e.is_ascii_lowercase() && Self::boin_index(e).is_none()
     }
-    /// Replace the pending (pre-conversion) string. Used by callers to
-    /// keep the IME in sync after they reset or reload the input line.
-    pub fn set_pending(&mut self, s: String) {
-        self.pending_string = s;
+    /// The text typed so far that has not been committed yet.
+    pub fn pending(&self) -> &str {
+        &self.pending_string
+    }
+    /// Hands the pending text over to the caller for committing,
+    /// leaving the IME empty.
+    pub fn take_pending(&mut self) -> String {
+        core::mem::take(&mut self.pending_string)
     }
     // The kana row (a, i, u, e, o) that a consonant spells. An empty
     // string means the row has no kana for that vowel.
