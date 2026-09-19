@@ -12,14 +12,25 @@ pub enum InputEditResult {
     UpdatePendingString(String),
 }
 
+// The kanji candidates for one reading, most likely first.
+type Candidates = &'static [&'static str];
+
 #[derive(Default)]
 pub struct InputMethodEditor {
     pending_string: String,
     romaji_map2: BTreeMap<char, [&'static str; 5]>,
     romaji_map3: BTreeMap<(char, char), [&'static str; 5]>,
+    // Reading (in kana) to its candidates. Keys and candidate lists
+    // must be non-empty.
+    dict: BTreeMap<&'static str, Candidates>,
 }
 
 impl InputMethodEditor {
+    pub fn init_dict(&mut self) {
+        self.dict.insert("きょう", &["今日"]);
+        self.dict.insert("てんき", &["天気"]);
+        self.dict.insert("あめ", &["雨"]);
+    }
     pub fn init_romaji_map(&mut self) {
         self.romaji_map2.insert('k', ["か", "き", "く", "け", "こ"]);
         self.romaji_map2.insert('s', ["さ", "し", "す", "せ", "そ"]);
@@ -102,6 +113,23 @@ impl InputMethodEditor {
                     InputEditResult::PassThrough
                 }
             }
+            KeyEvent::Char(' ') => {
+                // Space converts the pending text as a whole, or inserts
+                // a full-width space when there is nothing to convert.
+                // A reading that is not in the dictionary stays as is.
+                if self.pending_string.is_empty() {
+                    self.pending_string.push('　');
+                } else if let Some(candidate) = self
+                    .dict
+                    .get(self.pending_string.as_str())
+                    .and_then(|candidates| candidates.first())
+                {
+                    self.pending_string = candidate.to_string();
+                }
+                InputEditResult::UpdatePendingString(
+                    self.pending_string.clone(),
+                )
+            }
             KeyEvent::Char(prev1) => {
                 let s = {
                     let (prev3, prev2) = {
@@ -112,15 +140,6 @@ impl InputMethodEditor {
                     };
                     if '-' == prev1 {
                         String::from('ー')
-                    } else if ' ' == prev1 {
-                        if self.pending_string == "きょう" {
-                            self.pending_string.pop();
-                            self.pending_string.pop();
-                            self.pending_string.pop();
-                            "今日".to_string()
-                        } else {
-                            "　".to_string()
-                        }
                     } else if let (Some('n'), 'n') = (prev2, prev1) {
                         self.pending_string.pop();
                         String::from('ん')
@@ -262,11 +281,27 @@ fn basic_romaji_conversion() {
     );
 }
 
+#[cfg(test)]
+fn new_test_ime() -> InputMethodEditor {
+    let mut ime = InputMethodEditor::default();
+    ime.init_romaji_map();
+    ime.init_dict();
+    ime
+}
+
+// Types s one key at a time and returns the result of the last key.
+#[cfg(test)]
+fn type_text(ime: &mut InputMethodEditor, s: &str) -> InputEditResult {
+    s.chars()
+        .map(|c| ime.send_key_down(KeyEvent::Char(c)))
+        .last()
+        .unwrap_or_default()
+}
+
 #[test_case]
 fn today_conversion() {
     use alloc::string::ToString;
-    let mut ime = InputMethodEditor::default();
-    ime.init_romaji_map();
+    let mut ime = new_test_ime();
     assert_eq!(
         ime.send_key_down(KeyEvent::Char('k')),
         InputEditResult::UpdatePendingString("k".to_string())
@@ -286,5 +321,32 @@ fn today_conversion() {
     assert_eq!(
         ime.send_key_down(KeyEvent::Char(' ')),
         InputEditResult::UpdatePendingString("今日".to_string())
+    );
+}
+
+#[test_case]
+fn weather_conversion() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "tennki "),
+        InputEditResult::UpdatePendingString("天気".to_string())
+    );
+}
+
+#[test_case]
+fn unmatched_space_is_consumed_without_insertion() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, "sora "),
+        InputEditResult::UpdatePendingString("そら".to_string())
+    );
+}
+
+#[test_case]
+fn empty_pending_space_inserts_fullwidth_space() {
+    let mut ime = new_test_ime();
+    assert_eq!(
+        type_text(&mut ime, " "),
+        InputEditResult::UpdatePendingString("　".to_string())
     );
 }

@@ -116,6 +116,7 @@ impl Default for Console {
     fn default() -> Self {
         let mut ime = InputMethodEditor::default();
         ime.init_romaji_map();
+        ime.init_dict();
         Self {
             prev_cmd: None,
             input_buf: String::new(),
