@@ -1,14 +1,13 @@
-GLYPHS_TO_INCLUDE=$(shell cat chars_to_include.txt | \
-				 iconv -f utf-8 -t utf16be | xxd -p | grep -o '....' | \
-				 sort -u | tr '[:lower:]' '[:upper:]' | grep -v 000A | \
-				 sed -E -e 's/^/glyph_/' -e 's/$$/.txt/')
-
-glyphs.txt: $(GLYPHS_TO_INCLUDE) chars_to_include.txt Makefile
-	grep -H '^' $(GLYPHS_TO_INCLUDE) | tee glyphs.txt
-
+# glyphs.txt holds, for every character in chars_to_include.txt, 16 lines
+# of "glyph_XXXX.txt:" plus 16 pixels, sorted by code point. It is cut
+# out of the Unifont Japanese BDF by the imedict tool in the book
+# repository (manuscript_os/imedict), which reads the font once:
+#
+#   cd ../../../imedict && cargo run --release -- --repo ../code \
+#       --bdf ../code/third_party/unifont/unifont_jp-16.0.04.bdf [inputs...]
+#
+# imedict downloads the BDF to that path if it is missing; this rule
+# does the same for use by hand.
 unifont_jp-16.0.04.bdf :
 	wget https://unifoundry.com/pub/unifont/unifont-16.0.04/font-builds/unifont_jp-16.0.04.bdf.gz
 	gunzip unifont_jp-16.0.04.bdf.gz
-
-glyph_%.txt : unifont_jp-16.0.04.bdf Makefile
-	grep -A30 "STARTCHAR.*$*" unifont_jp-16.0.04.bdf | grep -B16 ENDCHAR | head -n 16 | xargs -I {} -- bash -c 'echo "obase=2; ibase=16; {}" | bc | sed 's/^/0000000000000000/'' | grep -o -E ".{16}$$" | tr '1' '#' | tr '0' '.' > $@
