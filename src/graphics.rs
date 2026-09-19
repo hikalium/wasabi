@@ -228,6 +228,10 @@ impl<T: Bitmap> BitmapTextWriter<T> {
             esc: EscapeState::Ground,
         }
     }
+    /// The top-left pixel of the cell the next char will be drawn in.
+    pub fn cursor(&self) -> (i64, i64) {
+        (self.cursor_x, self.cursor_y)
+    }
     // Applies one SGR (Select Graphic Rendition) parameter. Only the
     // underline switch is understood; everything else is ignored.
     fn apply_sgr(&mut self, param: u32) {

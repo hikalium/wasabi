@@ -13,7 +13,7 @@ pub enum InputEditResult {
 }
 
 // The kanji candidates for one reading, most likely first.
-type Candidates = &'static [&'static str];
+pub type Candidates = &'static [&'static str];
 
 // A dictionary word found at the start of a reading, and the rest of
 // the reading (e.g. a particle) that follows it.
@@ -129,6 +129,11 @@ impl InputMethodEditor {
     pub fn take_pending(&mut self) -> String {
         self.conversion = None;
         core::mem::take(&mut self.pending_string)
+    }
+    /// While a conversion is in progress: its candidates and which one
+    /// is currently shown.
+    pub fn candidates(&self) -> Option<(Candidates, usize)> {
+        self.conversion.as_ref().map(|c| (c.candidates, c.index))
     }
     // Finds the longest dictionary word that the reading begins with.
     // A phrase is a word plus whatever attaches to it, so the reading

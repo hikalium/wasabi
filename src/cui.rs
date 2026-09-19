@@ -6,6 +6,7 @@ use crate::font::get_glyph_width;
 use crate::graphics::draw_str_fg;
 use crate::graphics::fill_rect;
 use crate::hpet::global_timestamp;
+use crate::ime::Candidates;
 use crate::ime::InputEditResult;
 use crate::ime::InputMethodEditor;
 use crate::info;
@@ -13,6 +14,7 @@ use crate::init::EFI_MEMORY_MAP;
 use crate::init::REBOOT_PARAMS;
 use crate::keyboard::KeyEvent;
 use crate::print;
+use crate::print::cursor_position;
 use crate::println;
 use crate::result::Result;
 use crate::tablet::set_debug_mouse;
@@ -105,12 +107,30 @@ fn encode_line_diff(old: &[StyledChar], new: &[StyledChar]) -> String {
     out
 }
 
+// How many candidates the candidate window shows at once.
+const CANDIDATE_WINDOW_SLOTS: usize = 3;
+
+// The page of candidates that the selected one is on, and where the
+// selected one is within that page.
+fn candidate_page(candidates: Candidates, index: usize) -> (Candidates, usize) {
+    let start = index / CANDIDATE_WINDOW_SLOTS * CANDIDATE_WINDOW_SLOTS;
+    let end = (start + CANDIDATE_WINDOW_SLOTS).min(candidates.len());
+    (&candidates[start..end], index - start)
+}
+
+fn text_width(s: &str) -> i64 {
+    s.chars().map(get_glyph_width).sum()
+}
+
 pub struct Console {
     prev_cmd: Option<String>,
     input_buf: String,
     prev_input_was_cr: bool,
     ctrl_is_pressed: bool,
     ime: InputMethodEditor,
+    // Where the candidate window is drawn, while it is shown.
+    // (x, y, w, h) in pixels.
+    candidate_window: Option<(i64, i64, i64, i64)>,
 }
 impl Default for Console {
     fn default() -> Self {
@@ -123,6 +143,7 @@ impl Default for Console {
             prev_input_was_cr: false,
             ctrl_is_pressed: false,
             ime,
+            candidate_window: None,
         }
     }
 }
@@ -168,6 +189,46 @@ impl Console {
         let pending = self.ime.take_pending();
         self.input_buf.push_str(&pending);
     }
+    // Shows the candidates of the phrase being converted on the line
+    // below the pending text, the selected one highlighted, or takes
+    // the window down when no conversion is in progress. Like the IME
+    // indicator it is drawn straight into VRAM rather than printed, so
+    // it stays out of the text stream (terminals do not see it).
+    fn update_candidate_window(&mut self) {
+        let (cx, cy) = cursor_position();
+        let (_, vh) =
+            crate::print::get_global_vram_resolutions().unwrap_or((0, 0));
+        if let Some((x, y, w, h)) = self.candidate_window.take() {
+            crate::print::with_global_vram_buf(|buf| {
+                let _ = fill_rect(buf, 0x000000, x, y, w, h);
+            });
+        }
+        let Some((candidates, index)) = self.ime.candidates() else {
+            return;
+        };
+        let (page, selected) = candidate_page(candidates, index);
+        // Below the start of the pending text. The line below the
+        // bottom one is the top one, as for the text writer.
+        let x = (cx - text_width(self.ime.pending())).max(0);
+        let y = if cy + 16 < vh { cy + 16 } else { 0 };
+        let w = page.iter().map(|c| text_width(c) + 8).sum::<i64>() + 8;
+        crate::print::with_global_vram_buf(|buf| {
+            let _ = fill_rect(buf, 0x404040, x, y, w, 16);
+            let mut cx = x + 8;
+            for (i, c) in page.iter().enumerate() {
+                let cw = text_width(c);
+                let fg = if i == selected {
+                    let _ = fill_rect(buf, 0xffffff, cx, y, cw, 16);
+                    0x000000
+                } else {
+                    0xffffff
+                };
+                draw_str_fg(buf, cx, y, fg, c);
+                cx += cw + 8;
+            }
+        });
+        self.candidate_window = Some((x, y, w, 16));
+    }
     pub fn handle_key_down(&mut self, e: KeyEvent) {
         let e = match self.normalize_newline(e) {
             Some(e) => e,
@@ -206,6 +267,7 @@ impl Console {
                     // settle the pending text into it first.
                     self.commit_pending();
                     self.redraw(&old);
+                    self.update_candidate_window();
                     swap(&mut prev_cmd, &mut self.input_buf);
                     self.prev_cmd = Some(prev_cmd);
                     print!("\n{}", self.input_buf);
@@ -235,6 +297,7 @@ impl Console {
             e => warn!("Unhandled input: {e:?}"),
         }
         self.redraw(&old);
+        self.update_candidate_window();
     }
     pub fn handle_key_up(&mut self, e: KeyEvent) {
         if e == KeyEvent::CtrlLeft {
@@ -567,6 +630,32 @@ mod line_edit_tests {
         }
         assert_eq!(con.input_buf, "貴社の記者が汽車で帰社した");
         assert_eq!(con.ime.pending(), "");
+        set_ime_enabled(false);
+    }
+
+    #[test_case]
+    fn candidate_page_holds_three_and_follows_the_selection() {
+        let all: Candidates = &["a", "b", "c", "d"];
+        assert_eq!(candidate_page(all, 0), (&all[..3], 0));
+        assert_eq!(candidate_page(all, 2), (&all[..3], 2));
+        assert_eq!(candidate_page(all, 3), (&all[3..], 0));
+    }
+
+    #[test_case]
+    fn candidate_window_is_shown_only_while_converting() {
+        let mut con = console_with_ime();
+        type_str(&mut con, "ame");
+        assert!(con.candidate_window.is_none());
+        type_str(&mut con, " ");
+        assert!(con.candidate_window.is_some());
+        // Backspace cancels the conversion and takes the window down.
+        type_str(&mut con, "\x08");
+        assert!(con.candidate_window.is_none());
+        type_str(&mut con, " ");
+        assert!(con.candidate_window.is_some());
+        // So does committing.
+        con.handle_key_down(KeyEvent::Enter);
+        assert!(con.candidate_window.is_none());
         set_ime_enabled(false);
     }
 
