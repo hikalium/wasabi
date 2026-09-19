@@ -20,6 +20,10 @@ pub type Candidates = &'static [&'static str];
 // lists must be non-empty.
 pub type Dictionary = &'static [(&'static str, Candidates)];
 
+// How long a dictionary word has to be, in kana, to be converted when
+// it comes after the first word of a phrase.
+const MIN_REST_WORD_CHARS: usize = 3;
+
 // A dictionary word found at the start of a reading, and the rest of
 // the reading (e.g. a particle) that follows it.
 struct DictionaryMatch<'a> {
@@ -202,6 +206,30 @@ impl InputMethodEditor {
             })
         })
     }
+    // Converts what follows the first word of a phrase: again the
+    // longest dictionary word at the start, first candidate, and so on.
+    // Only words of MIN_REST_WORD_CHARS kana or more count; anything
+    // shorter is most likely a particle or an inflection (の, です,
+    // した) and is kept as typed, kana by kana.
+    fn convert_rest(&self, mut rest: &str) -> String {
+        let mut out = String::new();
+        while let Some(c) = rest.chars().next() {
+            match self.longest_match(rest) {
+                Some(m)
+                    if rest[..rest.len() - m.suffix.len()].chars().count()
+                        >= MIN_REST_WORD_CHARS =>
+                {
+                    out += m.candidates[0];
+                    rest = m.suffix;
+                }
+                _ => {
+                    out.push(c);
+                    rest = &rest[c.len_utf8()..];
+                }
+            }
+        }
+        out
+    }
     pub fn send_key_down(&mut self, e: KeyEvent) -> InputEditResult {
         match e {
             KeyEvent::Char('\x08') => {
@@ -239,9 +267,10 @@ impl InputMethodEditor {
                     let mut candidates: Vec<String> = self
                         .longest_match(&reading)
                         .map(|m| {
+                            let rest = self.convert_rest(m.suffix);
                             m.candidates
                                 .iter()
-                                .map(|c| [c, m.suffix].concat())
+                                .map(|c| [*c, rest.as_str()].concat())
                                 .collect()
                         })
                         .unwrap_or_default();
@@ -726,6 +755,38 @@ fn reading_and_katakana_close_the_candidates() {
         assert_eq!(
             type_text(&mut ime, typed),
             InputEditResult::UpdatePendingString(expected.to_string())
+        );
+    }
+}
+
+#[test_case]
+fn rest_of_the_reading_is_converted_too() {
+    let mut ime = new_test_ime();
+    for (typed, expected) in [
+        ("iikanji ", "良い感じ"),
+        (" ", "言い感じ"),
+        (" ", "いいかんじ"),
+        (" ", "イイカンジ"),
+    ] {
+        assert_eq!(
+            type_text(&mut ime, typed),
+            InputEditResult::UpdatePendingString(expected.to_string()),
+            "{typed}"
+        );
+    }
+}
+
+#[test_case]
+fn short_words_after_the_first_stay_as_typed() {
+    // した is 下 and も is 模 in the dictionary, but after a word two
+    // kana or fewer are more likely an inflection or a particle.
+    for (typed, expected) in [("kisyasita ", "貴社した"), ("kyoumo ", "今日も")]
+    {
+        let mut ime = new_test_ime();
+        assert_eq!(
+            type_text(&mut ime, typed),
+            InputEditResult::UpdatePendingString(expected.to_string()),
+            "{typed}"
         );
     }
 }
