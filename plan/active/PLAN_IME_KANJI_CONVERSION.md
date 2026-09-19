@@ -53,12 +53,12 @@ Enter で下線が消えて確定済みになる。未確定が空のときの E
 
 ```
 kyouno [Space] [Enter]   → 今日の
-tenkiha [Space] [Enter]  → 天気は
+tennkiha [Space] [Enter]  → 天気は
 amedesu [Space] [Enter]  → 雨です
 ```
 
 第4段階まで進むと、途中の Enter を省略して
-`kyouno [Space] tenkiha [Space] amedesu [Space] [Enter]` でも入力できる。
+`kyouno [Space] tennkiha [Space] amedesu [Space] [Enter]` でも入力できる。
 
 変換は「未確定文字列の先頭にある辞書語を置き換え、残りはそのまま残す」方式。
 文節は「自立語＋付属語」なので目標の文はこれで処理できるが、残りが助詞・
@@ -313,10 +313,10 @@ impl InputMethodEditor {
 作業ディレクトリに残った余分な `glyph_*.txt` が混入しなくなる。
 
 テスト（以降の IME テストで使う補助: `new_test_ime()` は
-`init_romaji_map` と `init_dict` を呼ぶ。`type_text(&mut ime, "tenki ")` は
+`init_romaji_map` と `init_dict` を呼ぶ。`type_text(&mut ime, "tennki ")` は
 1文字ずつ `send_key_down` して最後の結果を返す）:
 
-- `weather_conversion`: `tenki ` → `天気`
+- `weather_conversion`: `tennki ` → `天気`
 - `unmatched_space_is_consumed_without_insertion`: `sora ` → `そら`
 - `empty_pending_space_inserts_fullwidth_space`
 - `conversion_glyphs_are_available`: `今日天気雨` の各文字が幅 16
@@ -359,7 +359,7 @@ impl InputMethodEditor {
 テスト:
 
 - `phrase_conversion_preserves_suffix`: `kyouno `→`今日の`,
-  `tenkiha `→`天気は`, `amedesu `→`雨です`
+  `tennkiha `→`天気は`, `amedesu `→`雨です`
 - `longest_dictionary_prefix_wins`: テスト内で `きょ`→`短` を足しても
   `kyouno ` は `今日の`（`短` は文字列処理のテスト専用でグリフは要らない）
 - `sentence_is_built_from_committed_phrases`（Console 結合）: 3 文節を
@@ -454,7 +454,7 @@ ESC・DEL などの制御文字は「別の文字」として自動確定の契�
 - `typing_after_conversion_commits_and_starts_next_phrase`:
   `kyouno ` の後 `t` → `CommitAndUpdate { committed: "今日の", pending: "t" }`
 - `sentence_can_be_entered_with_one_final_commit`（Console 結合）:
-  `kyouno tenkiha amedesu ` を打って `input_buf == "今日の天気は"`,
+  `kyouno tennkiha amedesu ` を打って `input_buf == "今日の天気は"`,
   `pending == "雨です"`；Enter で `input_buf == "今日の天気は雨です"`
 - `space_cycles_without_auto_commit`
 - `backspace_cancels_without_auto_commit`
@@ -481,11 +481,16 @@ ESC・DEL などの制御文字は「別の文字」として自動確定の契�
 - 下線はグリフの最下行 `y + 15` に描くため、`g` や `y` のように最下行まで
   ピクセルがある字形では重なる。行の高さを 17 ピクセルにする案は改行・
   折り返し・消去領域に波及するので本計画には含めず、重なりを許容する。
-- 入力手順の前提として、`kyou␣` の直後に `no` だけ打って `tenki` を続けると
+- 入力手順の前提として、`kyou␣` の直後に `no` だけ打って `tennki` を続けると
   読みが `のてんき` になり、先頭一致では引けない。文節の終わりでスペースを
   押す手順を本文で明示する。第 4 段階の自動確定後は `kyou␣no...` で
   `今日` が確定し、次の未確定が `の...` から始まる。
 - 単独の `n` や未完成の子音は、既存仕様どおりその文字のまま確定する。
+  子音の前の `n` も `ん` にはならないので、`てんき` は `tennki` と打つ。
+- 第 4a 段階のあとに、語彙追加が辞書のデータとグリフだけで済むことを示す
+  コミットを置いた: `わたし`/`なまえ`/`なかの` と、4 候補の `きしゃ`
+  （貴社・記者・汽車・帰社）。「私の名前は中野です」と
+  「貴社の記者が汽車で帰社した」を Console 結合テストで固定している。
 - 全角スペースはコマンド引数の ASCII 空白区切りとは異なる。IME 有効中の
   コマンド入力の使い勝手は文章入力とは別に検討する。
 - `lookup_font_16x16` のキー生成にある `c as u16` は補助平面の文字を別の
