@@ -141,9 +141,11 @@ pub fn tcp_segment_checksum(
 // (server) socket that doesn't initiate active close. Initial open
 // (SynSent) and active-close states (FinWait*, Closing, TimeWait) are
 // intentionally omitted — the server reaches the four-way close from
-// CloseWait/LastAck only.
+// CloseWait/LastAck only. Closed is where a socket that doesn't listen
+// (a client socket) starts and returns to after a connection ends.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TcpSocketState {
+    Closed,
     Listen,
     SynReceived,
     Established,
@@ -168,8 +170,26 @@ struct TcpSocketInner {
     last_active_at: Option<Duration>,
 }
 
+impl TcpSocketInner {
+    /// Forget the current peer and go back to `state` (Listen for a
+    /// server, Closed for a client) so the socket can be used again.
+    fn reset_connection(&mut self, state: TcpSocketState) {
+        self.state = state;
+        self.peer_mac = EthernetAddr::zero();
+        self.peer_ip = IpV4Addr::new([0, 0, 0, 0]);
+        self.peer_port = 0;
+        self.last_seq_to_ack = 0;
+        self.rx_data.clear();
+        self.send_buffer.clear();
+        self.unacked_len = 0;
+        self.last_tx_at = None;
+    }
+}
+
 pub struct TcpSocket {
-    listen_port: u16,
+    local_port: u16,
+    // Where the socket returns after a connection ends.
+    initial_state: TcpSocketState,
     inner: Mutex<TcpSocketInner>,
 }
 
@@ -179,10 +199,17 @@ pub static TCP_SOCKET: TcpSocket = TcpSocket::new_server(23);
 
 impl TcpSocket {
     pub const fn new_server(listen_port: u16) -> Self {
+        Self::new(listen_port, TcpSocketState::Listen)
+    }
+    pub const fn new_client(local_port: u16) -> Self {
+        Self::new(local_port, TcpSocketState::Closed)
+    }
+    const fn new(local_port: u16, initial_state: TcpSocketState) -> Self {
         Self {
-            listen_port,
+            local_port,
+            initial_state,
             inner: Mutex::new(TcpSocketInner {
-                state: TcpSocketState::Listen,
+                state: initial_state,
                 peer_mac: EthernetAddr::zero(),
                 peer_ip: IpV4Addr::new([0, 0, 0, 0]),
                 peer_port: 0,
@@ -239,7 +266,7 @@ impl TcpSocket {
         let in_tcp =
             TcpPacket::copy_from_slice(&frame[..size_of::<TcpPacket>()])
                 .ok()?;
-        if in_tcp.dst_port() != self.listen_port {
+        if in_tcp.dst_port() != self.local_port {
             return None;
         }
 
@@ -262,19 +289,13 @@ impl TcpSocket {
         inner.last_active_at = Some(now);
 
         // RST teardown: if the peer reset us at any point, drop straight
-        // back to Listen so the next SYN can be accepted. Without this
-        // the socket can wedge in Established forever after a peer
-        // crash or middlebox reset.
+        // back to the initial state (Listen so the next SYN can be
+        // accepted, or Closed so the client can connect again). Without
+        // this the socket can wedge in Established forever after a peer
+        // crash or middlebox reset. A RST answering our SYN means the
+        // peer refused the connection.
         if in_tcp.is_rst() {
-            inner.state = TcpSocketState::Listen;
-            inner.peer_mac = EthernetAddr::zero();
-            inner.peer_ip = IpV4Addr::new([0, 0, 0, 0]);
-            inner.peer_port = 0;
-            inner.last_seq_to_ack = 0;
-            inner.rx_data.clear();
-            inner.send_buffer.clear();
-            inner.unacked_len = 0;
-            inner.last_tx_at = None;
+            inner.reset_connection(self.initial_state);
             return None;
         }
 
@@ -285,6 +306,9 @@ impl TcpSocket {
         let mut send_fin = false;
 
         match prev_state {
+            TcpSocketState::Closed => {
+                return None;
+            }
             TcpSocketState::Listen => {
                 if !in_tcp.is_syn() {
                     return None;
@@ -344,15 +368,7 @@ impl TcpSocket {
             }
             TcpSocketState::LastAck => {
                 if in_tcp.is_ack() {
-                    inner.state = TcpSocketState::Listen;
-                    inner.peer_mac = EthernetAddr::zero();
-                    inner.peer_ip = IpV4Addr::new([0, 0, 0, 0]);
-                    inner.peer_port = 0;
-                    inner.last_seq_to_ack = 0;
-                    inner.rx_data.clear();
-                    inner.send_buffer.clear();
-                    inner.unacked_len = 0;
-                    inner.last_tx_at = None;
+                    inner.reset_connection(self.initial_state);
                 }
                 return None;
             }
@@ -369,7 +385,7 @@ impl TcpSocket {
             peer_mac,
             our_ip,
             peer_ip,
-            self.listen_port,
+            self.local_port,
             peer_port,
             seq,
             Some(seq_to_ack),
@@ -460,7 +476,7 @@ impl TcpSocket {
             peer_mac,
             our_ip,
             peer_ip,
-            self.listen_port,
+            self.local_port,
             peer_port,
             seq,
             Some(seq_to_ack),
@@ -1014,6 +1030,30 @@ mod tests {
         );
         sock.handle_rx(&ack, OUR_MAC, OUR_IP, Duration::ZERO);
         assert_eq!(sock.state(), TcpSocketState::Listen);
+    }
+
+    #[test_case]
+    fn new_client_starts_closed_and_ignores_syn() {
+        let sock = TcpSocket::new_client(49152);
+        assert_eq!(sock.state(), TcpSocketState::Closed);
+        // Unlike a server socket, a Closed socket doesn't accept a SYN.
+        let syn = build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            12345,
+            OUR_MAC,
+            OUR_IP,
+            49152,
+            5000,
+            None,
+            true,
+            false,
+            &[],
+        );
+        assert!(sock
+            .handle_rx(&syn, OUR_MAC, OUR_IP, Duration::ZERO)
+            .is_none());
+        assert_eq!(sock.state(), TcpSocketState::Closed);
     }
 
     #[test_case]
