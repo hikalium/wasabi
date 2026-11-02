@@ -137,16 +137,17 @@ pub fn tcp_segment_checksum(
     g.checksum()
 }
 
-// Subset of RFC 9293 §3.3.2 states actually traversed by a passive
-// (server) socket that doesn't initiate active close. Initial open
-// (SynSent) and active-close states (FinWait*, Closing, TimeWait) are
-// intentionally omitted — the server reaches the four-way close from
-// CloseWait/LastAck only. Closed is where a socket that doesn't listen
-// (a client socket) starts and returns to after a connection ends.
+// Subset of RFC 9293 §3.3.2 states. A server socket starts in Listen
+// (passive open); a client socket starts in Closed and moves to SynSent
+// when it sends the first SYN (active open). Active-close states
+// (FinWait*, Closing, TimeWait) are intentionally omitted — both kinds
+// of socket reach the four-way close from CloseWait/LastAck only, i.e.
+// the peer always closes first.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TcpSocketState {
     Closed,
     Listen,
+    SynSent,
     SynReceived,
     Established,
     LastAck,
@@ -248,6 +249,47 @@ impl TcpSocket {
             inner.send_buffer.extend(data.iter().copied());
         }
     }
+    /// Start an active open: remember the peer, move to SynSent and
+    /// return the SYN frame to transmit. Only a Closed (client) socket
+    /// can connect. The SYN is retransmitted by `poll_tx` until the
+    /// peer's SYN+ACK arrives.
+    pub fn connect(
+        &self,
+        our_mac: EthernetAddr,
+        our_ip: IpV4Addr,
+        peer_mac: EthernetAddr,
+        peer_ip: IpV4Addr,
+        peer_port: u16,
+        now: Duration,
+    ) -> Option<Vec<u8>> {
+        let mut inner = self.inner.lock();
+        if inner.state != TcpSocketState::Closed {
+            return None;
+        }
+        inner.peer_mac = peer_mac;
+        inner.peer_ip = peer_ip;
+        inner.peer_port = peer_port;
+        let seq = inner.my_next_seq;
+        // SYN consumes one seq-space slot.
+        inner.my_next_seq = seq.wrapping_add(1);
+        inner.state = TcpSocketState::SynSent;
+        inner.last_tx_at = Some(now);
+        inner.last_active_at = Some(now);
+        drop(inner);
+        Some(build_segment(
+            our_mac,
+            peer_mac,
+            our_ip,
+            peer_ip,
+            self.local_port,
+            peer_port,
+            seq,
+            None,
+            true,
+            false,
+            &[],
+        ))
+    }
 
     /// Drive the state machine for one received frame
     /// (Ethernet+IPv4+TCP+data). Returns the immediate reply frame, if
@@ -321,6 +363,19 @@ impl TcpSocket {
                 inner.peer_port = in_tcp.src_port();
                 inner.my_next_seq = seq.wrapping_add(1);
                 inner.state = TcpSocketState::SynReceived;
+            }
+            TcpSocketState::SynSent => {
+                // Wait for the SYN+ACK that acknowledges our SYN, then
+                // ACK the peer's SYN to complete the handshake.
+                if !in_tcp.is_syn()
+                    || !in_tcp.is_ack()
+                    || in_tcp.ack_num() != inner.my_next_seq
+                {
+                    return None;
+                }
+                seq_to_ack = seq_to_ack.wrapping_add(1);
+                inner.state = TcpSocketState::Established;
+                inner.last_tx_at = None;
             }
             TcpSocketState::SynReceived => {
                 if !in_tcp.is_ack() || in_tcp.ack_num() != inner.my_next_seq {
@@ -410,6 +465,34 @@ impl TcpSocket {
         now: Duration,
     ) -> Option<Vec<u8>> {
         let mut inner = self.inner.lock();
+        if inner.state == TcpSocketState::SynSent {
+            // Our SYN (or the peer's SYN+ACK) may have been lost:
+            // resend the SYN once the RTO has elapsed.
+            let since =
+                inner.last_tx_at.map_or(TCP_RTO, |t| now.saturating_sub(t));
+            if since < TCP_RTO {
+                return None;
+            }
+            inner.last_tx_at = Some(now);
+            let seq = inner.my_next_seq.wrapping_sub(1);
+            let peer_mac = inner.peer_mac;
+            let peer_ip = inner.peer_ip;
+            let peer_port = inner.peer_port;
+            drop(inner);
+            return Some(build_segment(
+                our_mac,
+                peer_mac,
+                our_ip,
+                peer_ip,
+                self.local_port,
+                peer_port,
+                seq,
+                None,
+                true,
+                false,
+                &[],
+            ));
+        }
         if inner.state != TcpSocketState::Established {
             return None;
         }
@@ -1053,6 +1136,158 @@ mod tests {
         assert!(sock
             .handle_rx(&syn, OUR_MAC, OUR_IP, Duration::ZERO)
             .is_none());
+        assert_eq!(sock.state(), TcpSocketState::Closed);
+    }
+
+    // Active open. The test plays the server on SERVER_PORT.
+    const CLIENT_PORT: u16 = 49152;
+    const SERVER_PORT: u16 = 80;
+
+    fn from_server(
+        seq: u32,
+        ack: u32,
+        syn: bool,
+        fin: bool,
+        data: &[u8],
+    ) -> Vec<u8> {
+        build_client_segment(
+            PEER_MAC,
+            PEER_IP,
+            SERVER_PORT,
+            OUR_MAC,
+            OUR_IP,
+            CLIENT_PORT,
+            seq,
+            Some(ack),
+            syn,
+            fin,
+            data,
+        )
+    }
+
+    fn connect_client() -> (TcpSocket, TcpPacket) {
+        let sock = TcpSocket::new_client(CLIENT_PORT);
+        let syn = sock.connect(
+            OUR_MAC,
+            OUR_IP,
+            PEER_MAC,
+            PEER_IP,
+            SERVER_PORT,
+            Duration::ZERO,
+        );
+        (sock, parse_reply(&syn.unwrap()))
+    }
+
+    #[test_case]
+    fn connect_sends_syn_and_enters_syn_sent() {
+        let (sock, syn) = connect_client();
+        assert!(syn.is_syn() && !syn.is_ack());
+        assert_eq!(
+            (syn.src_port(), syn.dst_port()),
+            (CLIENT_PORT, SERVER_PORT)
+        );
+        assert_eq!(sock.state(), TcpSocketState::SynSent);
+        // Neither a second connect nor a connect on a server socket works.
+        let again = sock.connect(
+            OUR_MAC,
+            OUR_IP,
+            PEER_MAC,
+            PEER_IP,
+            80,
+            Duration::ZERO,
+        );
+        assert!(again.is_none());
+        let server = TcpSocket::new_server(23);
+        let s = server.connect(
+            OUR_MAC,
+            OUR_IP,
+            PEER_MAC,
+            PEER_IP,
+            80,
+            Duration::ZERO,
+        );
+        assert!(s.is_none());
+    }
+
+    #[test_case]
+    fn handle_rx_syn_sent_to_established() {
+        let (sock, syn) = connect_client();
+        // A SYN+ACK that doesn't acknowledge our SYN is ignored.
+        let bad = from_server(
+            9000,
+            syn.seq_num().wrapping_add(100),
+            true,
+            false,
+            &[],
+        );
+        assert!(sock
+            .handle_rx(&bad, OUR_MAC, OUR_IP, Duration::ZERO)
+            .is_none());
+        assert_eq!(sock.state(), TcpSocketState::SynSent);
+        let synack =
+            from_server(9000, syn.seq_num().wrapping_add(1), true, false, &[]);
+        let reply = sock.handle_rx(&synack, OUR_MAC, OUR_IP, Duration::ZERO);
+        // The third segment of the handshake: a bare ACK of the server's SYN.
+        let r = parse_reply(&reply.unwrap());
+        assert!(r.is_ack() && !r.is_syn() && !r.is_fin());
+        assert_eq!(r.seq_num(), syn.seq_num().wrapping_add(1));
+        assert_eq!(r.ack_num(), 9001);
+        assert_eq!(sock.state(), TcpSocketState::Established);
+    }
+
+    #[test_case]
+    fn handle_rx_rst_in_syn_sent_returns_to_closed() {
+        let (sock, syn) = connect_client();
+        let mut rst =
+            from_server(0, syn.seq_num().wrapping_add(1), false, false, &[]);
+        let flags_off = size_of::<IpV4Packet>() + 13;
+        rst[flags_off] = (1 << 2) | (1 << 4); // RST+ACK: connection refused
+        sock.handle_rx(&rst, OUR_MAC, OUR_IP, Duration::ZERO);
+        assert_eq!(sock.state(), TcpSocketState::Closed);
+    }
+
+    #[test_case]
+    fn poll_tx_retransmits_syn_after_rto() {
+        let (sock, syn) = connect_client();
+        let early = TCP_RTO - Duration::from_millis(1);
+        assert!(sock.poll_tx(OUR_MAC, OUR_IP, early).is_none());
+        let resent =
+            parse_reply(&sock.poll_tx(OUR_MAC, OUR_IP, TCP_RTO).unwrap());
+        assert!(resent.is_syn() && !resent.is_ack());
+        assert_eq!(resent.seq_num(), syn.seq_num());
+    }
+
+    #[test_case]
+    fn client_sends_request_and_closes_after_peer_fin() {
+        let (sock, syn) = connect_client();
+        let our_seq = syn.seq_num().wrapping_add(1);
+        let synack = from_server(9000, our_seq, true, false, &[]);
+        sock.handle_rx(&synack, OUR_MAC, OUR_IP, Duration::ZERO);
+        let request = b"GET / HTTP/1.1\r\n\r\n";
+        sock.push_tx_bytes(request);
+        let seg = parse_reply(
+            &sock.poll_tx(OUR_MAC, OUR_IP, Duration::ZERO).unwrap(),
+        );
+        assert_eq!((seg.seq_num(), seg.ack_num()), (our_seq, 9001));
+        // The server answers with data and FIN in one segment.
+        let response = b"HTTP/1.1 200 OK\r\n\r\n";
+        let acked = our_seq.wrapping_add(request.len() as u32);
+        let fin = from_server(9001, acked, false, true, response);
+        let reply = sock.handle_rx(&fin, OUR_MAC, OUR_IP, Duration::ZERO);
+        let r = parse_reply(&reply.unwrap());
+        assert!(r.is_fin() && r.is_ack());
+        let received: Vec<u8> =
+            core::iter::from_fn(|| sock.pop_rx_byte()).collect();
+        assert_eq!(received.as_slice(), response);
+        let last_seq = 9001 + response.len() as u32 + 1;
+        let last_ack = from_server(
+            last_seq,
+            r.seq_num().wrapping_add(1),
+            false,
+            false,
+            &[],
+        );
+        sock.handle_rx(&last_ack, OUR_MAC, OUR_IP, Duration::ZERO);
         assert_eq!(sock.state(), TcpSocketState::Closed);
     }
 
