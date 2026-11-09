@@ -21,8 +21,10 @@ fi
 
 # Open the gtk window only when there is a display to show it on, so
 # headless runs (CI, check.sh over ssh) keep QEMU's default display.
+# The gtk backend is not built into the macOS (cocoa) QEMU either, so
+# macOS also falls back to the default display.
 DISPLAY_OPTS=()
-if [ -n "${DISPLAY}${WAYLAND_DISPLAY}" ]; then
+if [ "$(uname)" != "Darwin" ] && [ -n "${DISPLAY}${WAYLAND_DISPLAY}" ]; then
   DISPLAY_OPTS=(-display gtk,grab-on-hover=on)
 fi
 
