@@ -144,8 +144,7 @@ pub struct Console {
     shift_is_pressed: bool,
     ime: InputMethodEditor,
     // Where the candidate window is drawn, while it is shown.
-    // (x, y, w, h) in pixels.
-    candidate_window: Option<(i64, i64, i64, i64)>,
+    candidate_window: Option<Rect>,
 }
 impl Default for Console {
     fn default() -> Self {
@@ -214,8 +213,8 @@ impl Console {
         let (cx, cy) = cursor_position();
         let (_, vh) = global_vram_resolutions();
         let buf = &mut *GLOBAL_VRAM.lock();
-        if let Some((x, y, w, h)) = self.candidate_window.take() {
-            let _ = fill_rect(buf, 0x000000, x, y, w, h);
+        if let Some(r) = self.candidate_window.take() {
+            let _ = fill_rect(buf, 0x000000, r.x(), r.y(), r.w(), r.h());
         }
         let Some((candidates, index)) = self.ime.candidates() else {
             return;
@@ -239,7 +238,7 @@ impl Console {
             draw_str_fg(buf, cx, y, fg, c);
             cx += cw + 8;
         }
-        self.candidate_window = Some((x, y, w, 16));
+        self.candidate_window = Rect::new(x, y, w, 16);
     }
     pub fn handle_key_down(&mut self, e: KeyEvent) {
         let e = match self.normalize_newline(e) {
