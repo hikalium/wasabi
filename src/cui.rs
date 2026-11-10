@@ -206,12 +206,10 @@ impl Console {
     // it stays out of the text stream (terminals do not see it).
     fn update_candidate_window(&mut self) {
         let (cx, cy) = cursor_position();
-        let (_, vh) =
-            crate::print::get_global_vram_resolutions().unwrap_or((0, 0));
+        let (_, vh) = global_vram_resolutions();
+        let buf = &mut *GLOBAL_VRAM.lock();
         if let Some((x, y, w, h)) = self.candidate_window.take() {
-            crate::print::with_global_vram_buf(|buf| {
-                let _ = fill_rect(buf, 0x000000, x, y, w, h);
-            });
+            let _ = fill_rect(buf, 0x000000, x, y, w, h);
         }
         let Some((candidates, index)) = self.ime.candidates() else {
             return;
@@ -222,21 +220,19 @@ impl Console {
         let x = (cx - text_width(self.ime.pending())).max(0);
         let y = if cy + 16 < vh { cy + 16 } else { 0 };
         let w = page.iter().map(|c| text_width(c) + 8).sum::<i64>() + 8;
-        crate::print::with_global_vram_buf(|buf| {
-            let _ = fill_rect(buf, 0x404040, x, y, w, 16);
-            let mut cx = x + 8;
-            for (i, c) in page.iter().enumerate() {
-                let cw = text_width(c);
-                let fg = if i == selected {
-                    let _ = fill_rect(buf, 0xffffff, cx, y, cw, 16);
-                    0x000000
-                } else {
-                    0xffffff
-                };
-                draw_str_fg(buf, cx, y, fg, c);
-                cx += cw + 8;
-            }
-        });
+        let _ = fill_rect(buf, 0x404040, x, y, w, 16);
+        let mut cx = x + 8;
+        for (i, c) in page.iter().enumerate() {
+            let cw = text_width(c);
+            let fg = if i == selected {
+                let _ = fill_rect(buf, 0xffffff, cx, y, cw, 16);
+                0x000000
+            } else {
+                0xffffff
+            };
+            draw_str_fg(buf, cx, y, fg, c);
+            cx += cw + 8;
+        }
         self.candidate_window = Some((x, y, w, 16));
     }
     pub fn handle_key_down(&mut self, e: KeyEvent) {
