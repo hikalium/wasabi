@@ -8,6 +8,7 @@ use crate::font::get_glyph_width;
 use crate::graphics::draw_str_fg;
 use crate::graphics::fill_rect;
 use crate::hpet::global_timestamp;
+use crate::http;
 use crate::ime::InputEditResult;
 use crate::ime::InputMethodEditor;
 use crate::info;
@@ -475,6 +476,7 @@ pub fn run_cmd(cmdline: &str) -> Result<()> {
             "show" => run_cmd_show(&args),
             "ping" => run_cmd_ping(&args),
             "dns" | "nslookup" => run_cmd_dns(&args),
+            "curl" => run_cmd_curl(&args),
             "reboot" | "r" => run_cmd_reboot(&args),
             "uname" => run_cmd_uname(&args),
             "hello" => {
@@ -579,6 +581,40 @@ pub fn run_cmd_dns(args: &[&str]) -> Result<()> {
         _ => net::default_dns_server(),
     };
     spawn_global(dns_query(hostname, server));
+    Ok(())
+}
+
+/// Fetch `url` over HTTP and print the body of the response. The host
+/// part may be an IPv4 address or a name to look up with DNS first.
+async fn curl(url: String) -> Result<()> {
+    let (host, path) = http::split_url(&url);
+    let addr = match parse_ipv4(host) {
+        Ok(addr) => addr,
+        Err(_) => net::getaddrinfo(host, net::default_dns_server()).await?[0],
+    };
+    let res = http::http_get(addr, host, path).await?;
+    if res.status != 200 {
+        println!("curl: the server answered with status {}", res.status);
+    }
+    println!("{}", String::from_utf8_lossy(&res.body));
+    Ok(())
+}
+
+pub fn run_cmd_curl(args: &[&str]) -> Result<()> {
+    let url = match args.get(1) {
+        Some(s) if !s.is_empty() => String::from(*s),
+        _ => {
+            info!("Usage: curl <url>");
+            return Ok(());
+        }
+    };
+    spawn_global(async {
+        let result = curl(url).await;
+        if let Err(e) = result {
+            println!("curl: {e}");
+        }
+        Ok(())
+    });
     Ok(())
 }
 

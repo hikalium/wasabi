@@ -36,6 +36,17 @@ pub fn build_get_request(host: &str, path: &str) -> String {
     )
 }
 
+/// Split a URL into the host name and the path to ask that host for.
+/// The "http://" in front is optional and the path defaults to "/", so
+/// "example.com" means the same as "http://example.com/".
+pub fn split_url(url: &str) -> (&str, &str) {
+    let rest = url.strip_prefix("http://").unwrap_or(url);
+    match rest.find('/') {
+        Some(i) => rest.split_at(i),
+        None => (rest, "/"),
+    }
+}
+
 pub fn parse_response(raw: &[u8]) -> Result<HttpResponse> {
     let header_len = raw
         .windows(4)
@@ -123,6 +134,21 @@ mod tests {
              Host: example.com\r\n\
              Connection: close\r\n\
              \r\n"
+        );
+    }
+
+    #[test_case]
+    fn split_url_finds_host_and_path() {
+        assert_eq!(split_url("example.com"), ("example.com", "/"));
+        assert_eq!(split_url("http://example.com"), ("example.com", "/"));
+        assert_eq!(split_url("http://example.com/"), ("example.com", "/"));
+        assert_eq!(
+            split_url("http://example.com/a/b.html"),
+            ("example.com", "/a/b.html")
+        );
+        assert_eq!(
+            split_url("10.0.2.2/index.html"),
+            ("10.0.2.2", "/index.html")
         );
     }
 
