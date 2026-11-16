@@ -29,6 +29,7 @@ use crate::ncm;
 use crate::print::hexdump_bytes;
 use crate::result::Result;
 use crate::slice::Sliceable;
+use crate::tcp::TCP_CLIENT_SOCKET;
 use crate::tcp::TCP_SOCKET;
 use crate::udp::UdpPacket;
 use crate::usb;
@@ -495,13 +496,18 @@ impl UsbNcmDriver {
                             }
                         } else if ip.protocol() == IpV4Protocol::tcp() {
                             let now = crate::hpet::global_timestamp();
-                            if let Some(reply) = TCP_SOCKET.handle_rx(
-                                frame,
-                                our_mac,
-                                our_ip(),
-                                now,
-                            ) {
-                                replies.push(reply);
+                            // Offer the segment to both sockets: each
+                            // one takes only what is addressed to its
+                            // own local port.
+                            for sock in [&TCP_SOCKET, &TCP_CLIENT_SOCKET] {
+                                if let Some(reply) = sock.handle_rx(
+                                    frame,
+                                    our_mac,
+                                    our_ip(),
+                                    now,
+                                ) {
+                                    replies.push(reply);
+                                }
                             }
                         }
                     }
@@ -745,8 +751,10 @@ impl UsbNcmDriver {
     async fn poll_tcp_tx(our_mac: EthernetAddr) -> Result<()> {
         loop {
             let now = crate::hpet::global_timestamp();
-            if let Some(frame) = TCP_SOCKET.poll_tx(our_mac, our_ip(), now) {
-                enqueue_tx_frame(frame);
+            for sock in [&TCP_SOCKET, &TCP_CLIENT_SOCKET] {
+                if let Some(frame) = sock.poll_tx(our_mac, our_ip(), now) {
+                    enqueue_tx_frame(frame);
+                }
             }
             sleep(Duration::from_millis(20)).await;
         }

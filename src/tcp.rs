@@ -15,6 +15,8 @@ use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
+use core::sync::atomic::AtomicU16;
+use core::sync::atomic::Ordering;
 use core::time::Duration;
 
 // Fixed retransmission timeout. With no RTT estimation we just pick a
@@ -192,7 +194,9 @@ impl TcpSocketInner {
 }
 
 pub struct TcpSocket {
-    local_port: u16,
+    // Fixed for a server. A client moves on to the next port every time
+    // a connection ends; see `end_connection`.
+    local_port: AtomicU16,
     // Where the socket returns after a connection ends.
     initial_state: TcpSocketState,
     inner: Mutex<TcpSocketInner>,
@@ -201,6 +205,14 @@ pub struct TcpSocket {
 /// Global TCP listener used by the NCM driver for the remote terminal.
 /// One connection at a time on port 23.
 pub static TCP_SOCKET: TcpSocket = TcpSocket::new_server(23);
+/// The first of the ports reserved for dynamic use, 49152-65535
+/// (RFC 6335 §6): the ones a client picks its local port from.
+const FIRST_DYNAMIC_PORT: u16 = 49152;
+/// Global TCP client socket for connections we open ourselves, used by
+/// the HTTP client. One connection at a time, each from its own local
+/// port; see `end_connection`.
+pub static TCP_CLIENT_SOCKET: TcpSocket =
+    TcpSocket::new_client(FIRST_DYNAMIC_PORT);
 
 impl TcpSocket {
     pub const fn new_server(listen_port: u16) -> Self {
@@ -211,7 +223,7 @@ impl TcpSocket {
     }
     const fn new(local_port: u16, initial_state: TcpSocketState) -> Self {
         Self {
-            local_port,
+            local_port: AtomicU16::new(local_port),
             initial_state,
             inner: Mutex::new(TcpSocketInner {
                 state: initial_state,
@@ -232,6 +244,24 @@ impl TcpSocket {
     }
     pub fn state(&self) -> TcpSocketState {
         self.inner.lock().state
+    }
+    fn local_port(&self) -> u16 {
+        self.local_port.load(Ordering::Relaxed)
+    }
+    /// Return to the initial state when a connection is over. A client
+    /// also moves to the next local port, so that its next connection
+    /// cannot be mistaken for this one: the server, or a NAT box on the
+    /// way, may remember a connection for a while after it has closed
+    /// and reject a new SYN that comes from the same address and port.
+    fn end_connection(&self, inner: &mut TcpSocketInner) {
+        inner.reset_connection(self.initial_state);
+        if self.initial_state == TcpSocketState::Closed {
+            let next = match self.local_port() {
+                u16::MAX => FIRST_DYNAMIC_PORT,
+                port => port + 1,
+            };
+            self.local_port.store(next, Ordering::Relaxed);
+        }
     }
     /// Snapshot of socket state for diagnostics. Uses `try_lock` so
     /// this can be called from log / panic paths without risking the
@@ -288,7 +318,7 @@ impl TcpSocket {
             peer_mac,
             our_ip,
             peer_ip,
-            self.local_port,
+            self.local_port(),
             peer_port,
             seq,
             None,
@@ -301,7 +331,7 @@ impl TcpSocket {
     /// state without telling the peer. For a caller that has waited long
     /// enough for a connection or a reply that never came.
     pub fn abort(&self) {
-        self.inner.lock().reset_connection(self.initial_state);
+        self.end_connection(&mut self.inner.lock());
     }
 
     /// Drive the state machine for one received frame
@@ -321,7 +351,7 @@ impl TcpSocket {
         let in_tcp =
             TcpPacket::copy_from_slice(&frame[..size_of::<TcpPacket>()])
                 .ok()?;
-        if in_tcp.dst_port() != self.local_port {
+        if in_tcp.dst_port() != self.local_port() {
             return None;
         }
 
@@ -350,7 +380,7 @@ impl TcpSocket {
         // crash or middlebox reset. A RST answering our SYN means the
         // peer refused the connection.
         if in_tcp.is_rst() {
-            inner.reset_connection(self.initial_state);
+            self.end_connection(&mut inner);
             return None;
         }
 
@@ -437,7 +467,7 @@ impl TcpSocket {
             }
             TcpSocketState::LastAck => {
                 if in_tcp.is_ack() {
-                    inner.reset_connection(self.initial_state);
+                    self.end_connection(&mut inner);
                 }
                 return None;
             }
@@ -454,7 +484,7 @@ impl TcpSocket {
             peer_mac,
             our_ip,
             peer_ip,
-            self.local_port,
+            self.local_port(),
             peer_port,
             seq,
             Some(seq_to_ack),
@@ -498,7 +528,7 @@ impl TcpSocket {
                 peer_mac,
                 our_ip,
                 peer_ip,
-                self.local_port,
+                self.local_port(),
                 peer_port,
                 seq,
                 None,
@@ -573,7 +603,7 @@ impl TcpSocket {
             peer_mac,
             our_ip,
             peer_ip,
-            self.local_port,
+            self.local_port(),
             peer_port,
             seq,
             Some(seq_to_ack),
@@ -1329,6 +1359,36 @@ mod tests {
         );
         assert!(again.is_ok());
         assert!(sock.pop_rx_byte().is_none());
+    }
+
+    #[test_case]
+    fn client_connects_from_a_new_port_each_time() {
+        let (sock, first) = connect_client();
+        assert_eq!(first.src_port(), CLIENT_PORT);
+        sock.abort();
+        // A late segment of the connection that is over finds no one.
+        let late = from_server(9000, 0, true, false, &[]);
+        assert!(sock
+            .handle_rx(&late, OUR_MAC, OUR_IP, Duration::ZERO)
+            .is_none());
+        let second = sock.connect(
+            OUR_MAC,
+            OUR_IP,
+            PEER_MAC,
+            PEER_IP,
+            SERVER_PORT,
+            Duration::ZERO,
+        );
+        let second = parse_reply(&second.unwrap());
+        assert_eq!(second.src_port(), CLIENT_PORT + 1);
+        // After the last port of the range comes the first one again.
+        let last = TcpSocket::new_client(u16::MAX);
+        last.abort();
+        assert_eq!(last.local_port(), FIRST_DYNAMIC_PORT);
+        // A server keeps listening on the same port.
+        let server = TcpSocket::new_server(23);
+        server.abort();
+        assert_eq!(server.local_port(), 23);
     }
 
     #[test_case]
