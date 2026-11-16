@@ -175,13 +175,16 @@ struct TcpSocketInner {
 impl TcpSocketInner {
     /// Forget the current peer and go back to `state` (Listen for a
     /// server, Closed for a client) so the socket can be used again.
+    /// Bytes already received stay in `rx_data`: the peer closing the
+    /// connection is how an HTTP response ends, so the reader must still
+    /// be able to collect them afterwards. They are dropped when the
+    /// next connection starts.
     fn reset_connection(&mut self, state: TcpSocketState) {
         self.state = state;
         self.peer_mac = EthernetAddr::zero();
         self.peer_ip = IpV4Addr::new([0, 0, 0, 0]);
         self.peer_port = 0;
         self.last_seq_to_ack = 0;
-        self.rx_data.clear();
         self.send_buffer.clear();
         self.unacked_len = 0;
         self.last_tx_at = None;
@@ -269,6 +272,7 @@ impl TcpSocket {
         if inner.state != TcpSocketState::Closed {
             return Err("TcpSocket::connect: socket is not Closed");
         }
+        inner.rx_data.clear();
         inner.peer_mac = peer_mac;
         inner.peer_ip = peer_ip;
         inner.peer_port = peer_port;
@@ -292,6 +296,12 @@ impl TcpSocket {
             false,
             &[],
         ))
+    }
+    /// Give up on the current connection and return to the initial
+    /// state without telling the peer. For a caller that has waited long
+    /// enough for a connection or a reply that never came.
+    pub fn abort(&self) {
+        self.inner.lock().reset_connection(self.initial_state);
     }
 
     /// Drive the state machine for one received frame
@@ -361,6 +371,7 @@ impl TcpSocket {
                 // SYN consumes one seq-space slot.
                 seq_to_ack = seq_to_ack.wrapping_add(1);
                 send_syn = true;
+                inner.rx_data.clear();
                 inner.peer_mac = in_tcp.ip.eth.src();
                 inner.peer_ip = in_tcp.ip.src();
                 inner.peer_port = in_tcp.src_port();
@@ -1279,9 +1290,6 @@ mod tests {
         let reply = sock.handle_rx(&fin, OUR_MAC, OUR_IP, Duration::ZERO);
         let r = parse_reply(&reply.unwrap());
         assert!(r.is_fin() && r.is_ack());
-        let received: Vec<u8> =
-            core::iter::from_fn(|| sock.pop_rx_byte()).collect();
-        assert_eq!(received.as_slice(), response);
         let last_seq = 9001 + response.len() as u32 + 1;
         let last_ack = from_server(
             last_seq,
@@ -1292,6 +1300,54 @@ mod tests {
         );
         sock.handle_rx(&last_ack, OUR_MAC, OUR_IP, Duration::ZERO);
         assert_eq!(sock.state(), TcpSocketState::Closed);
+        // The response can still be read after the connection has closed.
+        let received: Vec<u8> =
+            core::iter::from_fn(|| sock.pop_rx_byte()).collect();
+        assert_eq!(received.as_slice(), response);
+    }
+
+    #[test_case]
+    fn connect_drops_bytes_left_from_the_previous_connection() {
+        let (sock, syn) = connect_client();
+        let our_seq = syn.seq_num().wrapping_add(1);
+        let synack = from_server(9000, our_seq, true, false, &[]);
+        sock.handle_rx(&synack, OUR_MAC, OUR_IP, Duration::ZERO);
+        let fin = from_server(9001, our_seq, false, true, b"left over");
+        let reply = sock.handle_rx(&fin, OUR_MAC, OUR_IP, Duration::ZERO);
+        let r = parse_reply(&reply.unwrap());
+        let last_ack =
+            from_server(9011, r.seq_num().wrapping_add(1), false, false, &[]);
+        sock.handle_rx(&last_ack, OUR_MAC, OUR_IP, Duration::ZERO);
+        assert_eq!(sock.state(), TcpSocketState::Closed);
+        let again = sock.connect(
+            OUR_MAC,
+            OUR_IP,
+            PEER_MAC,
+            PEER_IP,
+            SERVER_PORT,
+            Duration::ZERO,
+        );
+        assert!(again.is_ok());
+        assert!(sock.pop_rx_byte().is_none());
+    }
+
+    #[test_case]
+    fn abort_returns_to_closed_so_the_socket_can_connect_again() {
+        let (sock, _) = connect_client();
+        assert_eq!(sock.state(), TcpSocketState::SynSent);
+        sock.abort();
+        assert_eq!(sock.state(), TcpSocketState::Closed);
+        // Nothing is retransmitted for the connection we gave up on.
+        assert!(sock.poll_tx(OUR_MAC, OUR_IP, TCP_RTO).is_none());
+        let again = sock.connect(
+            OUR_MAC,
+            OUR_IP,
+            PEER_MAC,
+            PEER_IP,
+            SERVER_PORT,
+            Duration::ZERO,
+        );
+        assert!(again.is_ok());
     }
 
     #[test_case]
