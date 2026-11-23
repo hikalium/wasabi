@@ -30,7 +30,7 @@ fi
   -device qemu-xhci \
   -device usb-kbd \
   -device usb-tablet \
-  -netdev user,id=usbnet0 \
+  -netdev "user,id=usbnet0,guestfwd=tcp:10.0.2.100:80-cmd:bash scripts/http_test_server.sh" \
   -device usb-ncm,netdev=usbnet0 \
   -device isa-debug-exit,iobase=0xf4,iosize=0x01
 RETCODE=$?

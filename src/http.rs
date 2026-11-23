@@ -1,10 +1,18 @@
 //! A minimal HTTP/1.1 client: one GET request per TCP connection.
 extern crate alloc;
 
+use crate::executor::sleep;
+use crate::hpet::global_timestamp;
+use crate::ip::IpV4Addr;
+use crate::net;
+use crate::nic;
 use crate::result::Result;
+use crate::tcp::TcpSocketState;
+use crate::tcp::TCP_CLIENT_SOCKET;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::time::Duration;
 
 /// What the server sent back, split at the empty line that ends the
 /// header.
@@ -45,6 +53,62 @@ pub fn parse_response(raw: &[u8]) -> Result<HttpResponse> {
         header: String::from(header),
         body: raw[header_len + 4..].to_vec(),
     })
+}
+
+/// Send "GET `path`" to the HTTP server at `addr` and return its
+/// response. `host` goes into the Host field; one server address can
+/// serve many host names and uses it to tell them apart.
+pub async fn http_get(
+    addr: IpV4Addr,
+    host: &str,
+    path: &str,
+) -> Result<HttpResponse> {
+    const HTTP_PORT: u16 = 80;
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    let sock = &TCP_CLIENT_SOCKET;
+    let our_mac = nic::our_mac().ok_or("NCM not ready (no MAC)")?;
+    if !nic::has_ip() {
+        return Err("no IP yet (waiting for DHCP)");
+    }
+    let server_mac = net::next_hop_mac(our_mac, addr).await?;
+    let deadline = global_timestamp() + TIMEOUT;
+    let syn = sock.connect(
+        our_mac,
+        nic::our_ip(),
+        server_mac,
+        addr,
+        HTTP_PORT,
+        global_timestamp(),
+    )?;
+    nic::enqueue_tx_frame(syn);
+    while sock.state() == TcpSocketState::SynSent {
+        if global_timestamp() >= deadline {
+            sock.abort();
+            return Err("HTTP: timeout while connecting");
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    if sock.state() != TcpSocketState::Established {
+        return Err("HTTP: the server refused the connection");
+    }
+    sock.push_tx_bytes(build_get_request(host, path).as_bytes());
+
+    // Read until the server closes the connection. Look at the state
+    // before draining: once the socket is Closed nothing more arrives,
+    // so the bytes drained after that are the whole rest of the response.
+    let mut raw = Vec::new();
+    loop {
+        let closed = sock.state() == TcpSocketState::Closed;
+        raw.extend(core::iter::from_fn(|| sock.pop_rx_byte()));
+        if closed {
+            return parse_response(&raw);
+        }
+        if global_timestamp() >= deadline {
+            sock.abort();
+            return Err("HTTP: timeout while waiting for the response");
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
 }
 
 #[cfg(test)]

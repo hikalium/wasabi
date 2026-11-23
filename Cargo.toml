@@ -19,3 +19,9 @@ test = false
 [[test]]
 name = "ping_to_gateway"
 harness = false
+
+# In-OS integration test: fetches a page from the canned HTTP server that
+# scripts/launch_qemu.sh attaches to the guest network.
+[[test]]
+name = "http_get"
+harness = false
